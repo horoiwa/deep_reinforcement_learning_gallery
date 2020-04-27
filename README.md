@@ -1,2 +1,16 @@
 # DeepRL_TF2
-deep reinforcement learning with tf2.X
+
+Deep reinforcement learning sample codes with tensorflow2
+
+
+## Requirements
+
+`python==3.7` and `tensorflow==2.1.0`
+
+## Samples
+
+- Deep Q Network
+
+- A2C
+
+- A3C
