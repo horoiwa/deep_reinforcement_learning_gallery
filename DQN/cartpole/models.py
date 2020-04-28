@@ -29,13 +29,6 @@ class QNetwork(tf.keras.Model):
         state = np.atleast_2d(state).astype(np.float32)
         return self(state).numpy
 
-    def copy_from(self, src_model):
-
-        target_variables = self.trainable_variables
-        src_variables = src_model.trainable_variables
-
-        for var1, var2 in zip(target_variables, src_variables):
-            var1.assign(var2.numpy())
 
 
 if __name__ == "__main__":
