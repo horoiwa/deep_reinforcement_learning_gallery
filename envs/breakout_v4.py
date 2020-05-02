@@ -14,6 +14,7 @@ if __name__ == "__main__":
     print("Environment:", ENV_NAME)
     print("Observation space:", env.observation_space)
     print("Action space", env.action_space)
+    print("")
 
     """
     Actions
@@ -43,7 +44,7 @@ if __name__ == "__main__":
             print("info", info)
             print()
 
-        if done:
+        if done or reward == -1:
             print(f"====STEP{step}====")
             print("GAMEOVER!")
             print("obs", observation.shape)
