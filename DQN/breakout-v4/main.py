@@ -116,9 +116,9 @@ class DQNAgent:
 
             action = self.sample_action(state)
 
-            next_frame, reward, done, info = self.env.step(action)
+            frame, reward, done, info = self.env.step(action)
 
-            next_state = np.append(frame_preprocessor(next_frame),
+            next_state = np.append(frame_preprocessor(frame),
                                    state[..., :3], axis=2)
 
             exp = Experience(state, action, reward, next_state, done)
