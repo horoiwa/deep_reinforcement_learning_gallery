@@ -31,11 +31,11 @@ class Experience:
 
 class DQNAgent:
 
-    MAX_EXPERIENCES = 50000
+    MAX_EXPERIENCES = 20000
 
     MIN_EXPERIENCES = 256
 
-    BATCH_SIZE = 32
+    BATCH_SIZE = 16
 
     def __init__(self, env, gamma=0.95, epsilon=1.0):
         """
@@ -49,7 +49,7 @@ class DQNAgent:
 
         self.epsion = epsilon
 
-        self.copy_period = 10
+        self.global_steps = 0
 
         self.q_network = QNetwork(self.env.action_space.n)
 
@@ -69,12 +69,7 @@ class DQNAgent:
 
             total_rewards.append(total_reward)
 
-            recent_score = (sum(total_rewards[-5:]) / 5)
-
-            self.copy_period = max(int(recent_score*0.8), 10)
-
             print(f"Episode {n}: {total_reward}")
-            print(f"Current copy period {self.copy_period}")
             print(f"Current experiences {len(self.experiences)}")
             print()
 
@@ -94,21 +89,24 @@ class DQNAgent:
 
             next_state, reward, done, info = self.env.step(action)
 
-            reward = reward if not done else -100
+            total_reward += reward
+
+            if done and steps < 475:
+                reward = -500
 
             exp = Experience(state, action, reward, next_state, done)
 
             self.experiences.append(exp)
 
-            total_reward += reward
-
             state = next_state
 
             steps += 1
 
+            self.global_steps += 1
+
             self.update_qnetwork()
 
-            if (steps != 0) and (steps % self.copy_period == 0):
+            if self.global_steps % 100 == 0:
                 self.update_target_network()
 
         return total_reward
@@ -173,21 +171,22 @@ def main():
 
     monitor_dir = Path(__file__).parent / "history"
 
-    ENV_NAME = "CartPole-v0"
+    ENV_NAME = "CartPole-v1"
     env = gym.make(ENV_NAME)
     env = wrappers.Monitor(env, monitor_dir, force=True)
 
     agent = DQNAgent(env=env)
-    history = agent.play(episodes=250)
+    history = agent.play(episodes=350)
 
     plt.plot(range(len(history)), history)
+    plt.plot([0, 350], [195, 195], "--", color="darkred")
     plt.xlabel("episodes")
     plt.ylabel("Total Reward")
-    plt.savefig(monitor_dir / "dqn_cartpole.png")
+    plt.savefig(monitor_dir / "dqn_cartpole-v1.png")
 
     df = pd.DataFrame()
     df["Total Reward"] = history
-    df.to_csv(monitor_dir / "dqn_cartpole.csv", index=None)
+    df.to_csv(monitor_dir / "dqn_cartpole-v1.csv", index=None)
 
 
 if __name__ == "__main__":
