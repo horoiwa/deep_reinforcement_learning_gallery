@@ -60,7 +60,7 @@ class DQNAgent:
 
     BATCH_SIZE = 32
 
-    def __init__(self, env, gamma=0.95, epsilon=1.0):
+    def __init__(self, env, gamma=0.98, epsilon=1.0):
         """
             gammma: 割引率
             epsilon: 探索と活用の割合
@@ -120,6 +120,8 @@ class DQNAgent:
 
             next_state = np.append(frame_preprocessor(frame),
                                    state[..., :3], axis=2)
+
+            print(info)
 
             exp = Experience(state, action, reward, next_state, done)
 
@@ -206,7 +208,7 @@ def main():
     env = wrappers.Monitor(env, monitor_dir, force=True)
 
     agent = DQNAgent(env=env)
-    history = agent.play(episodes=10)
+    history = agent.play(episodes=1)
 
     plt.plot(range(len(history)), history)
     plt.xlabel("episodes")
