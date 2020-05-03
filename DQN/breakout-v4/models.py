@@ -25,13 +25,11 @@ class QNetwork(tf.keras.Model):
 
         self.dense1 = kl.Dense(512, activation="relu")
 
-        self.drop1 = kl.Dropout(0.2)
-
-        self.out = kl.Dense(self.action_space, activation="relu")
-
-        self.optimizer = tf.optimizers.Adagrad(1e-5)
+        self.out = kl.Dense(self.action_space)
 
         self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
+
+        self.loss_func = tf.losses.Huber()
 
     @tf.function
     def call(self, x, training=True):
@@ -41,7 +39,6 @@ class QNetwork(tf.keras.Model):
         x = self.conv3(x)
         x = self.flatten1(x)
         x = self.dense1(x)
-        x = self.drop1(x, training=training)
         out = self.out(x)
 
         return out
@@ -61,7 +58,7 @@ class QNetwork(tf.keras.Model):
                 self(states) * selected_actions_onehot, axis=1)
 
             loss = tf.reduce_mean(
-                tf.square(target_values - selected_action_values))
+                self.loss_func(target_values, selected_action_values))
 
         variables = self.trainable_variables
         gradients = tape.gradient(loss, variables)

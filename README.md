@@ -7,7 +7,7 @@ Deep reinforcement learning sample codes with tensorflow2
 
 `python==3.7` and `tensorflow==2.1.0`
 
-## Samples
+## References
 
 ### DQN (Deep Q Network)
 
@@ -15,8 +15,10 @@ Deep reinforcement learning sample codes with tensorflow2
 
 [Human-level control through deep reinforcement learning (2015)](https://www.nature.com/articles/nature14236.)
 
-- A2C (Advantage Actor Critic)
+<br>
 
-- A3C
+## DDQN (Double Deep Q Network)
 
-- DDQN (Double Deep Q Network)
+## AC3/A2C (Advantage Actor Critic)
+
+

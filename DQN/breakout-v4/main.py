@@ -2,7 +2,9 @@ from pathlib import Path
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from dataclasses import dataclass
+import random
 import collections
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -42,9 +44,6 @@ def frame_preprocessor(frame):
     image_gray = tf.image.rgb_to_grayscale(image)
     image_crop = tf.image.crop_to_bounding_box(image_gray, 34, 0, 160, 160)
     image_resize = tf.image.resize(image_crop, [84, 84])
-
-    # (84,84, 1) -> (84, 84)
-    #image_2d = tf.squeeze(image_resize)
     image_scaled = tf.divide(image_resize, 255)
 
     return image_scaled
@@ -52,11 +51,9 @@ def frame_preprocessor(frame):
 
 class DQNAgent:
 
-    MAX_EXPERIENCES = 50000
+    MAX_EXPERIENCES = 300000
 
-    MIN_EXPERIENCES = 100
-
-    COPY_PERIOD = 100
+    MIN_EXPERIENCES = 10000
 
     BATCH_SIZE = 32
 
@@ -72,6 +69,8 @@ class DQNAgent:
 
         self.epsion = epsilon
 
+        self.copy_period = 250
+
         self.global_steps = 0
 
         self.q_network = QNetwork(self.env.action_space.n)
@@ -84,16 +83,30 @@ class DQNAgent:
 
         total_rewards = []
 
-        for n in range(episodes):
-            #: 探索率の更新
-            self.epsilon = 1.0 / np.sqrt(n+1)
+        recent_localsteps = collections.deque(maxlen=5)
 
-            total_reward = self.play_episode()
+        for n in range(episodes):
+
+            self.epsilon = 1.0 - min(0.9, self.global_steps * 0.9 / 200000)
+
+            total_reward, localsteps = self.play_episode()
 
             total_rewards.append(total_reward)
 
+            recent_localsteps.append(localsteps)
+
+            recent_average = sum(recent_localsteps) / len(recent_localsteps)
+
+            if recent_average > self.copy_period:
+                self.copy_period *= 2
+
             print(f"Episode {n}: {total_reward}")
             print(f"Reward {total_reward}")
+            print(f"Local steps {localsteps}")
+            print(f"Experiences {len(self.experiences)}")
+            print(f"Current epsilon {self.epsilon}")
+            print(f"Current copy perido {self.copy_period}")
+            print(f"Global step {self.global_steps}")
             print()
 
         return total_rewards
@@ -101,6 +114,8 @@ class DQNAgent:
     def play_episode(self):
 
         total_reward = 0
+
+        lives = 5
 
         steps = 0
 
@@ -121,7 +136,11 @@ class DQNAgent:
             next_state = np.append(frame_preprocessor(frame),
                                    state[..., :3], axis=2)
 
-            print(info)
+            if info["ale.lives"] != lives:
+                lives = info["ale.lives"]
+                exp = Experience(state, action, -100, next_state, done)
+            else:
+                exp = Experience(state, action, reward, next_state, done)
 
             exp = Experience(state, action, reward, next_state, done)
 
@@ -129,18 +148,20 @@ class DQNAgent:
 
             state = next_state
 
-            steps += 1
-
-            self.global_steps += 1
-
             self.update_qnetwork()
 
             total_reward += reward
 
-            if self.global_steps % self.COPY_PERIOD == 0:
+            steps += 1
+
+            self.global_steps += 1
+
+            if self.global_steps % self.copy_period == 0:
+                print("==Update target newwork==")
                 self.update_target_network()
 
-        return total_reward
+
+        return total_reward, steps
 
     def sample_action(self, state):
         """探索と活用"""
@@ -201,14 +222,17 @@ class DQNAgent:
 
 def main():
 
-    monitor_dir = Path(__file__).parent / "history"
+    start = datetime.now()
 
+    monitor_dir = Path(__file__).parent / "history"
     ENV_NAME = "Breakout-v4"
     env = gym.make(ENV_NAME)
-    env = wrappers.Monitor(env, monitor_dir, force=True)
+    env = wrappers.Monitor(env, monitor_dir, force=True,
+                           video_callable=(lambda ep: ep % 100 == 0))
 
     agent = DQNAgent(env=env)
-    history = agent.play(episodes=1)
+    history = agent.play(episodes=8001)
+
 
     plt.plot(range(len(history)), history)
     plt.xlabel("episodes")
@@ -219,6 +243,13 @@ def main():
     df["Total Reward"] = history
     df.to_csv(monitor_dir / "dqn_breakout-v4.csv", index=None)
 
+    end = datetime.now() - start
+    print(end)
+
 
 if __name__ == "__main__":
+    from tensorflow.python.client import device_lib
+    print(device_lib.list_local_devices())
+    print()
+
     main()
