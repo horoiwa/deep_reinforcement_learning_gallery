@@ -53,7 +53,7 @@ class DQNAgent:
 
     MAX_EXPERIENCES = 300000
 
-    MIN_EXPERIENCES = 10000
+    MIN_EXPERIENCES = 30000
 
     BATCH_SIZE = 32
 
@@ -105,7 +105,7 @@ class DQNAgent:
             print(f"Local steps {localsteps}")
             print(f"Experiences {len(self.experiences)}")
             print(f"Current epsilon {self.epsilon}")
-            print(f"Current copy perido {self.copy_period}")
+            print(f"Current copy period {self.copy_period}")
             print(f"Global step {self.global_steps}")
             print()
 
@@ -231,7 +231,7 @@ def main():
                            video_callable=(lambda ep: ep % 100 == 0))
 
     agent = DQNAgent(env=env)
-    history = agent.play(episodes=8001)
+    history = agent.play(episodes=5001)
 
 
     plt.plot(range(len(history)), history)
