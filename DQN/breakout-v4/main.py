@@ -57,6 +57,10 @@ class DQNAgent:
 
     BATCH_SIZE = 32
 
+    UPDATE_PERIOD = 4
+
+    COPY_PERIOD = 10000
+
     def __init__(self, env, gamma=0.98, epsilon=1.0):
         """
             gammma: 割引率
@@ -148,18 +152,18 @@ class DQNAgent:
 
             state = next_state
 
-            self.update_qnetwork()
-
             total_reward += reward
 
             steps += 1
 
             self.global_steps += 1
 
-            if self.global_steps % self.copy_period == 0:
+            if self.global_steps % self.UPDATE_PERIOD == 0:
+                self.update_qnetwork()
+
+            if self.global_steps % self.COPY_PERIOD == 0:
                 print("==Update target newwork==")
                 self.update_target_network()
-
 
         return total_reward, steps
 
@@ -231,7 +235,7 @@ def main():
                            video_callable=(lambda ep: ep % 100 == 0))
 
     agent = DQNAgent(env=env)
-    history = agent.play(episodes=5001)
+    history = agent.play(episodes=1001)
 
 
     plt.plot(range(len(history)), history)

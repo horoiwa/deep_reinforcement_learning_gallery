@@ -15,19 +15,24 @@ class QNetwork(tf.keras.Model):
 
         self.action_space = action_space
 
-        self.conv1 = kl.Conv2D(32, 8, strides=4, activation="relu")
+        self.conv1 = kl.Conv2D(32, 8, strides=4, activation="relu",
+                               kernel_initializer="he_normal")
 
-        self.conv2 = kl.Conv2D(64, 4, strides=2, activation="relu")
+        self.conv2 = kl.Conv2D(64, 4, strides=2, activation="relu",
+                               kernel_initializer="he_normal")
 
-        self.conv3 = kl.Conv2D(64, 3, strides=1, activation="relu")
+        self.conv3 = kl.Conv2D(64, 3, strides=1, activation="relu",
+                               kernel_initializer="he_normal")
 
         self.flatten1 = kl.Flatten()
 
-        self.dense1 = kl.Dense(512, activation="relu")
+        self.dense1 = kl.Dense(512, activation="relu",
+                               kernel_initializer="he_normal")
 
         self.drop1 = kl.Dropout(0.2)
 
-        self.out = kl.Dense(self.action_space)
+        self.out = kl.Dense(self.action_space,
+                            kernel_initializer="he_normal")
 
         self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
 
