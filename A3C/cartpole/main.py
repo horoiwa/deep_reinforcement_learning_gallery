@@ -4,6 +4,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from dataclasses import dataclass
 import threading
 
+import numpy as np
 import tensorflow as tf
 import gym
 
@@ -13,13 +14,13 @@ from models import create_networks
 @dataclass
 class Step:
 
-    state: list
+    state: np.ndarray
 
     action: int
 
     reward: float
 
-    next_state: list
+    next_state: np.ndarray
 
     done: bool
 
@@ -37,7 +38,7 @@ class A3CAgent:
     def __init__(self, agent_id, env,
                  global_counter, action_space,
                  global_value_network, global_policy_network,
-                 gamma, total_rewards, global_steps_fin):
+                 gamma, global_history, global_steps_fin):
 
         self.agent_id = agent_id
 
@@ -55,11 +56,13 @@ class A3CAgent:
 
         self.gamma = gamma
 
-        self.total_rewards = total_rewards
+        self.global_history = global_history
 
         self.global_steps_fin = global_steps_fin
 
     def run(self, coord):
+
+        self.total_reward = 0
 
         self.state = self.env.reset()
 
@@ -68,7 +71,7 @@ class A3CAgent:
 
                 self.copy_globalnets()
 
-                trajectory = self.play_n_steps()
+                trajectory = self.play_n_steps(N=self.MAX_TRAJECTORY)
 
                 self.update_globalnets(trajectory)
 
@@ -78,13 +81,38 @@ class A3CAgent:
         except tf.errors.CancelledError:
             return
 
-    def play_n_steps(self):
+    def play_n_steps(self, N):
+
         trajectory = []
-        for _ in range(self.MAX_TRAJECTORY):
+
+        for _ in range(N):
 
             self.global_counter.n += 1
 
+            action = self.policy_network.sample_action(self.state)
+
+            next_state, reward, done, info = self.env.step(action)
+
+            step = Step(self.state, action, reward, next_state, done)
+
+            trajectory.append(step)
+
+            if done:
+                print("Total reward:", self.total_reward,
+                      "agent:", self.agent_id)
+
+                self.global_history.append(self.total_reward)
+
+                self.total_reward = 0
+
+                self.state = self.env.reset()
+
+            else:
+                self.total_reward += reward
+                self.state = next_state
+
         return trajectory
+
 
     def update_globalnets(self, trajectory):
         pass
@@ -115,7 +143,7 @@ def main():
 
         global_counter = GlobalCounter()
 
-        total_rewards = []
+        global_history = []
 
         global_value_network, global_policy_network = create_networks(ACTION_SPACE)
 
@@ -128,7 +156,8 @@ def main():
                              action_space=ACTION_SPACE,
                              global_value_network=global_value_network,
                              global_policy_network=global_policy_network,
-                             gamma=0.99, total_rewards=total_rewards,
+                             gamma=0.99,
+                             global_history=global_history,
                              global_steps_fin=N_STEPS)
 
             agents.append(agent)
@@ -143,7 +172,7 @@ def main():
 
     coord.join(agent_threads, stop_grace_period_secs=300)
 
-    print(total_rewards)
+    print(global_history)
 
 
 if __name__ == "__main__":
