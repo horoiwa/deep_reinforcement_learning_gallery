@@ -1,26 +1,47 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 import tensorflow as tf
 import tensorflow.keras.layers as kl
 import numpy as np
 
 
-class ValueNetwork(tf.keras.Model):
+class SharedNetwork(tf.keras.Model):
 
     def __init__(self):
 
+        super(SharedNetwork, self).__init__()
+
+        self.dense1 = kl.Dense(32, activation="relu", name="dense1",
+                               kernel_initializer="he_normal")
+
+        self.dense2 = kl.Dense(32, activation="relu", name="dense2",
+                               kernel_initializer="he_normal")
+
+    def call(self, x):
+
+        x = self.dense1(x)
+        x = self.dense2(x)
+
+        return x
+
+
+class ValueNetwork(tf.keras.Model):
+
+    def __init__(self, shared_network):
+
         super(ValueNetwork, self).__init__()
 
-        self.dense1 = kl.Dense(32, activation="relu", name="dense1")
+        self.shared_network = shared_network
 
-        self.dense2 = kl.Dense(32, activation="relu", name="dense2")
-
-        self.out = kl.Dense(1, name="output")
+        self.out = kl.Dense(1, name="out",
+                            kernel_initializer="he_normal")
 
         self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
 
     @tf.function
     def call(self, x):
-        x = self.dense1(x)
-        x = self.dense2(x)
+        x = self.shared_network(x)
         out = self.out(x)
         return out
 
@@ -45,9 +66,40 @@ class ValueNetwork(tf.keras.Model):
 
 class PolicyNetwork(tf.keras.Model):
 
-    def __init__(self, action_space):
+    def __init__(self, shared_network, action_space):
 
         super(PolicyNetwork, self).__init__()
+
+        self.shared_network = shared_network
+
+        self.out = kl.Dense(action_space, name="out",
+                            kernel_initializer="he_normal")
+
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
+
+    @tf.function
+    def call(self, x):
+        x = self.shared_network(x)
+        out = self.out(x)
+        return out
+
+    def predict(self, states):
+        states = np.atleast_2d(states).astype(np.float32)
+        return self(states).numpy()
+
+
+    def compute_grads(self, tragectory):
+        for step in tragectory:
+            pass
+
+
+def create_networks(action_space):
+    shared_network = SharedNetwork()
+    value_network = ValueNetwork(shared_network=shared_network)
+    policy_network = PolicyNetwork(shared_network=shared_network,
+                                   action_space=action_space)
+    return value_network, policy_network
+
 
 
 if __name__ == "__main__":
@@ -58,4 +110,11 @@ if __name__ == "__main__":
     actions = [0, 1, 1]
 
     target_values = [1, 1, 1]
-    value_model = ValueModel()
+
+    shared_network = SharedNetwork()
+    value_network = ValueNetwork(shared_network=shared_network)
+    policy_network = PolicyNetwork(shared_network=shared_network,
+                                   action_space=2)
+
+    print(value_network.predict(states))
+    print(policy_network.predict(states))
