@@ -99,8 +99,6 @@ class DQNAgent:
 
             recent_localsteps.append(localsteps)
 
-            recent_average = sum(recent_localsteps) / len(recent_localsteps)
-
             print(f"Episode {n}: {total_reward}")
             print(f"Reward {total_reward}")
             print(f"Local steps {localsteps}")
