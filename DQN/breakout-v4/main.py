@@ -51,7 +51,7 @@ def frame_preprocessor(frame):
 
 class DQNAgent:
 
-    MAX_EXPERIENCES = 300000
+    MAX_EXPERIENCES = 350000
 
     MIN_EXPERIENCES = 30000
 
@@ -59,7 +59,7 @@ class DQNAgent:
 
     UPDATE_PERIOD = 4
 
-    COPY_PERIOD = 10000
+    COPY_PERIOD = 5000
 
     def __init__(self, env, gamma=0.98, epsilon=1.0):
         """
@@ -101,15 +101,11 @@ class DQNAgent:
 
             recent_average = sum(recent_localsteps) / len(recent_localsteps)
 
-            if recent_average > self.copy_period:
-                self.copy_period *= 2
-
             print(f"Episode {n}: {total_reward}")
             print(f"Reward {total_reward}")
             print(f"Local steps {localsteps}")
             print(f"Experiences {len(self.experiences)}")
             print(f"Current epsilon {self.epsilon}")
-            print(f"Current copy period {self.copy_period}")
             print(f"Global step {self.global_steps}")
             print()
 
@@ -142,11 +138,9 @@ class DQNAgent:
 
             if info["ale.lives"] != lives:
                 lives = info["ale.lives"]
-                exp = Experience(state, action, -100, next_state, done)
+                exp = Experience(state, action, -100, next_state, True)
             else:
                 exp = Experience(state, action, reward, next_state, done)
-
-            exp = Experience(state, action, reward, next_state, done)
 
             self.experiences.append(exp)
 
@@ -235,7 +229,7 @@ def main():
                            video_callable=(lambda ep: ep % 100 == 0))
 
     agent = DQNAgent(env=env)
-    history = agent.play(episodes=1001)
+    history = agent.play(episodes=3001)
 
 
     plt.plot(range(len(history)), history)
