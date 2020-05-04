@@ -15,8 +15,10 @@ Deep reinforcement learning sample codes with tensorflow2
 
 [Human-level control through deep reinforcement learning (2015)](https://www.nature.com/articles/nature14236.)
 
-- A2C (Advantage Actor Critic)
+<br>
 
-- A3C
+### A3C/A2C (Advantage Actor Critic)
+
+[Asynchronous Methods for Deep Reinforcement Learning](https://arxiv.org/abs/1602.01783)
 
 - DDQN (Double Deep Q Network)
