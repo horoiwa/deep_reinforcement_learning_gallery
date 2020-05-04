@@ -46,6 +46,10 @@ class ValueNetwork(tf.keras.Model):
         out = self.out(x)
         return out
 
+    def predict(self, state):
+        state = np.atleast_2d(state)
+        return self(state).numpy()[0][0]
+
     def compute_grads(self, states, target_values):
 
         with tf.GradientTape() as tape:
@@ -126,3 +130,4 @@ if __name__ == "__main__":
     print("probs")
     state = np.array([-0.10430691, -1.55866031, 0.19466207, 2.51363456])
     print(policy_network.sample_action(state))
+    print(value_network.predict(state))

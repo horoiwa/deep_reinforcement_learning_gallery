@@ -5,8 +5,10 @@ from dataclasses import dataclass
 import threading
 
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 import gym
+import matplotlib.pyplot as plt
 
 from models import create_networks
 
@@ -62,14 +64,14 @@ class A3CAgent:
 
     def run(self, coord):
 
+        self.sync_with_globalnetworks()
+
         self.total_reward = 0
 
         self.state = self.env.reset()
 
         try:
             while not coord.should_stop():
-
-                self.copy_globalnets()
 
                 trajectory = self.play_n_steps(N=self.MAX_TRAJECTORY)
 
@@ -98,8 +100,10 @@ class A3CAgent:
             trajectory.append(step)
 
             if done:
-                print("Total reward:", self.total_reward,
-                      "agent:", self.agent_id)
+                print(f"Global step {self.global_counter.n}")
+                print(f"Total Reward: {self.total_reward}")
+                print(f"Agent: {self.agent_id}")
+                print()
 
                 self.global_history.append(self.total_reward)
 
@@ -107,17 +111,18 @@ class A3CAgent:
 
                 self.state = self.env.reset()
 
+                self.sync_with_globalnetworks()
+
             else:
                 self.total_reward += reward
                 self.state = next_state
 
         return trajectory
 
-
     def update_globalnets(self, trajectory):
         pass
 
-    def copy_globalnets(self):
+    def sync_with_globalnetworks(self):
         global_valuenet_vars = self.global_value_network.trainable_variables
         global_policynet_vars = self.global_policy_network.trainable_variables
 
@@ -135,7 +140,7 @@ def main():
 
     ACTION_SPACE = 2
 
-    NUM_AGENTS = 1
+    NUM_AGENTS = 3
 
     N_STEPS = 100
 
@@ -148,6 +153,7 @@ def main():
         global_value_network, global_policy_network = create_networks(ACTION_SPACE)
 
         agents = []
+
         for agent_id in range(NUM_AGENTS):
 
             agent = A3CAgent(agent_id=f"agent_{agent_id}",
@@ -173,6 +179,16 @@ def main():
     coord.join(agent_threads, stop_grace_period_secs=300)
 
     print(global_history)
+
+    plt.plot(range(len(global_history)), global_history)
+    plt.plot([0, 350], [195, 195], "--", color="darkred")
+    plt.xlabel("episodes")
+    plt.ylabel("Total Reward")
+    plt.savefig(MONITOR_DIR / "dqn_cartpole-v1.png")
+
+    df = pd.DataFrame()
+    df["Total Reward"] = global_history
+    df.to_csv(MONITOR_DIR / "dqn_cartpole-v1.csv", index=None)
 
 
 if __name__ == "__main__":
