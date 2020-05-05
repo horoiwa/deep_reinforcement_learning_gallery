@@ -22,10 +22,23 @@ Deep reinforcement learning sample codes with tensorflow2
 
 
 [Why could my ddqn get significantly worse after beating the game repeatedly](https://datascience.stackexchange.com/questions/56053/why-could-my-ddqn-get-significantly-worse-after-beating-the-game-repeatedly)
+
 <br>
 
 ## DDQN (Double Deep Q Network)
 
-## AC3/A2C (Advantage Actor Critic)
+<br>
 
+### A3C/A2C (Advantage Actor Critic)
 
+[Asynchronous Methods for Deep Reinforcement Learning](https://arxiv.org/abs/1602.01783)
+
+[Deep Reinforcement Learning: Playing CartPole through Asynchronous Advantage Actor Critic (A3C) with tf.keras and eager execution](https://blog.tensorflow.org/2018/07/deep-reinforcement-learning-keras-eager-execution.html)
+
+[Deep Reinforcement Learning With TensorFlow 2.1](http://inoryy.com/post/tensorflow2-deep-reinforcement-learning/#asynchronous-advantage-actor-critic)
+
+### PPO
+
+### DDPG
+
+### DQFD
