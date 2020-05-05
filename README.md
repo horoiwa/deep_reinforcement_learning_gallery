@@ -22,4 +22,7 @@ Deep reinforcement learning sample codes with tensorflow2
 
 [Asynchronous Methods for Deep Reinforcement Learning](https://arxiv.org/abs/1602.01783)
 
+[Deep Reinforcement Learning: Playing CartPole through Asynchronous Advantage Actor Critic (A3C) with tf.keras and eager execution](https://blog.tensorflow.org/2018/07/deep-reinforcement-learning-keras-eager-execution.html)
+
+[Deep Reinforcement Learning With TensorFlow 2.1](http://inoryy.com/post/tensorflow2-deep-reinforcement-learning/#asynchronous-advantage-actor-critic)
 - DDQN (Double Deep Q Network)

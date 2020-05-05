@@ -50,14 +50,17 @@ class ValueNetwork(tf.keras.Model):
         state = np.atleast_2d(state)
         return self(state).numpy()[0][0]
 
-    def compute_grads(self, states, target_values):
+    def compute_grads(self, states, discounted_rewards):
+        """
+           loss =  MSE(discouted_rewards - V(state)) = MSE(Advantages)
+        """
 
         with tf.GradientTape() as tape:
 
             estimated_values = self(states)
 
             loss = tf.reduce_mean(
-                tf.square(target_values - estimated_values))
+                tf.square(discounted_rewards - estimated_values))
 
         variables = self.trainable_variables
         gradients = tape.gradient(loss, variables)
@@ -67,9 +70,13 @@ class ValueNetwork(tf.keras.Model):
 
 class PolicyNetwork(tf.keras.Model):
 
+    ALPHA = 0.005
+
     def __init__(self, shared_network, action_space):
 
         super(PolicyNetwork, self).__init__()
+
+        self.action_space = action_space
 
         self.shared_network = shared_network
 
@@ -94,9 +101,29 @@ class PolicyNetwork(tf.keras.Model):
         action = cdist.sample()
         return action.numpy()[0]
 
-    def compute_grads(self, tragectory):
-        for step in tragectory:
-            pass
+    def compute_grads(self,  states, actions, advantages):
+        """
+            Maximize: pi(a | s) * Advantage + alpha * entropy_of_pi(s)
+
+            alpha: 正則化係数
+        """
+        actions_onehot = tf.one_hot(actions, self.action_space)
+        with tf.GradientTape() as tape:
+            action_probs = self(states)
+            selected_action_probs = tf.reduce_max(
+                action_probs * actions_onehot, axis=1)
+
+            entropy = -tf.reduce_sum(
+                action_probs * tf.math.log(action_probs + 1e-20), axis=1)
+
+            loss = tf.reduce_mean(
+                -1 * (selected_action_probs * advantages + self.ALPHA * entropy))
+
+        variables = self.trainable_variables
+        gradients = tape.gradient(loss, variables)
+
+        return gradients
+
 
 
 def create_networks(action_space):

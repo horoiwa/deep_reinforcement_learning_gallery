@@ -2,6 +2,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 from dataclasses import dataclass
+from pathlib import Path
 import threading
 
 import numpy as np
@@ -35,7 +36,7 @@ class GlobalCounter:
 
 class A3CAgent:
 
-    MAX_TRAJECTORY = 5
+    MAX_TRAJECTORY = 3
 
     def __init__(self, agent_id, env,
                  global_counter, action_space,
@@ -77,6 +78,7 @@ class A3CAgent:
 
                 self.update_globalnets(trajectory)
 
+
                 if self.global_counter.n >= self.global_steps_fin:
                     coord.request_stop()
 
@@ -95,7 +97,10 @@ class A3CAgent:
 
             next_state, reward, done, info = self.env.step(action)
 
-            step = Step(self.state, action, reward, next_state, done)
+            if done:
+                step = Step(self.state, action, -10, next_state, done)
+            else:
+                step = Step(self.state, action, reward, next_state, done)
 
             trajectory.append(step)
 
@@ -113,6 +118,8 @@ class A3CAgent:
 
                 self.sync_with_globalnetworks()
 
+                break
+
             else:
                 self.total_reward += reward
                 self.state = next_state
@@ -120,7 +127,44 @@ class A3CAgent:
         return trajectory
 
     def update_globalnets(self, trajectory):
-        pass
+
+        if trajectory[-1].done:
+            R = 0
+        else:
+            R = self.value_network.predict(trajectory[-1].next_state)
+
+        discounted_rewards = []
+        advantages = []
+
+        for step in reversed(trajectory):
+            R = step.reward + self.gamma * R
+            adv = R - self.value_network.predict(step.state)
+            discounted_rewards.append(R)
+            advantages.append(adv)
+
+        discounted_rewards.reverse()
+        discounted_rewards = np.array(discounted_rewards)
+
+        advantages.reverse()
+        advantages = np.array(advantages)
+
+        states = np.array([step.state for step in trajectory])
+        actions = np.array([step.action for step in trajectory])
+
+        policy_grads = self.policy_network.compute_grads(
+            states, actions, advantages)
+
+        value_grads = self.value_network.compute_grads(
+            states, discounted_rewards)
+
+        global_policy_variables = self.global_policy_network.trainable_variables
+        global_value_variables = self.global_value_network.trainable_variables
+
+        self.global_policy_network.optimizer.apply_gradients(
+            zip(policy_grads, global_policy_variables))
+
+        self.global_value_network.optimizer.apply_gradients(
+            zip(value_grads, global_value_variables))
 
     def sync_with_globalnetworks(self):
         global_valuenet_vars = self.global_value_network.trainable_variables
@@ -140,9 +184,13 @@ def main():
 
     ACTION_SPACE = 2
 
-    NUM_AGENTS = 3
+    NUM_AGENTS = 4
 
-    N_STEPS = 100
+    N_STEPS = 10000
+
+    MONITOR_DIR = Path(__file__).parent / "history"
+    if not MONITOR_DIR.exists():
+        MONITOR_DIR.mkdir()
 
     with tf.device("/cpu:0"):
 
@@ -184,11 +232,11 @@ def main():
     plt.plot([0, 350], [195, 195], "--", color="darkred")
     plt.xlabel("episodes")
     plt.ylabel("Total Reward")
-    plt.savefig(MONITOR_DIR / "dqn_cartpole-v1.png")
+    plt.savefig(MONITOR_DIR / "a3c_cartpole-v1.png")
 
     df = pd.DataFrame()
     df["Total Reward"] = global_history
-    df.to_csv(MONITOR_DIR / "dqn_cartpole-v1.csv", index=None)
+    df.to_csv(MONITOR_DIR / "a3c_cartpole-v1.csv", index=None)
 
 
 if __name__ == "__main__":
