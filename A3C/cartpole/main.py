@@ -36,7 +36,7 @@ class GlobalCounter:
 
 class A3CAgent:
 
-    MAX_TRAJECTORY = 3
+    MAX_TRAJECTORY = 5
 
     def __init__(self, agent_id, env,
                  global_counter, action_space,
@@ -109,10 +109,10 @@ class A3CAgent:
             trajectory.append(step)
 
             if done:
-                print(f"Global step {self.global_counter.n}")
-                print(f"Total Reward: {self.total_reward}")
-                print(f"Agent: {self.agent_id}")
-                print()
+                #print(f"Global step {self.global_counter.n}")
+                #print(f"Total Reward: {self.total_reward}")
+                #print(f"Agent: {self.agent_id}")
+                #print()
 
                 self.global_history.append(self.total_reward)
 
@@ -133,9 +133,10 @@ class A3CAgent:
         if trajectory[-1].done:
             R = 0
         else:
-            R, _ = self.local_ACNet(
+            values, _ = self.local_ACNet(
                 tf.convert_to_tensor(np.atleast_2d(trajectory[-1].next_state),
                                      dtype=tf.float32))
+            R = values[0][0]
 
         discounted_rewards = []
         for step in reversed(trajectory):
@@ -158,17 +159,38 @@ class A3CAgent:
 
         action_probs = tf.nn.softmax(logits)
 
+        selected_action_probs = actions_onehot * action_probs
+
         entropy = tf.reduce_sum(
             action_probs * tf.math.log(action_probs + 1e-20), axis=1)
 
         policy_loss = tf.compat.v1.nn.softmax_cross_entropy_with_logits_v2(
             labels=actions_onehot, logits=logits)
-
         policy_loss *= tf.stop_gradient(advantages)
-
         policy_loss -= 0.01 * entropy
 
         total_loss = tf.reduce_mean((0.5 * value_loss + policy_loss))
+
+        #tf.print("")
+        #tf.print("advantage")
+        #tf.print(advantages)
+        #tf.print("logits")
+        #tf.print(logits)
+        #tf.print("pi(a|s)")
+        #tf.print(selected_action_probs)
+        #tf.print("")
+        #tf.print(
+        #    tf.compat.v1.nn.softmax_cross_entropy_with_logits_v2(
+        #    labels=actions_onehot, logits=logits)
+        #)
+        #tf.print("value")
+        #tf.print(value_loss)
+        #tf.print("policy")
+        #tf.print(policy_loss)
+        """作業メモ
+            - 学習はできるが明らかにポリシーロスの形状がおかしい
+            - なぜsoftmax_cross_entropy?
+        """
 
         return total_loss
 
@@ -179,7 +201,7 @@ def main():
 
     NUM_AGENTS = 4
 
-    N_STEPS = 3000
+    N_STEPS = 12000
 
     MONITOR_DIR = Path(__file__).parent / "history"
     if not MONITOR_DIR.exists():
