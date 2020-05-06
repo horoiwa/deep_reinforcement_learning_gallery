@@ -120,6 +120,9 @@ class DQNAgent:
 
         frame = self.env.reset()
 
+        for _ in range(random.randint(0, 10)):
+            frame, _, _, _= self.env.step(1)
+
         state = np.stack(
             [np.squeeze(frame_preprocessor(frame))]*4,
             axis=2).astype(np.float32)
@@ -135,7 +138,7 @@ class DQNAgent:
 
             if info["ale.lives"] != lives:
                 lives = info["ale.lives"]
-                exp = Experience(state, action, -100, next_state, True)
+                exp = Experience(state, action, reward, next_state, True)
             else:
                 exp = Experience(state, action, reward, next_state, done)
 

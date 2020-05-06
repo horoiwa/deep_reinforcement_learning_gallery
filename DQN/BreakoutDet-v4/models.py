@@ -32,7 +32,7 @@ class QNetwork(tf.keras.Model):
         self.out = kl.Dense(self.action_space,
                             kernel_initializer="he_normal")
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.00005)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00001)
 
         self.loss_func = tf.losses.Huber()
 
