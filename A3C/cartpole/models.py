@@ -15,39 +15,33 @@ class ActorCriticNet(tf.keras.Model):
 
         self.action_space = action_space
 
-        self.dense1 = kl.Dense(32, activation="relu", name="dense1",
-                               kernel_initializer="he_normal")
+        self.dense1 = kl.Dense(100, activation="relu", name="dense1")
 
-        self.dense2 = kl.Dense(32, activation="relu", name="dense2",
-                               kernel_initializer="he_normal")
+        self.dense2 = kl.Dense(100, activation="relu", name="dense2")
 
         self.values = kl.Dense(1, name="value",
                                kernel_initializer="he_normal")
 
-        self.policy_logits = kl.Dense(action_space, name="policy_logits",
-                                      kernel_initializer="he_normal")
-
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
+        self.policy_logits = kl.Dense(action_space, name="policy_logits")
 
     @tf.function
     def call(self, x):
-        x = self.dense1(x)
-        x = self.dense2(x)
-        values = self.values(x)
-        logits = self.policy_logits(x)
+
+        x1 = self.dense1(x)
+        logits = self.policy_logits(x1)
+
+        x2 = self.dense2(x)
+        values = self.values(x2)
+
         return values, logits
 
-    def predict(self, state):
-        state = np.atleast_2d(state)
-        return self(state).numpy()[0][0]
-
     def sample_action(self, state):
-        state = np.atleast_2d(state).astype(np.float32)
+
+        state = tf.convert_to_tensor(np.atleast_2d(state), dtype=tf.float32)
 
         _, logits = self(state)
 
-        action_probs =
-        raise NotImplementedError()
+        action_probs = tf.nn.softmax(logits)
 
         cdist = tfp.distributions.Categorical(probs=action_probs)
 
@@ -73,63 +67,6 @@ class ActorCriticNet(tf.keras.Model):
         return gradients
 
 
-class PolicyNetwork(tf.keras.Model):
-
-    ALPHA = 0.005
-
-    def __init__(self, shared_network, action_space):
-
-        super(PolicyNetwork, self).__init__()
-
-        self.action_space = action_space
-
-        self.shared_network = shared_network
-
-
-        self.softmax = kl.Softmax()
-
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
-
-    @tf.function
-    def call(self, x):
-        x = self.shared_network(x)
-        logits = self.dense1(x)
-        probs = self.softmax(logits)
-        return probs
-
-    def sample_action(self, state):
-        state = np.atleast_2d(state).astype(np.float32)
-        probs = self(state)
-        cdist = tfp.distributions.Categorical(probs=probs)
-        action = cdist.sample()
-        return action.numpy()[0]
-
-    def compute_grads(self,  states, actions, advantages):
-        """
-            Maximize: pi(a | s) * Advantage + alpha * entropy_of_pi(s)
-
-            alpha: 正則化係数
-        """
-        actions_onehot = tf.one_hot(actions, self.action_space)
-        with tf.GradientTape() as tape:
-            action_probs = self(states)
-            selected_action_probs = tf.reduce_max(
-                action_probs * actions_onehot, axis=1)
-
-            entropy = -tf.reduce_sum(
-                action_probs * tf.math.log(action_probs + 1e-20), axis=1)
-
-            loss = tf.reduce_mean(
-                -1 * (selected_action_probs * advantages + self.ALPHA * entropy))
-
-        variables = self.trainable_variables
-        gradients = tape.gradient(loss, variables)
-
-        return gradients
-
-
-
-
 if __name__ == "__main__":
     states = np.array([[-0.10430691, -1.55866031, 0.19466207, 2.51363456],
                        [-0.10430691, -1.55866031, 0.19466207, 2.51363456],
@@ -140,16 +77,35 @@ if __name__ == "__main__":
 
     target_values = [1, 1, 1]
 
-    shared_network = SharedNetwork()
-    value_network = ValueNetwork(shared_network=shared_network)
-    policy_network = PolicyNetwork(shared_network=shared_network,
-                                   action_space=2)
+    acnet = ActorCriticNet(2)
 
-    print(value_network(states))
-    print(policy_network(states))
+    values, logits = acnet(states)
 
-    print("")
-    print("probs")
+    print(values)
+    print(logits)
+
+    state = np.array([[-0.10430691, -1.55866031, 0.19466207, 2.51363456]])
+
+    value, logit = acnet(state)
+
+    print(tf.nn.softmax(logit))
+
     state = np.array([-0.10430691, -1.55866031, 0.19466207, 2.51363456])
-    print(policy_network.sample_action(state))
-    print(value_network.predict(state))
+
+    print(acnet.sample_action(state))
+
+    print("weights exists?")
+    print(len(acnet.get_weights()))
+
+    acnet2 = ActorCriticNet(2)
+
+    acnet2.build(input_shape=(None, 4))
+
+    print(len(acnet2.get_weights()))
+
+    values, logits = acnet2(states)
+
+    for var in acnet2.trainable_variables:
+        print(var)
+
+    #print(len(acnet2.get_weights()))
