@@ -11,7 +11,7 @@ import tensorflow as tf
 import gym
 import matplotlib.pyplot as plt
 
-from models import create_networks
+from models import ActorCriticNet
 
 
 @dataclass
@@ -40,7 +40,7 @@ class A3CAgent:
 
     def __init__(self, agent_id, env,
                  global_counter, action_space,
-                 global_value_network, global_policy_network,
+                 global_ACNet,
                  gamma, global_history, global_steps_fin):
 
         self.agent_id = agent_id
@@ -51,11 +51,9 @@ class A3CAgent:
 
         self.action_space = action_space
 
-        self.global_value_network = global_value_network
+        self.global_ACNet = global_ACNet
 
-        self.global_policy_network = global_policy_network
-
-        self.value_network, self.policy_network = create_networks(action_space)
+        self.local_ACNet = ActorCriticNet(self.action_space)
 
         self.gamma = gamma
 
@@ -65,7 +63,7 @@ class A3CAgent:
 
     def run(self, coord):
 
-        self.sync_with_globalnetworks()
+        self.sync_with_globalparameters()
 
         self.total_reward = 0
 
@@ -77,7 +75,6 @@ class A3CAgent:
                 trajectory = self.play_n_steps(N=self.MAX_TRAJECTORY)
 
                 self.update_globalnets(trajectory)
-
 
                 if self.global_counter.n >= self.global_steps_fin:
                     coord.request_stop()
@@ -93,7 +90,7 @@ class A3CAgent:
 
             self.global_counter.n += 1
 
-            action = self.policy_network.sample_action(self.state)
+            action = self.local_ACNet.sample_action(self.state)
 
             next_state, reward, done, info = self.env.step(action)
 
@@ -166,17 +163,13 @@ class A3CAgent:
         self.global_value_network.optimizer.apply_gradients(
             zip(value_grads, global_value_variables))
 
-    def sync_with_globalnetworks(self):
-        global_valuenet_vars = self.global_value_network.trainable_variables
-        global_policynet_vars = self.global_policy_network.trainable_variables
+    def sync_with_globalparameters(self):
 
-        local_valuenet_vars = self.value_network.trainable_variables
-        local_policynet_vars = self.policy_network.trainable_variables
+        global_variables = self.global_ACNet.trainable_variables
 
-        for v1, v2 in zip(local_valuenet_vars, global_valuenet_vars):
-            v1.assign(v2.numpy())
+        local_variables = self.local_ACNet.trainable_variables
 
-        for v1, v2 in zip(local_policynet_vars, global_policynet_vars):
+        for v1, v2 in zip(local_variables, global_variables):
             v1.assign(v2.numpy())
 
 
@@ -198,7 +191,7 @@ def main():
 
         global_history = []
 
-        global_value_network, global_policy_network = create_networks(ACTION_SPACE)
+        global_ACNet = ActorCriticNet(ACTION_SPACE)
 
         agents = []
 
@@ -208,8 +201,7 @@ def main():
                              env=gym.envs.make("CartPole-v1"),
                              global_counter=global_counter,
                              action_space=ACTION_SPACE,
-                             global_value_network=global_value_network,
-                             global_policy_network=global_policy_network,
+                             global_ACNet=ActorCriticNet,
                              gamma=0.99,
                              global_history=global_history,
                              global_steps_fin=N_STEPS)

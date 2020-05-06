@@ -7,11 +7,13 @@ import tensorflow_probability as tfp
 import numpy as np
 
 
-class SharedNetwork(tf.keras.Model):
+class ActorCriticNet(tf.keras.Model):
 
-    def __init__(self):
+    def __init__(self, action_space):
 
-        super(SharedNetwork, self).__init__()
+        super(ActorCriticNet, self).__init__()
+
+        self.action_space = action_space
 
         self.dense1 = kl.Dense(32, activation="relu", name="dense1",
                                kernel_initializer="he_normal")
@@ -19,36 +21,39 @@ class SharedNetwork(tf.keras.Model):
         self.dense2 = kl.Dense(32, activation="relu", name="dense2",
                                kernel_initializer="he_normal")
 
-    def call(self, x):
+        self.values = kl.Dense(1, name="value",
+                               kernel_initializer="he_normal")
 
-        x = self.dense1(x)
-        x = self.dense2(x)
-
-        return x
-
-
-class ValueNetwork(tf.keras.Model):
-
-    def __init__(self, shared_network):
-
-        super(ValueNetwork, self).__init__()
-
-        self.shared_network = shared_network
-
-        self.out = kl.Dense(1, name="out",
-                            kernel_initializer="he_normal")
+        self.policy_logits = kl.Dense(action_space, name="policy_logits",
+                                      kernel_initializer="he_normal")
 
         self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
 
     @tf.function
     def call(self, x):
-        x = self.shared_network(x)
-        out = self.out(x)
-        return out
+        x = self.dense1(x)
+        x = self.dense2(x)
+        values = self.values(x)
+        logits = self.policy_logits(x)
+        return values, logits
 
     def predict(self, state):
         state = np.atleast_2d(state)
         return self(state).numpy()[0][0]
+
+    def sample_action(self, state):
+        state = np.atleast_2d(state).astype(np.float32)
+
+        _, logits = self(state)
+
+        action_probs =
+        raise NotImplementedError()
+
+        cdist = tfp.distributions.Categorical(probs=action_probs)
+
+        action = cdist.sample()
+
+        return action.numpy()[0]
 
     def compute_grads(self, states, discounted_rewards):
         """
@@ -80,8 +85,6 @@ class PolicyNetwork(tf.keras.Model):
 
         self.shared_network = shared_network
 
-        self.dense1 = kl.Dense(action_space, name="out",
-                               kernel_initializer="he_normal")
 
         self.softmax = kl.Softmax()
 
@@ -124,14 +127,6 @@ class PolicyNetwork(tf.keras.Model):
 
         return gradients
 
-
-
-def create_networks(action_space):
-    shared_network = SharedNetwork()
-    value_network = ValueNetwork(shared_network=shared_network)
-    policy_network = PolicyNetwork(shared_network=shared_network,
-                                   action_space=action_space)
-    return value_network, policy_network
 
 
 
