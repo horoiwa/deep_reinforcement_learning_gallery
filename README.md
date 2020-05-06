@@ -16,6 +16,8 @@ Deep reinforcement learning sample codes with tensorflow2
 [Human-level control through deep reinforcement learning (2015)](https://www.nature.com/articles/nature14236.)
 
 
+[Implementing the Deep Q-Network](https://arxiv.org/pdf/1711.07478.pdf)
+
 [参考]
 
 [How to match DeepMind’s Deep Q-Learning score in Breakout](https://towardsdatascience.com/tutorial-double-deep-q-learning-with-dueling-network-architectures-4c1b3fb7f756)
