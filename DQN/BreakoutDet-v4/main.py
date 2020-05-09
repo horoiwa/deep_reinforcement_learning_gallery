@@ -61,7 +61,7 @@ class DQNAgent:
 
     COPY_PERIOD = 10000
 
-    def __init__(self, env, gamma=0.98, epsilon=1.0):
+    def __init__(self, env, gamma=0.98):
         """
             gammma: 割引率
             epsilon: 探索と活用の割合
@@ -71,9 +71,7 @@ class DQNAgent:
 
         self.gamma = gamma
 
-        self.epsion = epsilon
-
-        self.copy_period = 250
+        self.epsion = 1.0
 
         self.global_steps = 0
 
@@ -229,7 +227,7 @@ def main():
                            video_callable=(lambda ep: ep % 100 == 0))
 
     agent = DQNAgent(env=env)
-    history = agent.play(episodes=3001)
+    history = agent.play(episodes=10001)
 
     plt.plot(range(len(history)), history)
     plt.xlabel("episodes")
