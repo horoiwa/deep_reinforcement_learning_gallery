@@ -1,4 +1,6 @@
 from pathlib import Path
+import sys
+import random
 
 import gym
 from gym import wrappers
@@ -22,12 +24,23 @@ if __name__ == "__main__":
     done = False
     observation = env.reset()
     action = 0
-    step = 0
+    total_steps = 0
+
+    for _ in range(5):
+        print("RANDOM")
+        action = random.choice([0, 1])
+        observation, reward, done, info = env.step(action)
+        total_steps += 1
+        if done:
+            print("DONE!")
+            print("STEPS", total_steps)
+            sys.exit()
 
     for step in range(10000):
 
         env.step(0)
         observation, reward, done, info = env.step(action)
+        total_steps += 1
 
         print(f"====STEP{step}====")
         print("obs", observation, type(observation))
@@ -38,6 +51,5 @@ if __name__ == "__main__":
 
         if done:
             print("DONE!")
+            print("STEPS", step)
             break
-
-    print("N-episodes", env.episode_id, type(env.episode_id))

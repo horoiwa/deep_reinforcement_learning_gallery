@@ -3,6 +3,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from dataclasses import dataclass
 import collections
+import random
 
 import numpy as np
 import pandas as pd
@@ -33,11 +34,12 @@ class DQNAgent:
 
     MAX_EXPERIENCES = 20000
 
-    MIN_EXPERIENCES = 256
+    MIN_EXPERIENCES = 2000
 
-    BATCH_SIZE = 16
+    BATCH_SIZE = 32
 
-    def __init__(self, env, gamma=0.95, epsilon=1.0):
+    def __init__(self, env, gamma=0.95, epsilon=1.0,
+                 copy_period=1000, lr=0.01, update_period=2):
         """
             gammma: 割引率
             epsilon: 探索と活用の割合
@@ -49,11 +51,21 @@ class DQNAgent:
 
         self.epsion = epsilon
 
+        self.copy_period = copy_period
+
+        self.update_period = update_period
+
+        self.lr = lr
+
         self.global_steps = 0
 
-        self.q_network = QNetwork(self.env.action_space.n)
+        self.q_network = QNetwork(self.env.action_space.n, lr=lr)
+
+        self.q_network.build(input_shape=(None, 4))
 
         self.target_network = QNetwork(self.env.action_space.n)
+
+        self.target_network.build(input_shape=(None, 4))
 
         self.experiences = collections.deque(maxlen=self.MAX_EXPERIENCES)
 
@@ -62,8 +74,8 @@ class DQNAgent:
         total_rewards = []
 
         for n in range(episodes):
-            #: 探索率の更新
-            self.epsilon = 1.0 / np.sqrt(n+1)
+
+            self.epsilon = 1.0 - min(0.95, self.global_steps * 0.95 / 50000)
 
             total_reward = self.play_episode()
 
@@ -80,8 +92,21 @@ class DQNAgent:
         total_reward = 0
 
         steps = 0
+
         done = False
+
         state = self.env.reset()
+
+        for _ in range(random.randint(0, 5)):
+            action = self.sample_action(random.choice([0, 1]))
+
+            next_state, reward, done, info = self.env.step(action)
+
+            total_reward += reward
+
+            steps += 1
+
+            self.global_steps += 1
 
         while not done and steps < 20000:
 
@@ -90,9 +115,6 @@ class DQNAgent:
             next_state, reward, done, info = self.env.step(action)
 
             total_reward += reward
-
-            if done and steps < 475:
-                reward = -500
 
             exp = Experience(state, action, reward, next_state, done)
 
@@ -104,10 +126,11 @@ class DQNAgent:
 
             self.global_steps += 1
 
-            self.update_qnetwork()
+            if self.global_steps % self.update_period == 0:
+                self.update_qnetwork()
 
-            if self.global_steps % 100 == 0:
-                self.update_target_network()
+            if self.global_steps % self.copy_period == 0:
+                self.target_network.set_weights(self.q_network.get_weights())
 
         return total_reward
 
@@ -140,16 +163,6 @@ class DQNAgent:
         self.q_network.update(np.array(states), np.array(actions),
                               np.array(target_values))
 
-    def update_target_network(self):
-        """Update target Q-network
-        """
-
-        targetnet_variables = self.target_network.trainable_variables
-        qnet_variables = self.q_network.trainable_variables
-
-        for var1, var2 in zip(targetnet_variables, qnet_variables):
-            var1.assign(var2.numpy())
-
     def get_minibatch(self, batch_size):
         """Experience Replay mechanism
         """
@@ -167,15 +180,15 @@ class DQNAgent:
         return (states, actions, rewards, next_states, dones)
 
 
-def main():
+def main(copy_period, lr):
 
-    monitor_dir = Path(__file__).parent / "history"
+    monitor_dir = Path(__file__).parent / f"CP{copy_period}_LR{lr}"
 
     ENV_NAME = "CartPole-v1"
     env = gym.make(ENV_NAME)
     env = wrappers.Monitor(env, monitor_dir, force=True)
 
-    agent = DQNAgent(env=env)
+    agent = DQNAgent(env=env, copy_period=copy_period, lr=lr)
     history = agent.play(episodes=350)
 
     plt.plot(range(len(history)), history)
@@ -189,5 +202,17 @@ def main():
     df.to_csv(monitor_dir / "dqn_cartpole-v1.csv", index=None)
 
 
+def gridsearch():
+    import itertools
+
+    lrs = [0.001, 0.0005, 0.0001]
+    copy_periods = [1000, 500, 100]
+
+    for lr, copy_period in itertools.product(lrs, copy_periods):
+        print("START", lr, copy_period)
+        main(copy_period, lr)
+
+
 if __name__ == "__main__":
-    main()
+    #main()
+    gridsearch()

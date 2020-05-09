@@ -8,7 +8,7 @@ import tensorflow.keras.layers as kl
 
 class QNetwork(tf.keras.Model):
 
-    def __init__(self, action_space):
+    def __init__(self, action_space, lr=0.001):
 
         super(QNetwork, self).__init__()
 
@@ -22,7 +22,7 @@ class QNetwork(tf.keras.Model):
 
         self.out = kl.Dense(action_space, name="output")
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
+        self.optimizer = tf.keras.optimizers.Adam(lr=lr)
 
     @tf.function
     def call(self, x):
