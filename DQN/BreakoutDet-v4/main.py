@@ -227,7 +227,7 @@ def main():
                            video_callable=(lambda ep: ep % 100 == 0))
 
     agent = DQNAgent(env=env)
-    history = agent.play(episodes=10001)
+    history = agent.play(episodes=4501)
 
     plt.plot(range(len(history)), history)
     plt.xlabel("episodes")
