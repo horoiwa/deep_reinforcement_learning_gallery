@@ -14,21 +14,23 @@ class QNetwork(tf.keras.Model):
 
         self.action_space = action_space
 
-        self.dense1 = kl.Dense(32, activation="relu", name="dense1")
+        self.dense1 = kl.Dense(128, activation="relu", name="dense1",
+                               kernel_initializer="he_normal")
 
-        self.dense2 = kl.Dense(32, activation="relu", name="dense2")
+        self.dense2 = kl.Dense(128, activation="relu", name="dense2",
+                               kernel_initializer="he_normal")
 
-        self.drop1 = kl.Dropout(0.2)
-
-        self.out = kl.Dense(action_space, name="output")
+        self.out = kl.Dense(action_space, name="output",
+                            kernel_initializer="he_normal")
 
         self.optimizer = tf.keras.optimizers.Adam(lr=lr)
+
+        self.loss_func = tf.losses.Huber()
 
     @tf.function
     def call(self, x):
         x = self.dense1(x)
         x = self.dense2(x)
-        x = self.drop1(x)
         out = self.out(x)
         return out
 

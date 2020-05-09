@@ -34,9 +34,9 @@ class DQNAgent:
 
     MAX_EXPERIENCES = 20000
 
-    MIN_EXPERIENCES = 2000
+    MIN_EXPERIENCES = 512
 
-    BATCH_SIZE = 32
+    BATCH_SIZE = 16
 
     def __init__(self, env, gamma=0.95, epsilon=1.0,
                  copy_period=1000, lr=0.01, update_period=2):
@@ -75,7 +75,7 @@ class DQNAgent:
 
         for n in range(episodes):
 
-            self.epsilon = 1.0 - min(0.95, self.global_steps * 0.95 / 50000)
+            self.epsilon = 1.0 - min(0.95, self.global_steps * 0.95 / 500)
 
             total_reward = self.play_episode()
 
@@ -83,6 +83,7 @@ class DQNAgent:
 
             print(f"Episode {n}: {total_reward}")
             print(f"Current experiences {len(self.experiences)}")
+            print(f"Current epsilon {self.epsilon}")
             print()
 
         return total_rewards
@@ -97,18 +98,7 @@ class DQNAgent:
 
         state = self.env.reset()
 
-        for _ in range(random.randint(0, 5)):
-            action = self.sample_action(random.choice([0, 1]))
-
-            next_state, reward, done, info = self.env.step(action)
-
-            total_reward += reward
-
-            steps += 1
-
-            self.global_steps += 1
-
-        while not done and steps < 20000:
+        while not done:
 
             action = self.sample_action(state)
 
@@ -186,13 +176,14 @@ def main(copy_period, lr):
 
     ENV_NAME = "CartPole-v1"
     env = gym.make(ENV_NAME)
-    env = wrappers.Monitor(env, monitor_dir, force=True)
+    env = wrappers.Monitor(env, monitor_dir, force=True,
+                           video_callable=(lambda ep: ep % 25 == 0))
 
     agent = DQNAgent(env=env, copy_period=copy_period, lr=lr)
-    history = agent.play(episodes=350)
+    history = agent.play(episodes=401)
 
     plt.plot(range(len(history)), history)
-    plt.plot([0, 350], [195, 195], "--", color="darkred")
+    plt.plot([0, 400], [195, 195], "--", color="darkred")
     plt.xlabel("episodes")
     plt.ylabel("Total Reward")
     plt.savefig(monitor_dir / "dqn_cartpole-v1.png")
@@ -202,17 +193,7 @@ def main(copy_period, lr):
     df.to_csv(monitor_dir / "dqn_cartpole-v1.csv", index=None)
 
 
-def gridsearch():
-    import itertools
-
-    lrs = [0.001, 0.0005, 0.0001]
-    copy_periods = [1000, 500, 100]
-
-    for lr, copy_period in itertools.product(lrs, copy_periods):
-        print("START", lr, copy_period)
-        main(copy_period, lr)
-
-
 if __name__ == "__main__":
-    #main()
-    gridsearch()
+    copy_period = 250
+    lr = 0.0005
+    main(copy_period, lr)
