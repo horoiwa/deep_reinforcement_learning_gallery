@@ -25,6 +25,7 @@ Deep reinforcement learning sample codes with tensorflow2
 
 [Why could my ddqn get significantly worse after beating the game repeatedly](https://datascience.stackexchange.com/questions/56053/why-could-my-ddqn-get-significantly-worse-after-beating-the-game-repeatedly)
 
+[OpenAI baselines DQN](https://openai.com/blog/openai-baselines-dqn/)
 <br>
 
 ## DDQN (Double Deep Q Network)

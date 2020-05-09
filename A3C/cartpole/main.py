@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 import gym
+from gym import wrappers
 import matplotlib.pyplot as plt
 
 from models import ActorCriticNet
@@ -36,7 +37,7 @@ class GlobalCounter:
 
 class A3CAgent:
 
-    MAX_TRAJECTORY = 5
+    MAX_TRAJECTORY = 3
 
     def __init__(self, agent_id, env,
                  global_counter, action_space,
@@ -159,38 +160,18 @@ class A3CAgent:
 
         action_probs = tf.nn.softmax(logits)
 
-        selected_action_probs = actions_onehot * action_probs
+        log_selected_action_probs = actions_onehot * tf.math.log(action_probs + 1e-20)
 
-        entropy = tf.reduce_sum(
+        entropy = -tf.reduce_sum(
             action_probs * tf.math.log(action_probs + 1e-20), axis=1)
 
-        policy_loss = tf.compat.v1.nn.softmax_cross_entropy_with_logits_v2(
-            labels=actions_onehot, logits=logits)
-        policy_loss *= tf.stop_gradient(advantages)
-        policy_loss -= 0.01 * entropy
+        policy_loss = tf.reduce_sum(
+            log_selected_action_probs * tf.stop_gradient(advantages), axis=1)
+        policy_loss += 0.01 * entropy
+        policy_loss *= -1
+        policy_loss = tf.reshape(policy_loss, [-1, 1])
 
         total_loss = tf.reduce_mean((0.5 * value_loss + policy_loss))
-
-        #tf.print("")
-        #tf.print("advantage")
-        #tf.print(advantages)
-        #tf.print("logits")
-        #tf.print(logits)
-        #tf.print("pi(a|s)")
-        #tf.print(selected_action_probs)
-        #tf.print("")
-        #tf.print(
-        #    tf.compat.v1.nn.softmax_cross_entropy_with_logits_v2(
-        #    labels=actions_onehot, logits=logits)
-        #)
-        #tf.print("value")
-        #tf.print(value_loss)
-        #tf.print("policy")
-        #tf.print(policy_loss)
-        """作業メモ
-            - 学習はできるが明らかにポリシーロスの形状がおかしい
-            - なぜsoftmax_cross_entropy?
-        """
 
         return total_loss
 
@@ -199,9 +180,9 @@ def main():
 
     ACTION_SPACE = 2
 
-    NUM_AGENTS = 4
+    NUM_AGENTS = 1
 
-    N_STEPS = 12000
+    N_STEPS = 30000
 
     MONITOR_DIR = Path(__file__).parent / "history"
     if not MONITOR_DIR.exists():
@@ -222,7 +203,10 @@ def main():
         for agent_id in range(NUM_AGENTS):
 
             agent = A3CAgent(agent_id=f"agent_{agent_id}",
-                             env=gym.envs.make("CartPole-v1"),
+                             env=wrappers.Monitor(
+                                 gym.envs.make("CartPole-v1"),
+                                 MONITOR_DIR / str(agent_id),
+                                 force=True),
                              global_counter=global_counter,
                              action_space=ACTION_SPACE,
                              global_ACNet=global_ACNet,
