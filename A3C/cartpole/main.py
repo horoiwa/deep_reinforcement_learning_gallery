@@ -14,6 +14,8 @@ import matplotlib.pyplot as plt
 
 from models import ActorCriticNet
 
+MONITOR_DIR = Path(__file__).parent / "history"
+
 
 @dataclass
 class Step:
@@ -37,7 +39,7 @@ class GlobalCounter:
 
 class A3CAgent:
 
-    MAX_TRAJECTORY = 3
+    MAX_TRAJECTORY = 5
 
     def __init__(self, agent_id, env,
                  global_counter, action_space,
@@ -167,13 +169,26 @@ class A3CAgent:
 
         policy_loss = tf.reduce_sum(
             log_selected_action_probs * tf.stop_gradient(advantages), axis=1)
+
         policy_loss += 0.01 * entropy
         policy_loss *= -1
         policy_loss = tf.reshape(policy_loss, [-1, 1])
 
+        tf.print(policy_loss)
+        tf.print(value_loss)
+
         total_loss = tf.reduce_mean((0.5 * value_loss + policy_loss))
 
         return total_loss
+
+
+def get_env(agent_id, video=False):
+
+    if video:
+        return wrappers.Monitor(gym.envs.make("CartPole-v1"),
+                                MONITOR_DIR / str(agent_id), force=True),
+    else:
+        return gym.envs.make("CartPole-v1")
 
 
 def main():
@@ -182,9 +197,8 @@ def main():
 
     NUM_AGENTS = 1
 
-    N_STEPS = 30000
+    N_STEPS = 30
 
-    MONITOR_DIR = Path(__file__).parent / "history"
     if not MONITOR_DIR.exists():
         MONITOR_DIR.mkdir()
 
@@ -203,10 +217,7 @@ def main():
         for agent_id in range(NUM_AGENTS):
 
             agent = A3CAgent(agent_id=f"agent_{agent_id}",
-                             env=wrappers.Monitor(
-                                 gym.envs.make("CartPole-v1"),
-                                 MONITOR_DIR / str(agent_id),
-                                 force=True),
+                             env=get_env(video=False, agent_id=agent_id),
                              global_counter=global_counter,
                              action_space=ACTION_SPACE,
                              global_ACNet=global_ACNet,
