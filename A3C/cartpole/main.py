@@ -9,9 +9,12 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 import gym
+from gym import wrappers
 import matplotlib.pyplot as plt
 
 from models import ActorCriticNet
+
+MONITOR_DIR = Path(__file__).parent / "history"
 
 
 @dataclass
@@ -36,7 +39,7 @@ class GlobalCounter:
 
 class A3CAgent:
 
-    MAX_TRAJECTORY = 3
+    MAX_TRAJECTORY = 5
 
     def __init__(self, agent_id, env,
                  global_counter, action_space,
@@ -61,9 +64,9 @@ class A3CAgent:
 
         self.global_steps_fin = global_steps_fin
 
-    def run(self, coord):
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
-        self.sync_with_globalparameters()
+    def play(self, coord):
 
         self.total_reward = 0
 
@@ -74,7 +77,17 @@ class A3CAgent:
 
                 trajectory = self.play_n_steps(N=self.MAX_TRAJECTORY)
 
-                self.update_globalnets(trajectory)
+                with tf.GradientTape() as tape:
+
+                    total_loss = self.compute_loss(trajectory)
+
+                grads = tape.gradient(
+                    total_loss, self.local_ACNet.trainable_variables)
+
+                self.optimizer.apply_gradients(
+                    zip(grads, self.global_ACNet.trainable_variables))
+
+                self.local_ACNet.set_weights(self.global_ACNet.get_weights())
 
                 if self.global_counter.n >= self.global_steps_fin:
                     coord.request_stop()
@@ -94,10 +107,7 @@ class A3CAgent:
 
             next_state, reward, done, info = self.env.step(action)
 
-            if done:
-                step = Step(self.state, action, -10, next_state, done)
-            else:
-                step = Step(self.state, action, reward, next_state, done)
+            step = Step(self.state, action, reward, next_state, done)
 
             trajectory.append(step)
 
@@ -113,8 +123,6 @@ class A3CAgent:
 
                 self.state = self.env.reset()
 
-                self.sync_with_globalnetworks()
-
                 break
 
             else:
@@ -123,54 +131,60 @@ class A3CAgent:
 
         return trajectory
 
-    def update_globalnets(self, trajectory):
+    def compute_loss(self, trajectory):
 
         if trajectory[-1].done:
             R = 0
         else:
-            R = self.value_network.predict(trajectory[-1].next_state)
+            values, _ = self.local_ACNet(
+                tf.convert_to_tensor(np.atleast_2d(trajectory[-1].next_state),
+                                     dtype=tf.float32))
+            R = tf.stop_gradient(values[0][0])
 
         discounted_rewards = []
-        advantages = []
-
         for step in reversed(trajectory):
             R = step.reward + self.gamma * R
-            adv = R - self.value_network.predict(step.state)
             discounted_rewards.append(R)
-            advantages.append(adv)
-
         discounted_rewards.reverse()
-        discounted_rewards = np.array(discounted_rewards)
 
-        advantages.reverse()
-        advantages = np.array(advantages)
+        states = tf.convert_to_tensor(
+            np.vstack([step.state for step in trajectory]), dtype=tf.float32)
 
-        states = np.array([step.state for step in trajectory])
-        actions = np.array([step.action for step in trajectory])
+        values, logits = self.local_ACNet(states)
 
-        policy_grads = self.policy_network.compute_grads(
-            states, actions, advantages)
+        advantages = tf.convert_to_tensor(np.vstack(discounted_rewards), dtype=tf.float32) - values
 
-        value_grads = self.value_network.compute_grads(
-            states, discounted_rewards)
+        value_loss = advantages ** 2
 
-        global_policy_variables = self.global_policy_network.trainable_variables
-        global_value_variables = self.global_value_network.trainable_variables
+        actions_onehot = tf.one_hot([step.action for step in trajectory],
+                                    self.action_space, dtype=tf.float32)
 
-        self.global_policy_network.optimizer.apply_gradients(
-            zip(policy_grads, global_policy_variables))
+        action_probs = tf.nn.softmax(logits)
 
-        self.global_value_network.optimizer.apply_gradients(
-            zip(value_grads, global_value_variables))
+        log_selected_action_probs = actions_onehot * tf.math.log(action_probs + 1e-20)
 
-    def sync_with_globalparameters(self):
+        entropy = tf.reduce_sum(
+            -1 * action_probs * tf.math.log(action_probs + 1e-20), axis=1)
 
-        global_variables = self.global_ACNet.trainable_variables
+        policy_loss = tf.reduce_sum(
+            log_selected_action_probs * tf.stop_gradient(advantages), axis=1)
 
-        local_variables = self.local_ACNet.trainable_variables
+        policy_loss += 0.01 * entropy
+        policy_loss *= -1
+        policy_loss = tf.reshape(policy_loss, [-1, 1])
 
-        for v1, v2 in zip(local_variables, global_variables):
-            v1.assign(v2.numpy())
+        total_loss = tf.reduce_mean((0.5 * value_loss + policy_loss))
+
+        return total_loss
+
+
+def get_env(agent_id, video=False):
+
+    if video:
+        return wrappers.Monitor(gym.envs.make("CartPole-v1"),
+                                MONITOR_DIR / str(agent_id), force=True),
+    else:
+        return gym.envs.make("CartPole-v1")
 
 
 def main():
@@ -179,9 +193,8 @@ def main():
 
     NUM_AGENTS = 4
 
-    N_STEPS = 10000
+    N_STEPS = 50000
 
-    MONITOR_DIR = Path(__file__).parent / "history"
     if not MONITOR_DIR.exists():
         MONITOR_DIR.mkdir()
 
@@ -193,15 +206,17 @@ def main():
 
         global_ACNet = ActorCriticNet(ACTION_SPACE)
 
+        global_ACNet.build(input_shape=(None, 4))
+
         agents = []
 
         for agent_id in range(NUM_AGENTS):
 
             agent = A3CAgent(agent_id=f"agent_{agent_id}",
-                             env=gym.envs.make("CartPole-v1"),
+                             env=get_env(video=False, agent_id=agent_id),
                              global_counter=global_counter,
                              action_space=ACTION_SPACE,
-                             global_ACNet=ActorCriticNet,
+                             global_ACNet=global_ACNet,
                              gamma=0.99,
                              global_history=global_history,
                              global_steps_fin=N_STEPS)
@@ -211,7 +226,7 @@ def main():
     coord = tf.train.Coordinator()
     agent_threads = []
     for agent in agents:
-        target_func = (lambda: agent.run(coord))
+        target_func = (lambda: agent.play(coord))
         thread = threading.Thread(target=target_func)
         thread.start()
         agent_threads.append(thread)
@@ -221,7 +236,7 @@ def main():
     print(global_history)
 
     plt.plot(range(len(global_history)), global_history)
-    plt.plot([0, 350], [195, 195], "--", color="darkred")
+    plt.plot([0, len(global_history)], [195, 195], "--", color="darkred")
     plt.xlabel("episodes")
     plt.ylabel("Total Reward")
     plt.savefig(MONITOR_DIR / "a3c_cartpole-v1.png")
