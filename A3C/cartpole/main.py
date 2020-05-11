@@ -64,7 +64,7 @@ class A3CAgent:
 
         self.global_steps_fin = global_steps_fin
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
     def play(self, coord):
 
@@ -112,10 +112,10 @@ class A3CAgent:
             trajectory.append(step)
 
             if done:
-                #print(f"Global step {self.global_counter.n}")
-                #print(f"Total Reward: {self.total_reward}")
-                #print(f"Agent: {self.agent_id}")
-                #print()
+                print(f"Global step {self.global_counter.n}")
+                print(f"Total Reward: {self.total_reward}")
+                print(f"Agent: {self.agent_id}")
+                print()
 
                 self.global_history.append(self.total_reward)
 
@@ -139,7 +139,7 @@ class A3CAgent:
             values, _ = self.local_ACNet(
                 tf.convert_to_tensor(np.atleast_2d(trajectory[-1].next_state),
                                      dtype=tf.float32))
-            R = values[0][0]
+            R = tf.stop_gradient(values[0][0])
 
         discounted_rewards = []
         for step in reversed(trajectory):
@@ -152,8 +152,7 @@ class A3CAgent:
 
         values, logits = self.local_ACNet(states)
 
-        advantages = tf.convert_to_tensor(
-            np.array(discounted_rewards)[:, None], dtype=tf.float32) - values
+        advantages = tf.convert_to_tensor(np.vstack(discounted_rewards), dtype=tf.float32) - values
 
         value_loss = advantages ** 2
 
@@ -164,8 +163,8 @@ class A3CAgent:
 
         log_selected_action_probs = actions_onehot * tf.math.log(action_probs + 1e-20)
 
-        entropy = -tf.reduce_sum(
-            action_probs * tf.math.log(action_probs + 1e-20), axis=1)
+        entropy = tf.reduce_sum(
+            -1 * action_probs * tf.math.log(action_probs + 1e-20), axis=1)
 
         policy_loss = tf.reduce_sum(
             log_selected_action_probs * tf.stop_gradient(advantages), axis=1)
@@ -173,9 +172,6 @@ class A3CAgent:
         policy_loss += 0.01 * entropy
         policy_loss *= -1
         policy_loss = tf.reshape(policy_loss, [-1, 1])
-
-        tf.print(policy_loss)
-        tf.print(value_loss)
 
         total_loss = tf.reduce_mean((0.5 * value_loss + policy_loss))
 
@@ -195,9 +191,9 @@ def main():
 
     ACTION_SPACE = 2
 
-    NUM_AGENTS = 1
+    NUM_AGENTS = 4
 
-    N_STEPS = 30
+    N_STEPS = 50000
 
     if not MONITOR_DIR.exists():
         MONITOR_DIR.mkdir()
@@ -240,7 +236,7 @@ def main():
     print(global_history)
 
     plt.plot(range(len(global_history)), global_history)
-    plt.plot([0, 350], [195, 195], "--", color="darkred")
+    plt.plot([0, len(global_history)], [195, 195], "--", color="darkred")
     plt.xlabel("episodes")
     plt.ylabel("Total Reward")
     plt.savefig(MONITOR_DIR / "a3c_cartpole-v1.png")

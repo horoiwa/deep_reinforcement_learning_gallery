@@ -15,17 +15,13 @@ class ActorCriticNet(tf.keras.Model):
 
         self.action_space = action_space
 
-        self.dense1 = kl.Dense(100, activation="relu", name="dense1",
-                               kernel_initializer="he_normal")
+        self.dense1 = kl.Dense(100, activation="relu")
 
-        self.dense2 = kl.Dense(100, activation="relu", name="dense2",
-                               kernel_initializer="he_normal")
+        self.dense2 = kl.Dense(100, activation="relu")
 
-        self.values = kl.Dense(1, name="value",
-                               kernel_initializer="he_normal")
+        self.values = kl.Dense(1, name="value")
 
-        self.policy_logits = kl.Dense(action_space, name="policy_logits",
-                                      kernel_initializer="he_normal")
+        self.policy_logits = kl.Dense(action_space)
 
     @tf.function
     def call(self, x):
