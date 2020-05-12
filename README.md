@@ -18,7 +18,6 @@ Deep reinforcement learning sample codes with tensorflow2
 
 [Implementing the Deep Q-Network](https://arxiv.org/pdf/1711.07478.pdf)
 
-[参考]
 
 [How to match DeepMind’s Deep Q-Learning score in Breakout](https://towardsdatascience.com/tutorial-double-deep-q-learning-with-dueling-network-architectures-4c1b3fb7f756)
 
@@ -26,6 +25,7 @@ Deep reinforcement learning sample codes with tensorflow2
 [Why could my ddqn get significantly worse after beating the game repeatedly](https://datascience.stackexchange.com/questions/56053/why-could-my-ddqn-get-significantly-worse-after-beating-the-game-repeatedly)
 
 [OpenAI baselines DQN](https://openai.com/blog/openai-baselines-dqn/)
+
 <br>
 
 ## DDQN (Double Deep Q Network)
@@ -38,7 +38,8 @@ Deep reinforcement learning sample codes with tensorflow2
 
 [Deep Reinforcement Learning: Playing CartPole through Asynchronous Advantage Actor Critic (A3C) with tf.keras and eager execution](https://blog.tensorflow.org/2018/07/deep-reinforcement-learning-keras-eager-execution.html)
 
-[Deep Reinforcement Learning With TensorFlow 2.1](http://inoryy.com/post/tensorflow2-deep-reinforcement-learning/#asynchronous-advantage-actor-critic)
+
+[OpenAI baselines](https://openai.com/blog/baselines-acktr-a2c/)
 
 ### PPO
 
