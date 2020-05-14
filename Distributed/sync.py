@@ -27,6 +27,7 @@ def preprocess(frame):
     frame = frame.crop((0, 20, 160, 210))
     frame = frame.resize((84, 84))
     frame = np.array(frame, dtype=np.float32)
+    frame = frame / 255
 
     return frame
 
@@ -43,6 +44,66 @@ class Step:
     info: dict
 
 
+def workerfunc(conn, env_func):
+
+    NUM_FRAMES = 4
+
+    FIRE_ACTION = 1
+
+    env = env_func()
+
+    frames = collections.deque(maxlen=NUM_FRAMES)
+
+    lives = 5
+
+    while True:
+
+        cmd, action = conn.recv()
+
+        if cmd == 'step':
+            frame, reward, done, info = env.step(action)
+            frame = preprocess(frame)
+            frames.append(frame)
+
+            if done:
+                frame = env.reset()
+                frame = preprocess(frame)
+                for _ in range(NUM_FRAMES):
+                    frames.append(frame)
+
+                for _ in range(random.randint(0, 10)):
+                    frame, _, _, _ = env.step(FIRE_ACTION)
+                    frame = preprocess(frame)
+                    frames.append(frame)
+
+            elif info["ale.lives"] != lives:
+                lives = info["ale.lives"]
+                done = True
+
+            next_state = np.stack(frames, axis=2)
+            conn.send(Step(reward, next_state, done, info))
+
+        elif cmd == 'reset':
+            frame = env.reset()
+
+            frame = preprocess(frame)
+            for _ in range(NUM_FRAMES):
+                frames.append(frame)
+
+            state = np.stack(frames, axis=2)
+            conn.send(state)
+
+        elif cmd == 'close':
+            conn.close()
+            break
+
+        elif cmd == "connect_test":
+            conn.send(f"Connection OK: worker{env.seed}")
+
+        else:
+            raise NotImplementedError()
+
+
 class SubProcVecEnv:
 
     def __init__(self, env_funcs):
@@ -57,7 +118,7 @@ class SubProcVecEnv:
 
         self.worker_conns = [pipe[1] for pipe in pipes]
 
-        self.workers = [Process(target=self.worker, args=(worker_conn, env_func))
+        self.workers = [Process(target=workerfunc, args=(worker_conn, env_func))
                         for (worker_conn, env_func)
                         in zip(self.worker_conns, env_funcs)]
 
@@ -84,6 +145,7 @@ class SubProcVecEnv:
 
         infos = [step.info for step in steps]
 
+        print(rewards)
 
         return rewards, next_states, dones, infos
 
@@ -107,66 +169,11 @@ class SubProcVecEnv:
 
         self.closed = True
 
-    @staticmethod
-    def worker(conn, env_func):
-
-        NUM_FRAMES = 4
-
-        env = env_func()
-
-        frames = collections.deque(maxlen=NUM_FRAMES)
-
-        lives = 5
-
-        while True:
-            cmd, action = conn.recv()
-            if cmd == 'step':
-                frame, reward, done, info = env.step(action)
-                frame = preprocess(frame)
-                frames.append(frame)
-
-                if done:
-                    frame = env.reset()
-                    frame = preprocess(frame)
-                    for _ in range(NUM_FRAMES):
-                        frames.append(frame)
-
-                    for _ in range(random.randint(0, 10)):
-                        frame, _, _, _ = env.step(1)
-                        frame = preprocess(frame)
-                        frames.append(frame)
-
-                elif info["ale.lives"] != lives:
-                    lives = info["ale.lives"]
-                    done = True
-
-                next_state = np.stack(frames, axis=2)
-                conn.send(Step(reward, next_state, done, info))
-
-            elif cmd == 'reset':
-                frame = env.reset()
-
-                frame = preprocess(frame)
-                for _ in range(NUM_FRAMES):
-                    frames.append(frame)
-
-                state = np.stack(frames, axis=2)
-                conn.send(state)
-
-            elif cmd == 'close':
-                conn.close()
-                break
-
-            elif cmd == "connect_test":
-                conn.send(f"Connection OK: worker{env.seed}")
-
-            else:
-                raise NotImplementedError()
 
 
 def main():
 
-    N_PROC = 3
+    N_PROC = 4
 
     TRAJECTORY_SIZE = 5
 
