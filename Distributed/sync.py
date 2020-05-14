@@ -4,16 +4,43 @@ Nプロセス×５ステップ分のミニバッチができたらモデルの�
 """
 
 import functools
+import collections
+from dataclasses import dataclass
+import random
 
 import numpy as np
-import gym
+from PIL import Image
 from multiprocessing import Pipe, Process
+import gym
 
 
 def envfunc_proto(env_id):
-    env = gym.make("CartPole-v1")
+    env = gym.make("BreakoutDeterministic-v4")
     env.seed = env_id
     return env
+
+
+def preprocess(frame):
+
+    frame = Image.fromarray(frame)
+    frame = frame.convert("L")
+    frame = frame.crop((0, 20, 160, 210))
+    frame = frame.resize((84, 84))
+    frame = np.array(frame, dtype=np.float32)
+
+    return frame
+
+
+@dataclass
+class Step:
+
+    reward: float
+
+    next_state: np.ndarray
+
+    done: bool
+
+    info: dict
 
 
 class SubProcVecEnv:
@@ -43,18 +70,22 @@ class SubProcVecEnv:
             print(conn.recv())
 
     def step(self, actions):
+
         for conn, action in zip(self.conns, actions):
             conn.send(('step', action))
 
-        steps = [remote.recv() for remote in self.remotes]
-
-        next_states = [step.next_state for step in steps]
+        steps = [conn.recv() for conn in self.conns]
 
         rewards = [step.reward for step in steps]
+
+        next_states = np.stack([step.next_state for step in steps])
 
         dones = [step.done for step in steps]
 
         infos = [step.info for step in steps]
+
+
+        return rewards, next_states, dones, infos
 
     def reset(self):
         for conn in self.conns:
@@ -79,19 +110,48 @@ class SubProcVecEnv:
     @staticmethod
     def worker(conn, env_func):
 
+        NUM_FRAMES = 4
+
         env = env_func()
 
+        frames = collections.deque(maxlen=NUM_FRAMES)
+
+        lives = 5
+
         while True:
-            cmd, data = conn.recv()
+            cmd, action = conn.recv()
             if cmd == 'step':
-                ob, reward, done, info = env.step(data)
+                frame, reward, done, info = env.step(action)
+                frame = preprocess(frame)
+                frames.append(frame)
+
                 if done:
-                    ob = env.reset()
-                conn.send((ob, reward, done, info))
+                    frame = env.reset()
+                    frame = preprocess(frame)
+                    for _ in range(NUM_FRAMES):
+                        frames.append(frame)
+
+                    for _ in range(random.randint(0, 10)):
+                        frame, _, _, _ = env.step(1)
+                        frame = preprocess(frame)
+                        frames.append(frame)
+
+                elif info["ale.lives"] != lives:
+                    lives = info["ale.lives"]
+                    done = True
+
+                next_state = np.stack(frames, axis=2)
+                conn.send(Step(reward, next_state, done, info))
 
             elif cmd == 'reset':
-                obs = env.reset()
-                conn.send(obs)
+                frame = env.reset()
+
+                frame = preprocess(frame)
+                for _ in range(NUM_FRAMES):
+                    frames.append(frame)
+
+                state = np.stack(frames, axis=2)
+                conn.send(state)
 
             elif cmd == 'close':
                 conn.close()
@@ -104,18 +164,40 @@ class SubProcVecEnv:
                 raise NotImplementedError()
 
 
-class MasterAgent:
-
-    def __init__(self):
-        pass
-
-
 def main():
 
-    N_PROC = 4
+    N_PROC = 3
+
+    TRAJECTORY_SIZE = 5
 
     vecenv = SubProcVecEnv(
         [functools.partial(envfunc_proto, env_id=i) for i in range(N_PROC)])
+
+    self_state = vecenv.reset()
+    print(self_state.shape)
+
+    mb_states, mb_actions, mb_rewards, mb_dones = [], [], [], []
+
+    for i in range(TRAJECTORY_SIZE):
+        state = self_state
+
+        #actions = model.sample_action(state)
+        actions = [1, 0, 1]
+        rewards, next_states, dones, infos = vecenv.step(actions)
+
+        mb_states.append(state)
+        mb_actions.append(actions)
+        mb_rewards.append(rewards)
+        mb_dones.append(dones)
+
+        self_state = next_states
+
+    mb_states = np.array(mb_states).swapaxes(0, 1)
+    mb_actions = np.array(mb_actions).T
+    mb_rewards = np.array(mb_rewards).T
+    mb_dones = np.array(mb_dones).T
+
+    print(mb_states.shape)
 
     vecenv.close()
 
