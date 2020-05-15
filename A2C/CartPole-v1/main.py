@@ -1,160 +1,162 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+import functools
+import random
 
 import gym
+import numpy as np
 from multiprocessing import Process, Pipe
 
-
-def worker(remote, parent_remote, env_fn_wrapper):
-    parent_remote.close()
-
-    #: ここで初めて環境を作成する
-    env = env_fn_wrapper.x()
-    while True:
-        cmd, data = remote.recv()
-        if cmd == 'step':
-            ob, reward, done, info = env.step(data)
-            if done:
-                ob = env.reset()
-            remote.send((ob, reward, done, info))
-        elif cmd == 'reset':
-            ob = env.reset()
-            remote.send(ob)
-        elif cmd == 'reset_task':
-            ob = env.reset_task()
-            remote.send(ob)
-        elif cmd == 'close':
-            remote.close()
-            break
-        elif cmd == 'get_spaces':
-            remote.send((env.action_space, env.observation_space))
-        elif cmd == 'get_id':
-            remote.send(env.spec.id)
-        else:
-            raise NotImplementedError
+from env import SubProcVecEnv
+from models import ActorCriticNet
 
 
-class CloudpickleWrapper():
-    """
-    Uses cloudpickle to serialize contents
-    (otherwise multiprocessing tries to use pickle)
-    """
-
-    def __init__(self, x):
-        self.x = x
-
-    def __getstate__(self):
-        import cloudpickle
-        return cloudpickle.dumps(self.x)
-
-    def __setstate__(self, ob):
-        import pickle
-        self.x = pickle.loads(ob)
+def envfunc_proto(env_id):
+    env = gym.make("CartPole-v1")
+    env.seed = env_id
+    return env
 
 
+class A2CAgent:
 
-class SubprocVecEnv():
+    TRAJECTORY_SIZE = 5
 
-    def __init__(self, env_fns):
+    ACTION_SPACE = 2
+
+    TEST_FREQ = 100
+
+    def __init__(self, n_procs, gamma=0.99, weights=None):
+
+        self.n_procs = n_procs
+
+        self.ACNet = ActorCriticNet(action_space=self.ACTION_SPACE)
+
+        if weights:
+            pass
+
+        self.gamma = gamma
+
+        self.vecenv = SubProcVecEnv(
+            [functools.partial(envfunc_proto, env_id=i)
+             for i in range(self.n_procs)])
+
+        self.states = None
+
+        self.batch_size = self.n_procs * self.TRAJECTORY_SIZE
+
+    def run(self, total_steps):
+
+        self.states = self.vecenv.reset()
+
+        test_scores = []
+
+        steps = 0
+
+        for n in range(total_steps // self.TRAJECTORY_SIZE):
+
+            mb_states, mb_actions, mb_discounted_rewards = self.run_Nsteps()
+
+            states = mb_states.reshape(self.batch_size, 4)
+
+            selected_actions = mb_actions.reshape(self.batch_size, -1)
+
+            discounted_rewards = mb_discounted_rewards.reshape(self.batch_size, -1)
+
+            self.ACNet.update(states, selected_actions, discounted_rewards)
+
+            steps += self.n_procs * self.TRAJECTORY_SIZE
+
+            print("Step:", steps)
+
+            if steps % self.TEST_FREQ == 0:
+
+                test_score = self.play()
+
+                test_scores.append(test_score)
+
+                print("Test Play:", test_score)
+
+
+    def run_Nsteps(self):
+
+        mb_states, mb_values, mb_actions, mb_rewards, mb_dones = [], [], [], [], []
+
+        for _ in range(self.TRAJECTORY_SIZE):
+
+            states = np.array(self.states)
+
+            actions = self.ACNet.sample_action(states)
+
+            rewards, next_states, dones, infos = self.vecenv.step(actions)
+
+            mb_states.append(states)
+            mb_actions.append(actions)
+            mb_rewards.append(rewards)
+            mb_dones.append(dones)
+
+            self.states = next_states
+
+        mb_states = np.array(mb_states).swapaxes(0, 1)
+        mb_actions = np.array(mb_actions).T
+        mb_rewards = np.array(mb_rewards).T
+        mb_values = np.array(mb_values).T
+        mb_dones = np.array(mb_dones).T
+
+
+        """Calculate Discounted Rewards
         """
-        envs: list of gym environments to run in subprocesses
-        """
-        self.closed = False
+        last_values, _ = self.ACNet.predict(self.states)
 
-        nenvs = len(env_fns)
+        mb_discounted_rewards = np.zeros(mb_rewards.shape)
+        for n, (rewards, dones, last_value) in enumerate(zip(mb_rewards, mb_dones, last_values.flatten())):
+            rewards = rewards.tolist()
+            dones = dones.tolist()
 
-        """Pipe() は　（pipe1, pipe2）
-            糸電話の端と端
+            discounted_rewards = self.discount_with_dones(rewards, dones, last_value)
+            mb_discounted_rewards[n] = discounted_rewards
 
-            pipes = [Pipe() for _ in range(nenvs)]
+        return (mb_states, mb_actions, mb_discounted_rewards)
 
-            #: ホスト側パイプ
-            self.remotes = [pipe[0] for pipe in pipes]
+    def discount_with_dones(self, rewards, dones, last_value):
 
-            #: リモート側パイプ
-            self.work_remotes = [pipe[1] for pipe in pipes]
-        """
-        self.remotes, self.work_remotes = zip(*[Pipe() for _ in range(nenvs)])
+        R = 0 if dones[-1] else last_value
 
-        self.ps = [Process(target=worker, args=(work_remote, remote, CloudpickleWrapper(env_fn)))
-                   for (work_remote, remote, env_fn) in zip(self.work_remotes, self.remotes, env_fns)]
+        discounted_rewards = []
+        for r, done in zip(reversed(rewards), reversed(dones)):
+            R = r + (not done) * self.gamma * R
+            discounted_rewards.append(R)
 
-        for p in self.ps:
-            p.daemon = True
-            p.start()
+        discounted_rewards.reverse()
 
-        #:こちらのメモリからは必要なくなったので閉じる
-        for remote in self.work_remotes:
-            remote.close()
+        return discounted_rewards
 
-        #ただの確認だなこれは
-        self.remotes[0].send(('get_spaces', None))
-        self.action_space, self.observation_space = self.remotes[0].recv()
+    def play(self):
 
-        self.remotes[0].send(('get_id', None))
-        self.env_id = self.remotes[0].recv()
-
-    def step(self, actions):
-        for remote, action in zip(self.remotes, actions):
-            remote.send(('step', action))
-        results = [remote.recv() for remote in self.remotes]
-        obs, rews, dones, infos = zip(*results)
-        return np.stack(obs), np.stack(rews), np.stack(dones), infos
-
-    def reset(self):
-        for remote in self.remotes:
-            remote.send(('reset', None))
-        return np.stack([remote.recv() for remote in self.remotes])
-
-    def reset_task(self):
-        for remote in self.remotes:
-            remote.send(('reset_task', None))
-        return np.stack([remote.recv() for remote in self.remotes])
-
-    def close(self):
-        if self.closed:
-            return
-
-        for remote in self.remotes:
-            remote.send(('close', None))
-        for p in self.ps:
-            p.join()
-        self.closed = True
-
-    @property
-    def num_envs(self):
-        return len(self.remotes)
-
-
-def make_env(env_id):
-    def wrapper():
         env = gym.make("CartPole-v1")
-        env.seed = env_id
-        return env
-    return wrapper
+
+        obs = env.reset()
+
+        done = False
+
+        total_rewards = 0
+
+        while not done:
+
+            action = self.ACNet.sample_action(obs)
+
+            obs, reward, done, info = env.step(action[0])
+
+            total_rewards += reward
+
+        return total_rewards
+
+
 
 
 def main():
-    create_env = (lambda: gym.make("CartPole-v1"))
-    env = SubprocVecEnv([make_env(i) for i in range(4)])
-
-
-
-def test():
-    pass
-
-
-def test1():
-    a, b = zip(*[Pipe() for _ in range(3)])
-    print(a, b)
-
-    arr = [(i, i*10) for i in range(3)]
-    c, d = zip(*arr)
-    print(*arr)
-    print(c) # [0, 1, 2]
-    print(d) # [0, 10, 20]
+    agent = A2CAgent(n_procs=3)
+    agent.run(total_steps=100)
 
 
 if __name__ == "__main__":
-    #main()
-    test()
+    main()

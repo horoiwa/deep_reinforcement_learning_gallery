@@ -145,8 +145,6 @@ class SubProcVecEnv:
 
         infos = [step.info for step in steps]
 
-        print(rewards)
-
         return rewards, next_states, dones, infos
 
     def reset(self):
@@ -170,10 +168,9 @@ class SubProcVecEnv:
         self.closed = True
 
 
-
 def main():
 
-    N_PROC = 4
+    N_PROC = 10
 
     TRAJECTORY_SIZE = 5
 
@@ -189,7 +186,7 @@ def main():
         state = self_state
 
         #actions = model.sample_action(state)
-        actions = [1, 0, 1]
+        actions = [random.choice([0, 1]) for _ in range(N_PROC)]
         rewards, next_states, dones, infos = vecenv.step(actions)
 
         mb_states.append(state)
