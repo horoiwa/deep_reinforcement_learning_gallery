@@ -23,7 +23,7 @@ class A2CAgent:
 
     ACTION_SPACE = 2
 
-    TEST_FREQ = 100
+    TEST_FREQ = 1000
 
     def __init__(self, n_procs, gamma=0.99, weights=None):
 
@@ -52,7 +52,7 @@ class A2CAgent:
 
         steps = 0
 
-        for n in range(total_steps // self.TRAJECTORY_SIZE):
+        for n in range(total_steps // (self.n_procs * self.TRAJECTORY_SIZE)):
 
             mb_states, mb_actions, mb_discounted_rewards = self.run_Nsteps()
 
@@ -76,6 +76,7 @@ class A2CAgent:
 
                 print("Test Play:", test_score)
 
+        return test_scores
 
     def run_Nsteps(self):
 
@@ -152,10 +153,10 @@ class A2CAgent:
 
 
 
-
 def main():
-    agent = A2CAgent(n_procs=3)
-    agent.run(total_steps=100)
+    agent = A2CAgent(n_procs=10)
+    test_history = agent.run(total_steps=40000)
+    print(test_history)
 
 
 if __name__ == "__main__":
