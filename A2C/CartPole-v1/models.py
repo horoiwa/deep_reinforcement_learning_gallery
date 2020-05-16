@@ -14,7 +14,7 @@ class ActorCriticNet(tf.keras.Model):
 
     ENTROPY_COEF = 0.01
 
-    def __init__(self, action_space, lr=0.0005):
+    def __init__(self, action_space, lr=0.0002):
 
         super(ActorCriticNet, self).__init__()
 

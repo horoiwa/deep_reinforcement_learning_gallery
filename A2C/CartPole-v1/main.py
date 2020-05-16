@@ -2,10 +2,13 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import functools
 import random
+from pathlib import Path
 
 import gym
+from gym import wrappers
 import numpy as np
 from multiprocessing import Process, Pipe
+import matplotlib.pyplot as plt
 
 from env import SubProcVecEnv
 from models import ActorCriticNet
@@ -22,8 +25,6 @@ class A2CAgent:
     TRAJECTORY_SIZE = 5
 
     ACTION_SPACE = 2
-
-    TEST_FREQ = 1000
 
     def __init__(self, n_procs, gamma=0.99, weights=None):
 
@@ -44,7 +45,9 @@ class A2CAgent:
 
         self.batch_size = self.n_procs * self.TRAJECTORY_SIZE
 
-    def run(self, total_steps):
+        self.hiscore = 0
+
+    def run(self, total_steps, test_freq=10000):
 
         self.states = self.vecenv.reset()
 
@@ -52,7 +55,7 @@ class A2CAgent:
 
         steps = 0
 
-        for n in range(total_steps // (self.n_procs * self.TRAJECTORY_SIZE)):
+        for _ in range(total_steps // (self.n_procs * self.TRAJECTORY_SIZE)):
 
             mb_states, mb_actions, mb_discounted_rewards = self.run_Nsteps()
 
@@ -64,17 +67,24 @@ class A2CAgent:
 
             self.ACNet.update(states, selected_actions, discounted_rewards)
 
+            if steps % test_freq == 0:
+
+                scores = self.play(5)
+
+                average_score = sum(scores) / len(scores)
+
+                test_scores.append(average_score)
+
+                print("Test Play:", average_score)
+
+                if average_score > self.hiscore:
+                    self.hiscore = average_score
+                    self.save_model()
+                    print("Hi Score Update:", self.hiscore)
+
             steps += self.n_procs * self.TRAJECTORY_SIZE
 
             print("Step:", steps)
-
-            if steps % self.TEST_FREQ == 0:
-
-                test_score = self.play()
-
-                test_scores.append(test_score)
-
-                print("Test Play:", test_score)
 
         return test_scores
 
@@ -103,7 +113,6 @@ class A2CAgent:
         mb_values = np.array(mb_values).T
         mb_dones = np.array(mb_dones).T
 
-
         """Calculate Discounted Rewards
         """
         last_values, _ = self.ACNet.predict(self.states)
@@ -131,33 +140,80 @@ class A2CAgent:
 
         return discounted_rewards
 
-    def play(self):
+    def save_model(self):
 
-        env = gym.make("CartPole-v1")
+        self.ACNet.save_weights("checkpoints/best")
 
-        obs = env.reset()
+    def load_model(self, weights_path):
 
-        done = False
+        self.ACNet.load_weights(weights_path)
 
-        total_rewards = 0
+    def play(self, n=1, monitordir=None):
 
-        while not done:
+        if monitordir:
+            env = wrappers.Monitor(gym.make("CartPole-v1"),
+                                   monitordir, force=True,
+                                   video_callable=(lambda ep: True))
+        else:
+            env = gym.make("CartPole-v1")
 
-            action = self.ACNet.sample_action(obs)
+        total_rewards = []
 
-            obs, reward, done, info = env.step(action[0])
+        for _ in range(n):
+            obs = env.reset()
 
-            total_rewards += reward
+            done = False
+
+            total_reward = 0
+
+            while not done:
+
+                action = self.ACNet.sample_action(obs)
+
+                obs, reward, done, info = env.step(action[0])
+
+                total_reward += reward
+
+            total_rewards.append(total_reward)
 
         return total_rewards
 
 
-
 def main():
+
+    MONITOR_DIR = Path(__file__).parent / "log"
+
+    total_steps = 200000
+
+    test_freq = 2000
+
     agent = A2CAgent(n_procs=10)
-    test_history = agent.run(total_steps=40000)
-    print(test_history)
+
+    log_testplay = agent.run(total_steps=total_steps, test_freq=test_freq)
+
+    agent.load_model("checkpoints/best")
+    agent.play(5, monitordir=MONITOR_DIR)
+
+    steps = np.arange(1, total_steps+1, test_freq)
+    #steps = steps / 1000
+
+    plt.plot(steps, log_testplay)
+    plt.xlabel("steps")
+    plt.ylabel("Total rewards")
+    plt.savefig(MONITOR_DIR / "testplay.png")
+
+
+def play():
+
+    MONITOR_DIR = Path(__file__).parent / "log"
+
+    agent = A2CAgent(n_procs=1)
+
+    agent.load_model("checkpoints/best")
+
+    agent.play(10, monitordir=MONITOR_DIR)
 
 
 if __name__ == "__main__":
     main()
+    #play()
