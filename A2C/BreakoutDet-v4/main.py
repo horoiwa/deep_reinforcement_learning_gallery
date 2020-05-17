@@ -196,7 +196,7 @@ def main():
 
     test_freq = 10000
 
-    agent = A2CAgent(n_procs=10)
+    agent = A2CAgent(n_procs=8)
 
     log_testplay = agent.run(total_steps=total_steps, test_freq=test_freq)
 
