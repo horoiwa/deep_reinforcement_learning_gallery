@@ -3,6 +3,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import functools
 import random
 from pathlib import Path
+import collections
 
 import gym
 from gym import wrappers
@@ -10,12 +11,12 @@ import numpy as np
 from multiprocessing import Process, Pipe
 import matplotlib.pyplot as plt
 
-from env import SubProcVecEnv
+from env import SubProcVecEnv, preprocess
 from models import ActorCriticNet
 
 
 def envfunc_proto(env_id):
-    env = gym.make("CartPole-v1")
+    env = gym.make("BreakoutDeterministic-v4")
     env.seed = env_id
     return env
 
@@ -24,7 +25,7 @@ class A2CAgent:
 
     TRAJECTORY_SIZE = 5
 
-    ACTION_SPACE = 2
+    ACTION_SPACE = 4
 
     def __init__(self, n_procs, gamma=0.99, weights=None):
 
@@ -59,7 +60,7 @@ class A2CAgent:
 
             mb_states, mb_actions, mb_discounted_rewards = self.run_Nsteps()
 
-            states = mb_states.reshape(self.batch_size, 4)
+            states = mb_states.reshape((self.batch_size, 84, 84, 4))
 
             selected_actions = mb_actions.reshape(self.batch_size, -1)
 
@@ -90,15 +91,16 @@ class A2CAgent:
 
     def run_Nsteps(self):
 
-        mb_states, mb_values, mb_actions, mb_rewards, mb_dones = [], [], [], [], []
+        mb_states, mb_actions, mb_rewards, mb_dones = [], [], [], []
 
         for _ in range(self.TRAJECTORY_SIZE):
 
             states = np.array(self.states)
 
-            actions = self.ACNet.sample_action(states)
+            #actions = self.ACNet.sample_action(states)
+            actions = [random.choice([0, 1, 2, 3]) for _ in range(self.n_procs)]
 
-            rewards, next_states, dones, infos = self.vecenv.step(actions)
+            rewards, next_states, dones, _ = self.vecenv.step(actions)
 
             mb_states.append(states)
             mb_actions.append(actions)
@@ -110,7 +112,6 @@ class A2CAgent:
         mb_states = np.array(mb_states).swapaxes(0, 1)
         mb_actions = np.array(mb_actions).T
         mb_rewards = np.array(mb_rewards).T
-        mb_values = np.array(mb_values).T
         mb_dones = np.array(mb_dones).T
 
         """Calculate Discounted Rewards
@@ -151,26 +152,35 @@ class A2CAgent:
     def play(self, n=1, monitordir=None):
 
         if monitordir:
-            env = wrappers.Monitor(gym.make("CartPole-v1"),
+            env = wrappers.Monitor(gym.make("BreakoutDeterministic-v4"),
                                    monitordir, force=True,
                                    video_callable=(lambda ep: True))
         else:
-            env = gym.make("CartPole-v1")
+            env = gym.make("BreakoutDeterministic-v4")
 
         total_rewards = []
 
         for _ in range(n):
-            obs = env.reset()
+
+            frame = preprocess(env.reset())
+
+            frames = collections.deque(maxlen=4)
+
+            for _ in range(4):
+                frames.append(frame)
 
             done = False
 
             total_reward = 0
 
             while not done:
+                state = np.stack(frames, axis=2)[np.newaxis, ...]
 
-                action = self.ACNet.sample_action(obs)
+                action = self.ACNet.sample_action(state)
 
-                obs, reward, done, info = env.step(action[0])
+                frame, reward, done, _ = env.step(action[0])
+
+                frames.append(preprocess(frame))
 
                 total_reward += reward
 
@@ -183,24 +193,26 @@ def main():
 
     MONITOR_DIR = Path(__file__).parent / "log"
 
-    total_steps = 200000
+    total_steps = 30
 
     test_freq = 2000
 
-    agent = A2CAgent(n_procs=10)
+    agent = A2CAgent(n_procs=3)
 
     log_testplay = agent.run(total_steps=total_steps, test_freq=test_freq)
 
-    agent.load_model("checkpoints/best")
-    agent.play(5, monitordir=MONITOR_DIR)
+    print(log_testplay)
 
-    steps = np.arange(1, total_steps+1, test_freq)
+    #agent.load_model("checkpoints/best")
+    #agent.play(5, monitordir=MONITOR_DIR)
+
+    #steps = np.arange(1, total_steps+1, test_freq)
     #steps = steps / 1000
 
-    plt.plot(steps, log_testplay)
-    plt.xlabel("steps")
-    plt.ylabel("Total rewards")
-    plt.savefig(MONITOR_DIR / "testplay.png")
+    #plt.plot(steps, log_testplay)
+    #plt.xlabel("steps")
+    #plt.ylabel("Total rewards")
+    #plt.savefig(MONITOR_DIR / "testplay.png")
 
 
 def play():

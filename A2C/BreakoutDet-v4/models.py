@@ -14,30 +14,51 @@ class ActorCriticNet(tf.keras.Model):
 
     ENTROPY_COEF = 0.01
 
+    MAX_GRAD_NORM = 0.5
+
     def __init__(self, action_space, lr=0.0002):
 
         super(ActorCriticNet, self).__init__()
 
         self.action_space = action_space
 
-        self.dense1 = kl.Dense(128, activation="relu")
+        self.conv1 = kl.Conv2D(32, 8, strides=4, activation="relu",
+                               kernel_initializer="he_normal")
 
-        self.dense2 = kl.Dense(128, activation="relu")
+        self.conv2 = kl.Conv2D(64, 4, strides=2, activation="relu",
+                               kernel_initializer="he_normal")
 
-        self.values = kl.Dense(1, name="value")
+        self.conv3 = kl.Conv2D(64, 3, strides=1, activation="relu",
+                               kernel_initializer="he_normal")
 
-        self.policy_logits = kl.Dense(action_space)
+        self.flat1 = kl.Flatten()
 
-        self.optimizer = tf.optimizers.Adam(lr=lr)
+        self.dense1 = kl.Dense(512, activation="relu",
+                               kernel_initializer="he_normal")
+
+        self.logits = kl.Dense(self.action_space,
+                               kernel_initializer="he_normal")
+
+        self.values = kl.Dense(1, kernel_initializer="he_normal")
+
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00005)
 
     @tf.function
     def call(self, x):
 
-        x1 = self.dense1(x)
-        logits = self.policy_logits(x1)
+        x = self.conv1(x)
 
-        x2 = self.dense2(x)
-        values = self.values(x2)
+        x = self.conv2(x)
+
+        x = self.conv3(x)
+
+        x = self.flat1(x)
+
+        x = self.dense1(x)
+
+        logits = self.logits(x)
+
+        values = self.values(x)
 
         return values, logits
 
@@ -93,21 +114,21 @@ class ActorCriticNet(tf.keras.Model):
             total_loss = tf.reduce_mean(policy_loss + self.VALUE_COEF * value_loss)
 
         grads = tape.gradient(total_loss, self.trainable_variables)
-
+        grads, grad_norm = tf.clip_by_global_norm(grads, self.MAX_GRAD_NORM)
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
 
 
 
 if __name__ == "__main__":
-    states = np.array([[-0.10430691, -1.55866031, 0.19466207, 2.51363456],
-                       [-0.10430691, -1.55866031, 0.19466207, 2.51363456],
-                       [-0.10430691, -1.55866031, 0.19466207, 2.51363456]])
+    state = np.ones((84, 84, 4))
+    states = np.array([state, state, state])
+    print(states.shape)
 
+    state.astype(np.float32)
     states.astype(np.float32)
 
-    acnet = ActorCriticNet(2)
-
+    acnet = ActorCriticNet(action_space=4)
     values, logits = acnet(states)
 
     print(values)

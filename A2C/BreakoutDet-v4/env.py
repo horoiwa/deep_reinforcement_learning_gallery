@@ -1,7 +1,9 @@
 import collections
 from dataclasses import dataclass
+import random
 
 import numpy as np
+from PIL import Image
 from multiprocessing import Pipe, Process
 
 
@@ -17,25 +19,66 @@ class Step:
     info: dict
 
 
+def preprocess(frame):
+
+    frame = Image.fromarray(frame)
+    frame = frame.convert("L")
+    frame = frame.crop((0, 20, 160, 210))
+    frame = frame.resize((84, 84))
+    frame = np.array(frame, dtype=np.float32)
+    frame = frame / 255
+
+    return frame
+
+
 def workerfunc(conn, env_func):
 
+    NUM_FRAMES = 4
+
+    FIRE_ACTION = 1
+
     env = env_func()
+
+    frames = collections.deque(maxlen=NUM_FRAMES)
+
+    lives = 5
 
     while True:
 
         cmd, action = conn.recv()
 
         if cmd == 'step':
-            next_state, reward, done, info = env.step(action)
+            frame, reward, done, info = env.step(action)
+            frame = preprocess(frame)
+            frames.append(frame)
 
             if done:
-                next_state = env.reset()
+                frame = env.reset()
+                frame = preprocess(frame)
+                for _ in range(NUM_FRAMES):
+                    frames.append(frame)
 
+                for _ in range(random.randint(0, 10)):
+                    frame, _, _, _ = env.step(FIRE_ACTION)
+                    frame = preprocess(frame)
+                    frames.append(frame)
+
+            elif info["ale.lives"] != lives:
+                lives = info["ale.lives"]
+                done = True
+
+            next_state = np.stack(frames, axis=2)
             conn.send(Step(reward, next_state, done, info))
 
         elif cmd == 'reset':
-            next_state = env.reset()
-            conn.send(next_state)
+            frame = env.reset()
+
+            frame = preprocess(frame)
+            for _ in range(NUM_FRAMES):
+                frames.append(frame)
+
+            state = np.stack(frames, axis=2)
+            conn.send(state)
 
         elif cmd == 'close':
             conn.close()
