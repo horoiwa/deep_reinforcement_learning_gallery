@@ -97,8 +97,7 @@ class A2CAgent:
 
             states = np.array(self.states)
 
-            #actions = self.ACNet.sample_action(states)
-            actions = [random.choice([0, 1, 2, 3]) for _ in range(self.n_procs)]
+            actions = self.ACNet.sample_action(states)
 
             rewards, next_states, dones, _ = self.vecenv.step(actions)
 
@@ -193,26 +192,24 @@ def main():
 
     MONITOR_DIR = Path(__file__).parent / "log"
 
-    total_steps = 30
+    total_steps = 10000000
 
-    test_freq = 2000
+    test_freq = 10000
 
-    agent = A2CAgent(n_procs=3)
+    agent = A2CAgent(n_procs=10)
 
     log_testplay = agent.run(total_steps=total_steps, test_freq=test_freq)
 
-    print(log_testplay)
+    agent.load_model("checkpoints/best")
+    agent.play(10, monitordir=MONITOR_DIR)
 
-    #agent.load_model("checkpoints/best")
-    #agent.play(5, monitordir=MONITOR_DIR)
+    steps = np.arange(1, total_steps+1, test_freq)
+    steps = steps / 1000
 
-    #steps = np.arange(1, total_steps+1, test_freq)
-    #steps = steps / 1000
-
-    #plt.plot(steps, log_testplay)
-    #plt.xlabel("steps")
-    #plt.ylabel("Total rewards")
-    #plt.savefig(MONITOR_DIR / "testplay.png")
+    plt.plot(steps, log_testplay)
+    plt.xlabel("steps")
+    plt.ylabel("Total rewards")
+    plt.savefig(MONITOR_DIR / "testplay.png")
 
 
 def play():
