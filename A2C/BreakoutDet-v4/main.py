@@ -8,6 +8,7 @@ import collections
 import gym
 from gym import wrappers
 import numpy as np
+import pandas as pd
 from multiprocessing import Process, Pipe
 import matplotlib.pyplot as plt
 
@@ -82,6 +83,8 @@ class A2CAgent:
                     self.hiscore = average_score
                     self.save_model()
                     print("Hi Score Update:", self.hiscore)
+
+                print("Current Hiscore:", self.hiscore)
 
             steps += self.n_procs * self.TRAJECTORY_SIZE
 
@@ -192,11 +195,11 @@ def main():
 
     MONITOR_DIR = Path(__file__).parent / "log"
 
-    total_steps = 10000000
+    total_steps = 25000000
 
-    test_freq = 10000
+    test_freq = 15000
 
-    agent = A2CAgent(n_procs=8)
+    agent = A2CAgent(n_procs=15)
 
     log_testplay = agent.run(total_steps=total_steps, test_freq=test_freq)
 
@@ -210,6 +213,11 @@ def main():
     plt.xlabel("steps")
     plt.ylabel("Total rewards")
     plt.savefig(MONITOR_DIR / "testplay.png")
+
+    df = pd.DataFrame()
+    df["steps"] = steps
+    df["testscore"] = log_testplay
+    df.to_csv(MONITOR_DIR / "testplay.csv")
 
 
 def play():

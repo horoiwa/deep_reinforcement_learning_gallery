@@ -12,7 +12,7 @@ class ActorCriticNet(tf.keras.Model):
 
     VALUE_COEF = 0.5
 
-    ENTROPY_COEF = 0.01
+    ENTROPY_COEF = 0.005
 
     MAX_GRAD_NORM = 0.5
 
