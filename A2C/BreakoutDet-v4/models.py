@@ -16,7 +16,7 @@ class ActorCriticNet(tf.keras.Model):
 
     MAX_GRAD_NORM = 0.5
 
-    def __init__(self, action_space, lr=0.0002):
+    def __init__(self, action_space, lr=0.00005):
 
         super(ActorCriticNet, self).__init__()
 
@@ -41,7 +41,7 @@ class ActorCriticNet(tf.keras.Model):
 
         self.values = kl.Dense(1, kernel_initializer="he_normal")
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.00005)
+        self.optimizer = tf.keras.optimizers.Adam(lr=lr)
 
     @tf.function
     def call(self, x):
