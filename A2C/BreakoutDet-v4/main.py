@@ -151,7 +151,7 @@ class A2CAgent:
 
         self.ACNet.load_weights(weights_path)
 
-    def play(self, n=1, monitordir=None):
+    def play(self, n=1, monitordir=None, log=False):
 
         if monitordir:
             env = wrappers.Monitor(gym.make("BreakoutDeterministic-v4"),
@@ -162,7 +162,7 @@ class A2CAgent:
 
         total_rewards = []
 
-        for _ in range(n):
+        for i in range(n):
 
             frame = preprocess(env.reset())
 
@@ -187,6 +187,9 @@ class A2CAgent:
                 total_reward += reward
 
             total_rewards.append(total_reward)
+
+            if log:
+                print(i, total_reward)
 
         return total_rewards
 
@@ -226,9 +229,9 @@ def play():
 
     agent = A2CAgent(n_procs=1)
 
-    agent.load_model("checkpoints/best")
+    agent.load_model("checkpoints25M/best")
 
-    agent.play(10, monitordir=MONITOR_DIR)
+    agent.play(10, monitordir=MONITOR_DIR, log=True)
 
 
 if __name__ == "__main__":
