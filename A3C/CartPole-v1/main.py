@@ -64,7 +64,7 @@ class A3CAgent:
 
         self.global_steps_fin = global_steps_fin
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.0005)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0004)
 
     def play(self, coord):
 
@@ -77,9 +77,27 @@ class A3CAgent:
 
                 trajectory = self.play_n_steps(N=self.MAX_TRAJECTORY)
 
+                states = [step.state for step in trajectory]
+
+                actions = [step.action for step in trajectory]
+
+                if trajectory[-1].done:
+                    R = 0
+                else:
+                    values, _ = self.local_ACNet(
+                        tf.convert_to_tensor(np.atleast_2d(trajectory[-1].next_state),
+                                             dtype=tf.float32))
+                    R = values[0][0].numpy()
+
+                discounted_rewards = []
+                for step in reversed(trajectory):
+                    R = step.reward + self.gamma * R
+                    discounted_rewards.append(R)
+                discounted_rewards.reverse()
+
                 with tf.GradientTape() as tape:
 
-                    total_loss = self.compute_loss(trajectory)
+                    total_loss = self.compute_loss(states, actions, discounted_rewards)
 
                 grads = tape.gradient(
                     total_loss, self.local_ACNet.trainable_variables)
@@ -131,49 +149,40 @@ class A3CAgent:
 
         return trajectory
 
-    def compute_loss(self, trajectory):
-
-        if trajectory[-1].done:
-            R = 0
-        else:
-            values, _ = self.local_ACNet(
-                tf.convert_to_tensor(np.atleast_2d(trajectory[-1].next_state),
-                                     dtype=tf.float32))
-            R = tf.stop_gradient(values[0][0])
-
-        discounted_rewards = []
-        for step in reversed(trajectory):
-            R = step.reward + self.gamma * R
-            discounted_rewards.append(R)
-        discounted_rewards.reverse()
+    def compute_loss(self, states, actions, discounted_rewards):
 
         states = tf.convert_to_tensor(
-            np.vstack([step.state for step in trajectory]), dtype=tf.float32)
+            np.vstack(states), dtype=tf.float32)
 
         values, logits = self.local_ACNet(states)
 
-        advantages = tf.convert_to_tensor(np.vstack(discounted_rewards), dtype=tf.float32) - values
+        discounted_rewards = tf.convert_to_tensor(
+            np.vstack(discounted_rewards), dtype=tf.float32)
+
+        advantages = discounted_rewards - values
 
         value_loss = advantages ** 2
 
-        actions_onehot = tf.one_hot([step.action for step in trajectory],
-                                    self.action_space, dtype=tf.float32)
+        actions_onehot = tf.one_hot(actions, self.action_space, dtype=tf.float32)
 
         action_probs = tf.nn.softmax(logits)
 
-        log_selected_action_probs = actions_onehot * tf.math.log(action_probs + 1e-20)
+        log_action_prob = actions_onehot * tf.math.log(action_probs + 1e-20)
 
-        entropy = tf.reduce_sum(
-            -1 * action_probs * tf.math.log(action_probs + 1e-20), axis=1)
+        log_action_prob = tf.reduce_sum(log_action_prob, axis=1, keepdims=True)
+
+        entropy = -1 * tf.reduce_sum(
+            action_probs * tf.math.log(action_probs + 1e-20),
+            axis=1, keepdims=True)
 
         policy_loss = tf.reduce_sum(
-            log_selected_action_probs * tf.stop_gradient(advantages), axis=1)
+            log_action_prob * tf.stop_gradient(advantages),
+            axis=1, keepdims=True)
 
         policy_loss += 0.01 * entropy
         policy_loss *= -1
-        policy_loss = tf.reshape(policy_loss, [-1, 1])
 
-        total_loss = tf.reduce_mean((0.5 * value_loss + policy_loss))
+        total_loss = tf.reduce_mean(0.5 * value_loss + policy_loss)
 
         return total_loss
 
@@ -191,7 +200,7 @@ def main():
 
     ACTION_SPACE = 2
 
-    NUM_AGENTS = 4
+    NUM_AGENTS = 8
 
     N_STEPS = 50000
 
