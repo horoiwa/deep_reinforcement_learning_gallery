@@ -2,6 +2,10 @@
 
 Deep reinforcement learning sample codes with tensorflow2
 
+深層強化学習の主要な手法をtensorflow2.Xで実装します。
+
+どの実装も1フォルダで完結するようにしています。
+
 
 ## Requirements
 
@@ -28,7 +32,11 @@ Deep reinforcement learning sample codes with tensorflow2
 
 <br>
 
-## DDQN (Double Deep Q Network)
+## Double DQN
+
+<br>
+
+## Dueling Network
 
 <br>
 
