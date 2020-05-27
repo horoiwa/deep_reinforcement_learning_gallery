@@ -29,8 +29,13 @@ class QNetwork(tf.keras.Model):
         self.dense1 = kl.Dense(512, activation="relu",
                                kernel_initializer="he_normal")
 
-        self.out = kl.Dense(self.action_space,
-                            kernel_initializer="he_normal")
+        self.dense2 = kl.Dense(512, activation="relu",
+                               kernel_initializer="he_normal")
+
+        self.values = kl.Dense(1, kernel_initializer="he_normal")
+
+        self.advantages = kl.Dense(self.action_space,
+                                   kernel_initializer="he_normal")
 
         self.optimizer = tf.keras.optimizers.Adam(lr=0.00005)
 
@@ -43,10 +48,19 @@ class QNetwork(tf.keras.Model):
         x = self.conv2(x)
         x = self.conv3(x)
         x = self.flatten1(x)
-        x = self.dense1(x)
-        out = self.out(x)
 
-        return out
+        x1 = self.dense1(x)
+        values = self.values(x1)
+
+        x2 = self.dense2(x)
+        advantages = self.advantages(x2)
+
+        #scaled_advantages = advantages - tf.reduce_max(advantages)
+        scaled_advantages = advantages - tf.reduce_mean(advantages)
+
+        q_values = values + scaled_advantages
+
+        return q_values
 
     def predict(self, states):
         if len(states.shape) == 3:
@@ -77,9 +91,6 @@ class QNetwork(tf.keras.Model):
 
 
 if __name__ == "__main__":
-    from tensorflow.python.client import device_lib
-    print(device_lib.list_local_devices())
-    print()
 
     frames = np.zeros((1, 84, 84, 4))
     for i in range(4):
@@ -90,5 +101,6 @@ if __name__ == "__main__":
     #print(qnet.summary())
 
     pred = qnet.predict(frames)
+    print()
     print(pred)
 
