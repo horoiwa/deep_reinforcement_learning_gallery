@@ -11,7 +11,9 @@ Deep reinforcement learning sample codes with tensorflow2
 
 `python==3.7` and `tensorflow==2.1.0`
 
-## References
+<br>
+
+## 参考文献
 
 ### DQN (Deep Q Network)
 
@@ -34,9 +36,13 @@ Deep reinforcement learning sample codes with tensorflow2
 
 ## Double DQN
 
+[Deep Reinforcement Learning with Double Q-learning](https://arxiv.org/abs/1509.06461)
+
 <br>
 
 ## Dueling Network
+
+[Dueling Network Architectures for Deep Reinforcement Learning](https://arxiv.org/abs/1511.06581)
 
 <br>
 

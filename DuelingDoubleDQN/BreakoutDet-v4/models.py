@@ -56,9 +56,9 @@ class QNetwork(tf.keras.Model):
     @tf.function
     def update(self, states, selected_actions, target_values):
 
+        selected_actions_onehot = tf.one_hot(selected_actions,
+                                             self.action_space)
         with tf.GradientTape() as tape:
-            selected_actions_onehot = tf.one_hot(selected_actions,
-                                                 self.action_space)
 
             selected_action_values = tf.reduce_sum(
                 self(states) * selected_actions_onehot, axis=1)
@@ -66,9 +66,8 @@ class QNetwork(tf.keras.Model):
             loss = tf.reduce_mean(
                 self.loss_func(target_values, selected_action_values))
 
-        variables = self.trainable_variables
-        gradients = tape.gradient(loss, variables)
-        self.optimizer.apply_gradients(zip(gradients, variables))
+        gradients = tape.gradient(loss, self.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
 
     def summary(self):
         """確認用: self.callのtf.functionを外さないとエラー吐くことに注意

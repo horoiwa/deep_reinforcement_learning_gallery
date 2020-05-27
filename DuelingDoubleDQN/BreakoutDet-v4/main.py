@@ -48,7 +48,12 @@ class DQNAgent:
 
     MAX_EXPERIENCES = 350000
 
-    MIN_EXPERIENCES = 30000
+    #MIN_EXPERIENCES = 30000
+    MIN_EXPERIENCES = 300
+
+    ENV_ID = "BreakoutDeterministic-v4"
+
+    ACTION_SPACE = 4
 
     NUM_FRAMES = 4
 
@@ -58,13 +63,15 @@ class DQNAgent:
 
     COPY_PERIOD = 10000
 
+    INPUT_SHAPE = (None, 84, 84, 4)
+
     def __init__(self, gamma=0.98):
         """
             gammma: 割引率
             epsilon: 探索と活用の割合
         """
 
-        self.env = gym.make("BreakoutDeterministic-v4")
+        self.env = gym.make(self.ENV_ID)
 
         self.gamma = gamma
 
@@ -72,11 +79,15 @@ class DQNAgent:
 
         self.global_steps = 0
 
-        self.q_network = QNetwork(self.env.action_space.n)
+        self.q_network = QNetwork(self.ACTION_SPACE)
 
-        self.target_network = QNetwork(self.env.action_space.n)
+        self.q_network.build(input_shape=self.INPUT_SHAPE)
 
-        self.experiences = collections.deque(maxlen=self.MAX_EXPERIENCES)
+        self.target_network = QNetwork(self.ACTION_SPACE)
+
+        self.target_network.build(input_shape=self.INPUT_SHAPE)
+
+        self.replay_buffer = collections.deque(maxlen=self.MAX_EXPERIENCES)
 
         self.hiscore = 0
 
@@ -100,7 +111,7 @@ class DQNAgent:
 
             print(f"Episode {n}: {total_reward}")
             print(f"Local steps {localsteps}")
-            print(f"Experiences {len(self.experiences)}")
+            print(f"Experiences {len(self.replay_buffer)}")
             print(f"Current epsilon {self.epsilon}")
             print(f"Global step {self.global_steps}")
             print(f"recent average score {recent_average_score}")
@@ -151,7 +162,7 @@ class DQNAgent:
             else:
                 exp = Experience(state, action, reward, next_state, done)
 
-            self.experiences.append(exp)
+            self.replay_buffer.append(exp)
 
             state = next_state
 
@@ -166,7 +177,7 @@ class DQNAgent:
 
             if self.global_steps % self.COPY_PERIOD == 0:
                 print("==Update target newwork==")
-                self.update_target_network()
+                self.target_network.set_weights(self.q_network.get_weights())
 
         return total_reward, steps
 
@@ -184,39 +195,35 @@ class DQNAgent:
         """ Q-Networkの訓練
             ただしExperiencesが規定数に達していないうちは何もしない
         """
-        if len(self.experiences) < self.MIN_EXPERIENCES:
+        if len(self.replay_buffer) < self.MIN_EXPERIENCES:
             return
 
         (states, actions, rewards,
          next_states, dones) = self.get_minibatch(self.BATCH_SIZE)
 
-        next_Qs = np.max(
-            self.target_network.predict(np.array(next_states)), axis=1)
+        #maxQ_actions = np.argmax(self.target_network(np.vstack(next_states)), axis=1)
+        maxQ_actions = np.argmax(self.q_network(np.vstack(next_states)), axis=1)
+
+        maxQ_actions_onehot = np.identity(self.ACTION_SPACE)[maxQ_actions]
+
+        next_Qs = self.target_network(np.vstack(next_states))
+
+        next_maxQs = np.max(next_Qs * maxQ_actions_onehot, axis=1)
 
         target_values = [reward + self.gamma * next_q if not done else reward
                          for reward, next_q, done
-                         in zip(rewards, next_Qs, dones)]
+                         in zip(rewards, next_maxQs, dones)]
 
-        self.q_network.update(np.array(states), np.array(actions),
+        self.q_network.update(np.vstack(states), np.array(actions),
                               np.array(target_values))
-
-    def update_target_network(self):
-        """Update target Q-network
-        """
-
-        targetnet_variables = self.target_network.trainable_variables
-        qnet_variables = self.q_network.trainable_variables
-
-        for var1, var2 in zip(targetnet_variables, qnet_variables):
-            var1.assign(var2.numpy())
 
     def get_minibatch(self, batch_size):
         """Experience Replay mechanism
         """
-        indices = np.random.choice(len(self.experiences),
+        indices = np.random.choice(len(self.replay_buffer),
                                    size=batch_size, replace=False)
 
-        selected_experiences = [self.experiences[i] for i in indices]
+        selected_experiences = [self.replay_buffer[i] for i in indices]
 
         states = [exp.state for exp in selected_experiences]
         actions = [exp.action for exp in selected_experiences]
@@ -237,11 +244,11 @@ class DQNAgent:
     def testplay(self, n=1, monitordir=None, log=False):
 
         if monitordir:
-            env = wrappers.Monitor(gym.make("BreakoutDeterministic-v4"),
+            env = wrappers.Monitor(gym.make(self.ENV_ID),
                                    monitordir, force=True,
                                    video_callable=(lambda ep: True))
         else:
-            env = gym.make("BreakoutDeterministic-v4")
+            env = gym.make(self.ENV_ID)
 
         total_rewards = []
 
@@ -306,7 +313,7 @@ def main():
     print(end)
 
 
-def play_only():
+def play_only(n=5):
 
     monitor_dir = Path(__file__).parent / "history"
 
@@ -314,7 +321,7 @@ def play_only():
 
     agent.load_model("checkpoints/best")
 
-    total_rewards = agent.testplay(n=5, monitordir=monitor_dir)
+    total_rewards = agent.testplay(n=n, monitordir=monitor_dir)
 
     print(total_rewards)
 
