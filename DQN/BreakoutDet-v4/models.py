@@ -63,8 +63,7 @@ class QNetwork(tf.keras.Model):
             selected_action_values = tf.reduce_sum(
                 self(states) * selected_actions_onehot, axis=1)
 
-            loss = tf.reduce_mean(
-                self.loss_func(target_values, selected_action_values))
+            loss = self.loss_func(target_values, selected_action_values)
 
         variables = self.trainable_variables
         gradients = tape.gradient(loss, variables)
