@@ -48,8 +48,7 @@ class DQNAgent:
 
     MAX_EXPERIENCES = 350000
 
-    #MIN_EXPERIENCES = 30000
-    MIN_EXPERIENCES = 300
+    MIN_EXPERIENCES = 30000
 
     ENV_ID = "BreakoutDeterministic-v4"
 
@@ -272,6 +271,7 @@ class DQNAgent:
 
                 if initial_step:
                     action = 1
+                    initial_step = False
                 else:
                     action = self.sample_action(state, train=False)
 
@@ -330,4 +330,4 @@ if __name__ == "__main__":
 
     main()
 
-    #play_only()
+    play_only(n=10)
