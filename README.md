@@ -46,6 +46,15 @@ Deep reinforcement learning sample codes with tensorflow2
 
 <br>
 
+## Prioritized Experience Replay
+
+[original](https://arxiv.org/abs/1511.05952)
+
+
+## Ape-X
+
+[Distributed Prioritized Experience Replay](https://arxiv.org/pdf/1803.00933.pdf)
+
 ### A3C/A2C (Advantage Actor Critic)
 
 [Asynchronous Methods for Deep Reinforcement Learning](https://arxiv.org/abs/1602.01783)
@@ -55,8 +64,13 @@ Deep reinforcement learning sample codes with tensorflow2
 
 [OpenAI baselines](https://openai.com/blog/baselines-acktr-a2c/)
 
+
 ### PPO
 
 ### DDPG
 
 ### DQFD
+
+### その他
+
+[Reinforcement Learning for Improving Agent Design](https://arxiv.org/abs/1810.03779)
