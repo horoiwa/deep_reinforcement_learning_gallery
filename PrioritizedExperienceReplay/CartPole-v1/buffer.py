@@ -17,45 +17,61 @@ class Experience:
 
     done: bool
 
-    priority: float
 
+class ReplayBuffer:
 
-class PrioritizedReplayBuffer:
+    ALPHA = 0.7
+
+    EPSILON = 0.01
 
     def __init__(self, max_experiences):
 
         self.max_experiences = max_experiences
 
-        self.n = 0
+        self.count = 0
 
         self.experiences = []
 
-    def add(self, exp):
+        self.priorities = np.zeros(self.max_experiences) + self.EPSILON
 
-        exp.priority = 0
+    def add_experience(self, exp):
 
-        if len(self.experiences) < self.max_experiences:
+        if len(self.experiences) == self.max_experiences:
+            self.experiences[self.count] = exp
+        else:
             self.experiences.append(exp)
 
-        elif len(self.experiences) == self.max_experiences:
-            self.n = 0
-            self.experiences[self.n] = exp
-            self.n += 1
+        self.priorities[self.count] = self.priorities.max()
 
+        if self.count == self.max_experiences-1:
+            self.count = 0
         else:
-            self.experiences[self.n] = exp
-            self.n += 1
+            self.count += 1
 
-    @property
-    def max_priority(self):
-        return max([exp.priority for exp in self.experiences])
+    def get_minibatch(self, batch_size):
+        selected_indices = np.random.choice(
+            np.arange(len(self.experiences)), size=batch_size)
+
+        selected_experiences = [self.experiences[idx] for idx in selected_indices]
+
+        return selected_experiences
 
     def get_prioritized_minibatch(self, batch_size):
-        pass
 
-    def update_priority(self, indices, priorities):
-        for idx, priority in zip(indices, priorities):
-            self.experiences[i].priority = priority
+        weights = self.priorities / self.priorities.sum()
+
+        selected_indices = np.random.choice(
+            np.arange(len(self.experiences)), p=weights, size=batch_size)
+
+        selected_weights = [weights[idx] for idx in selected_indices]
+
+        selected_experiences = [self.experiences[idx] for idx in selected_indices]
+
+        return selected_indices, selected_weights, selected_experiences
+
+    def update_priority(self, indices, new_priorities):
+
+        self.priorities[indices] = new_priorities
 
     def __len__(self):
         return len(self.experiences)
@@ -66,29 +82,31 @@ if __name__ == "__main__":
     import numpy as np
     import random
 
-    buffer = PrioritizedReplayBuffer(max_experiences=8)
+    buffer = ReplayBuffer(max_experiences=8)
 
     Exp = collections.namedtuple("Experience",
                                  ["state", "action",
                                   "reward", "next_state", "done", "priority"])
-    for _ in range(10):
+    for i in range(20):
 
         s1 = [np.random.randint(100) for _ in range(4)]
 
         a = [np.random.randint(2)]
 
-        r = 1
+        r = i
 
         s2 = [np.random.randint(100) for _ in range(4)]
 
         done = random.choice([False, True])
 
-        priority = 1
+        exp = Experience(s1, a, r, s2, done)
 
-        exp = Experience(s1, a, r, s2, done, priority)
-
-        buffer.add(exp)
+        buffer.add_experience(exp)
 
     print(len(buffer))
 
-    print*
+    print()
+
+    for exp in buffer.experiences:
+        print(exp.reward)
+
