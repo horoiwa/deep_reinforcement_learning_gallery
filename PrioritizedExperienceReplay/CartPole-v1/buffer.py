@@ -18,7 +18,7 @@ class Experience:
     done: bool
 
 
-class ReplayBuffer:
+class PrioritizedReplayBuffer:
 
     ALPHA = 0.7
 
@@ -32,7 +32,9 @@ class ReplayBuffer:
 
         self.experiences = []
 
-        self.priorities = np.zeros(self.max_experiences) + self.EPSILON
+        self.priorities = np.zeros(self.max_experiences)
+
+        self.max_priority = 1.0
 
     def add_experience(self, exp):
 
@@ -41,7 +43,7 @@ class ReplayBuffer:
         else:
             self.experiences.append(exp)
 
-        self.priorities[self.count] = self.priorities.max()
+        self.priorities[self.count] = self.max_priority()
 
         if self.count == self.max_experiences-1:
             self.count = 0
@@ -49,29 +51,29 @@ class ReplayBuffer:
             self.count += 1
 
     def get_minibatch(self, batch_size):
-        selected_indices = np.random.choice(
-            np.arange(len(self.experiences)), size=batch_size)
 
-        selected_experiences = [self.experiences[idx] for idx in selected_indices]
+        N = len(self.experiences)
 
-        return selected_experiences
+        probs = (self.priorities / self.priorities.sum())[:N]
 
-    def get_prioritized_minibatch(self, batch_size):
+        indices = np.random.choice(np.arange(N), p=probs,
+                                   replace=True, size=batch_size)
 
-        weights = self.priorities / self.priorities.sum()
+        weights = np.array([1 / probs[idx] for idx in indices]) * (1 / N)
 
-        selected_indices = np.random.choice(
-            np.arange(len(self.experiences)), p=weights, size=batch_size)
+        experiences = [self.experiences[idx] for idx in indices]
 
-        selected_weights = [weights[idx] for idx in selected_indices]
+        return indices, weights, experiences
 
-        selected_experiences = [self.experiences[idx] for idx in selected_indices]
+    def update_priority(self, indices, td_errors):
 
-        return selected_indices, selected_weights, selected_experiences
+        assert len(indices) == len(td_errors)
 
-    def update_priority(self, indices, new_priorities):
+        priorities = (np.abs(td_errors) + self.EPSILON) ** self.ALPHA
 
-        self.priorities[indices] = new_priorities
+        self.priorities[indices] = priorities
+
+        self.max_priority = max(self.max_priority, priorities.max())
 
     def __len__(self):
         return len(self.experiences)

@@ -50,6 +50,7 @@ Deep reinforcement learning sample codes with tensorflow2
 
 [original](https://arxiv.org/abs/1511.05952)
 
+[baselines](https://github.com/openai/baselines/blob/master/baselines/deepq/replay_buffer.py)
 
 ## Ape-X
 

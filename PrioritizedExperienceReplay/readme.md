@@ -1,3 +1,6 @@
+cartpoleはDQN＋PERだが、spaceinvadorsはDuelingDoubleDQN + PER
+
+
 ## 優先度つき経験再生
 
 https://arxiv.org/abs/1511.05952
