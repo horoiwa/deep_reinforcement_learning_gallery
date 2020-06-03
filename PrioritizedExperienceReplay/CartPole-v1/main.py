@@ -198,10 +198,10 @@ def main(copy_period, lr):
     ENV_NAME = "CartPole-v1"
     env = gym.make(ENV_NAME)
     env = wrappers.Monitor(env, monitor_dir, force=True,
-                           video_callable=(lambda ep: ep % 25 == 0))
+                           video_callable=(lambda ep: ep % 100 == 0))
 
     agent = DQNAgent(env=env, copy_period=copy_period, lr=lr)
-    history = agent.play(n_episodes=301)
+    history = agent.play(n_episodes=501)
     print(history)
 
     plt.plot(range(len(history)), history)

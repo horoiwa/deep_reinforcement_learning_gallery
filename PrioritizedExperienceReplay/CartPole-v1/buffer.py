@@ -45,13 +45,16 @@ class PrioritizedReplayBuffer:
         indices = np.random.choice(np.arange(N), p=probs,
                                    replace=False, size=batch_size)
 
-        weights = (np.array([probs[idx] for idx in indices]) * N) ** -beta
+        selected_probs = np.array(
+            [probs[idx] for idx in indices], dtype=np.float32)
 
-        weights /= weights.max()
+        selected_weights = (selected_probs * N) ** -beta
 
-        experiences = [self.experiences[idx] for idx in indices]
+        selected_weights /= selected_weights.max()
 
-        return indices, weights, experiences
+        selected_experiences = [self.experiences[idx] for idx in indices]
+
+        return indices, selected_weights, selected_experiences
 
     def update_priority(self, indices, td_errors):
 

@@ -34,6 +34,15 @@ class QNetwork(tf.keras.Model):
         out = self.out(x)
         return out
 
+    @tf.function
+    def huber_loss(self, errors, weights):
+        errors = errors * weights
+        is_smaller_error = tf.abs(errors) < 1.0
+        squared_loss = tf.square(errors) * 0.5
+        linear_loss = tf.abs(errors) - 0.5
+
+        return tf.where(is_smaller_error, squared_loss, linear_loss)
+
     def predict(self, states):
         states = np.atleast_2d(states).astype(np.float32)
         return self(states).numpy()
@@ -48,10 +57,10 @@ class QNetwork(tf.keras.Model):
                 self(states) * selected_actions_onehot, axis=1, keepdims=True)
 
             td_errors = target_values - selected_action_values
-            loss = tf.reduce_mean(tf.square(weights * td_errors))
+
+            loss = tf.reduce_mean(self.huber_loss(td_errors, weights))
 
         grads = tape.gradient(loss, self.trainable_variables)
-        grads, grad_norm = tf.clip_by_global_norm(grads, 0.5)
         self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
         return td_errors.numpy().flatten()
