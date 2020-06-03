@@ -147,11 +147,20 @@ class DQNAgent:
         """ Q-Networkの訓練
             ただしExperiencesが規定数に達していないうちは何もしない
         """
-        if len(self.experiences) < self.MIN_EXPERIENCES:
+        if len(self.replay_buffer) < self.MIN_EXPERIENCES:
             return
 
-        (states, actions, rewards,
-         next_states, dones) = self.get_minibatch(self.BATCH_SIZE)
+        indices, weights, experiences = self.replay_buffer.get_minibatch(self.BATCH_SIZE, self.beta)
+
+        states = [exp.state for exp in experiences]
+
+        actions = [exp.action for exp in experiences]
+
+        rewards = [exp.reward for exp in experiences]
+
+        next_states = [exp.next_state for exp in experiences]
+
+        dones = [exp.done for exp in experiences]
 
         next_Qs = np.max(self.target_network.predict(next_states), axis=1)
 
@@ -159,8 +168,11 @@ class DQNAgent:
                          for reward, next_q, done
                          in zip(rewards, next_Qs, dones)]
 
-        self.q_network.update(np.array(states), np.array(actions),
-                              np.array(target_values))
+        td_errors = self.q_network.update(
+            np.vstack(states), np.array(actions),
+            np.vstack(target_values), np.vstack(weights))
+
+        self.replay_buffer.update_priority(indices, td_errors)
 
     def get_minibatch(self, batch_size):
         """Experience Replay mechanism
@@ -185,22 +197,22 @@ def main(copy_period, lr):
 
     ENV_NAME = "CartPole-v1"
     env = gym.make(ENV_NAME)
-    #env = wrappers.Monitor(env, monitor_dir, force=True,
-    #                       video_callable=(lambda ep: ep % 25 == 0))
+    env = wrappers.Monitor(env, monitor_dir, force=True,
+                           video_callable=(lambda ep: ep % 25 == 0))
 
     agent = DQNAgent(env=env, copy_period=copy_period, lr=lr)
-    history = agent.play(episodes=51)
+    history = agent.play(n_episodes=301)
     print(history)
 
-    #plt.plot(range(len(history)), history)
-    #plt.plot([0, 400], [195, 195], "--", color="darkred")
-    #plt.xlabel("episodes")
-    #plt.ylabel("Total Reward")
-    #plt.savefig(monitor_dir / "dqn_cartpole-v1.png")
+    plt.plot(range(len(history)), history)
+    plt.plot([0, 400], [195, 195], "--", color="darkred")
+    plt.xlabel("episodes")
+    plt.ylabel("Total Reward")
+    plt.savefig(monitor_dir / "dqn_cartpole-v1.png")
 
-    #df = pd.DataFrame()
-    #df["Total Reward"] = history
-    #df.to_csv(monitor_dir / "dqn_cartpole-v1.csv", index=None)
+    df = pd.DataFrame()
+    df["Total Reward"] = history
+    df.to_csv(monitor_dir / "dqn_cartpole-v1.csv", index=None)
 
 
 if __name__ == "__main__":

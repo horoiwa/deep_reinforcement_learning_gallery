@@ -4,20 +4,6 @@ from dataclasses import dataclass
 import numpy as np
 
 
-@dataclass
-class Experience:
-
-    state: np.ndarray
-
-    action: int
-
-    reward: float
-
-    next_state: np.ndarray
-
-    done: bool
-
-
 class PrioritizedReplayBuffer:
 
     ALPHA = 0.7

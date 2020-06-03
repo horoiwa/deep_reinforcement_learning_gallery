@@ -38,22 +38,23 @@ class QNetwork(tf.keras.Model):
         states = np.atleast_2d(states).astype(np.float32)
         return self(states).numpy()
 
-    def update(self, states, selected_actions, target_values):
+    def update(self, states, selected_actions, target_values, weights):
 
         with tf.GradientTape() as tape:
             selected_actions_onehot = tf.one_hot(selected_actions,
                                                  self.action_space)
 
             selected_action_values = tf.reduce_sum(
-                self(states) * selected_actions_onehot, axis=1)
+                self(states) * selected_actions_onehot, axis=1, keepdims=True)
 
-            loss = tf.reduce_mean(
-                tf.square(target_values - selected_action_values))
+            td_errors = target_values - selected_action_values
+            loss = tf.reduce_mean(tf.square(weights * td_errors))
 
-        variables = self.trainable_variables
-        gradients = tape.gradient(loss, variables)
-        self.optimizer.apply_gradients(zip(gradients, variables))
+        grads = tape.gradient(loss, self.trainable_variables)
+        grads, grad_norm = tf.clip_by_global_norm(grads, 0.5)
+        self.optimizer.apply_gradients(zip(grads, self.trainable_variables))
 
+        return td_errors.numpy().flatten()
 
 
 if __name__ == "__main__":
