@@ -180,10 +180,12 @@ class DQNAgent:
 
         return total_reward, steps
 
-    def sample_action(self, state, train=True):
+    def sample_action(self, state, epsilon=None):
         """探索と活用"""
 
-        if train and np.random.random() < self.epsilon:
+        epsilon = epsilon if epsilon else self.epsilon
+
+        if np.random.random() < epsilon:
             random_action = np.random.choice(self.env.action_space.n)
             return random_action
         else:
@@ -200,7 +202,10 @@ class DQNAgent:
         (states, actions, rewards,
          next_states, dones) = self.get_minibatch(self.BATCH_SIZE)
 
+        #: Nature DQN
         #maxQ_actions = np.argmax(self.target_network(np.vstack(next_states)), axis=1)
+
+        #: Double DQN
         maxQ_actions = np.argmax(self.q_network(np.vstack(next_states)), axis=1)
 
         maxQ_actions_onehot = np.identity(self.ACTION_SPACE)[maxQ_actions]
@@ -240,18 +245,22 @@ class DQNAgent:
 
         self.q_network.load_weights(weights_path)
 
-    def testplay(self, n=1, monitordir=None, log=False):
+        self.target_network.load_weights(weights_path)
+
+    def testplay(self, n=1, monitordir=None):
 
         if monitordir:
             env = wrappers.Monitor(gym.make(self.ENV_ID),
                                    monitordir, force=True,
-                                   video_callable=(lambda ep: True))
+                                   video_callable=(lambda ep: ep % 1 == 0))
         else:
             env = gym.make(self.ENV_ID)
 
         total_rewards = []
 
         for i in range(n):
+
+            print(f"Start {i}")
 
             frames = collections.deque(maxlen=4)
 
@@ -260,20 +269,21 @@ class DQNAgent:
             for _ in range(self.NUM_FRAMES):
                 frames.append(frame)
 
+            for _ in range(np.random.randint(10)):
+
+                frame, _, _, _ = env.step(1)
+
+                frames.append(preprocess(frame))
+
             done = False
 
             total_reward = 0
 
-            initial_step = True
             while not done:
 
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
 
-                if initial_step:
-                    action = 1
-                    initial_step = False
-                else:
-                    action = self.sample_action(state, train=False)
+                action = self.sample_action(state, epsilon=0.05)
 
                 frame, reward, done, _ = env.step(action)
 
@@ -283,8 +293,7 @@ class DQNAgent:
 
             total_rewards.append(total_reward)
 
-            if log:
-                print(i, total_reward)
+            print(i, total_reward)
 
         return total_rewards
 
@@ -313,7 +322,7 @@ def main():
     print(end)
 
 
-def play_only(n=10):
+def play_only(n):
 
     monitor_dir = Path(__file__).parent / "history"
 
@@ -328,6 +337,6 @@ def play_only(n=10):
 
 if __name__ == "__main__":
 
-    main()
+    #main()
 
     play_only(n=10)
