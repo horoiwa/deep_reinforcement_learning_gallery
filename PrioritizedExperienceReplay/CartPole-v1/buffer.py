@@ -43,23 +43,25 @@ class PrioritizedReplayBuffer:
         else:
             self.experiences.append(exp)
 
-        self.priorities[self.count] = self.max_priority()
+        self.priorities[self.count] = self.max_priority
 
         if self.count == self.max_experiences-1:
             self.count = 0
         else:
             self.count += 1
 
-    def get_minibatch(self, batch_size):
+    def get_minibatch(self, batch_size, beta):
 
         N = len(self.experiences)
 
         probs = (self.priorities / self.priorities.sum())[:N]
 
         indices = np.random.choice(np.arange(N), p=probs,
-                                   replace=True, size=batch_size)
+                                   replace=False, size=batch_size)
 
-        weights = np.array([1 / probs[idx] for idx in indices]) * (1 / N)
+        weights = (np.array([probs[idx] for idx in indices]) * N) ** -beta
+
+        weights /= weights.max()
 
         experiences = [self.experiences[idx] for idx in indices]
 
@@ -79,17 +81,16 @@ class PrioritizedReplayBuffer:
         return len(self.experiences)
 
 
-
 if __name__ == "__main__":
     import numpy as np
     import random
 
-    buffer = ReplayBuffer(max_experiences=8)
+    buffer = PrioritizedReplayBuffer(max_experiences=16)
 
     Exp = collections.namedtuple("Experience",
                                  ["state", "action",
                                   "reward", "next_state", "done", "priority"])
-    for i in range(20):
+    for i in range(32):
 
         s1 = [np.random.randint(100) for _ in range(4)]
 
@@ -112,3 +113,16 @@ if __name__ == "__main__":
     for exp in buffer.experiences:
         print(exp.reward)
 
+    indices, weights, experiences = buffer.get_minibatch(4, 0.5)
+    print(indices)
+    print(weights)
+
+    td_errors = np.random.randint(-100, 100, size=len(indices))
+    print(td_errors)
+    buffer.update_priority(indices, td_errors)
+    print()
+    indices, weights, experiences = buffer.get_minibatch(4, 0.5)
+    print(indices)
+    print(weights)
+    print()
+    print(buffer.max_priority)

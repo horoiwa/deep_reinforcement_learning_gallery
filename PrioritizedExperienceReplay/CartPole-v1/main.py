@@ -39,6 +39,8 @@ class DQNAgent:
 
     BATCH_SIZE = 16
 
+    BETA_INIT = 0.5
+
     def __init__(self, env, gamma=0.95, epsilon=1.0,
                  copy_period=1000, lr=0.01, update_period=2):
         """
@@ -71,15 +73,15 @@ class DQNAgent:
         self.replay_buffer = PrioritizedReplayBuffer(
             max_experiences=self.MAX_EXPERIENCES)
 
-        self.beta = 0
+        self.beta = self.BETA_INIT
 
-    def play(self, episodes):
+    def play(self, n_episodes):
 
         total_rewards = []
 
-        for n in range(episodes):
+        for n in range(n_episodes):
 
-            self.beta = n / episodes
+            self.beta = self.BETA_INIT + (1-self.BETA_INIT) * (n / n_episodes)
 
             self.epsilon = 1.0 - min(0.95, self.global_steps * 0.95 / 500)
 
