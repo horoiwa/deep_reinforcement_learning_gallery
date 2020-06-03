@@ -41,7 +41,6 @@ class QNetwork(tf.keras.Model):
 
         self.loss_func = tf.losses.Huber()
 
-    @tf.function
     def call(self, x, training=True):
 
         x = self.conv1(x)
@@ -67,7 +66,6 @@ class QNetwork(tf.keras.Model):
             states = states[np.newaxis, ...]
         return self(states).numpy()
 
-    @tf.function
     def update(self, states, selected_actions, target_values):
 
         selected_actions_onehot = tf.one_hot(selected_actions,

@@ -291,7 +291,7 @@ class DQNAgent:
 
 def main():
 
-    TOTAL_EPISODES = 20
+    TOTAL_EPISODES = 4500
 
     start = datetime.now()
 
@@ -313,7 +313,7 @@ def main():
     print(end)
 
 
-def play_only(n=5):
+def play_only(n=10):
 
     monitor_dir = Path(__file__).parent / "history"
 
