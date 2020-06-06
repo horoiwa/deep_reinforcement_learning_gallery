@@ -16,6 +16,7 @@ import gym
 from gym import wrappers
 
 from models import QNetwork
+from buffer import PrioritizedReplayBuffer
 
 
 @dataclass
@@ -54,7 +55,8 @@ class DQNAgent:
 
     MAX_EXPERIENCES = 300000
 
-    MIN_EXPERIENCES = 30000
+    #MIN_EXPERIENCES = 30000
+    MIN_EXPERIENCES = 100
 
     ENV_ID = "SpaceInvadersDeterministic-v4"
 
@@ -69,6 +71,8 @@ class DQNAgent:
     COPY_PERIOD = 10000
 
     INPUT_SHAPE = (None, 84, 84, 4)
+
+    BETA_INIT = 0.5
 
     def __init__(self, gamma=0.98):
         """
@@ -92,17 +96,20 @@ class DQNAgent:
 
         self.target_network.build(input_shape=self.INPUT_SHAPE)
 
-        self.replay_buffer = collections.deque(maxlen=self.MAX_EXPERIENCES)
+        self.replay_buffer = PrioritizedReplayBuffer(
+            max_experiences=self.MAX_EXPERIENCES)
 
         self.hiscore = 0
 
-    def play(self, episodes):
+    def play(self, n_episodes):
 
         total_rewards = []
 
         recent_scores = collections.deque(maxlen=5)
 
-        for n in range(episodes):
+        for n in range(n_episodes):
+
+            self.beta = self.BETA_INIT + (1-self.BETA_INIT) * (n / n_episodes)
 
             self.epsilon = 1.0 - min(0.95, self.global_steps * 0.95 / 500000)
 
@@ -118,6 +125,8 @@ class DQNAgent:
             print(f"Local steps {localsteps}")
             print(f"Experiences {len(self.replay_buffer)}")
             print(f"Current epsilon {self.epsilon}")
+            print(f"Current beta {self.beta}")
+            print(f"Current maxp {self.replay_buffer.max_priority}")
             print(f"Global step {self.global_steps}")
             print(f"recent average score {recent_average_score}")
             print()
@@ -170,7 +179,7 @@ class DQNAgent:
             else:
                 exp = Experience(state, action, reward, next_state, done)
 
-            self.replay_buffer.append(exp)
+            self.replay_buffer.add_experience(exp)
 
             state = next_state
 
@@ -208,8 +217,17 @@ class DQNAgent:
         if len(self.replay_buffer) < self.MIN_EXPERIENCES:
             return
 
-        (states, actions, rewards,
-         next_states, dones) = self.get_minibatch(self.BATCH_SIZE)
+        indices, weights, experiences = self.replay_buffer.get_minibatch(self.BATCH_SIZE, self.beta)
+
+        states = [exp.state for exp in experiences]
+
+        actions = [exp.action for exp in experiences]
+
+        rewards = [exp.reward for exp in experiences]
+
+        next_states = [exp.next_state for exp in experiences]
+
+        dones = [exp.done for exp in experiences]
 
         #: Nature DQN
         #maxQ_actions = np.argmax(self.target_network(np.vstack(next_states)), axis=1)
@@ -227,24 +245,10 @@ class DQNAgent:
                          for reward, next_q, done
                          in zip(rewards, next_maxQs, dones)]
 
-        self.q_network.update(np.vstack(states), np.array(actions),
-                              np.array(target_values))
+        td_errors = self.q_network.update(np.vstack(states), np.array(actions),
+                                          np.array(target_values), weights)
 
-    def get_minibatch(self, batch_size):
-        """Experience Replay mechanism
-        """
-        indices = np.random.choice(len(self.replay_buffer),
-                                   size=batch_size, replace=False)
-
-        selected_experiences = [self.replay_buffer[i] for i in indices]
-
-        states = [exp.state for exp in selected_experiences]
-        actions = [exp.action for exp in selected_experiences]
-        rewards = [exp.reward for exp in selected_experiences]
-        next_states = [exp.next_state for exp in selected_experiences]
-        dones = [exp.done for exp in selected_experiences]
-
-        return (states, actions, rewards, next_states, dones)
+        self.replay_buffer.update_priority(indices, td_errors)
 
     def save_model(self):
 
@@ -310,13 +314,14 @@ class DQNAgent:
 def main():
 
     TOTAL_EPISODES = 3500
+    TOTAL_EPISODES = 35
 
     start = datetime.now()
 
     monitor_dir = Path(__file__).parent / "history"
 
     agent = DQNAgent()
-    history = agent.play(episodes=TOTAL_EPISODES)
+    history = agent.play(n_episodes=TOTAL_EPISODES)
 
     plt.plot(range(len(history)), history)
     plt.xlabel("episodes")
@@ -349,4 +354,5 @@ if __name__ == "__main__":
 
     main()
 
-    play_only(n=10)
+    #play_only(n=10)
+    play_only(n=1)

@@ -61,12 +61,21 @@ class QNetwork(tf.keras.Model):
 
         return q_values
 
+    @tf.function
+    def huber_loss(self, errors, weights):
+        errors = errors * weights
+        is_smaller_error = tf.abs(errors) < 1.0
+        squared_loss = tf.square(errors) * 0.5
+        linear_loss = tf.abs(errors) - 0.5
+
+        return tf.where(is_smaller_error, squared_loss, linear_loss)
+
     def predict(self, states):
         if len(states.shape) == 3:
             states = states[np.newaxis, ...]
         return self(states).numpy()
 
-    def update(self, states, selected_actions, target_values):
+    def update(self, states, selected_actions, target_values, weights):
 
         selected_actions_onehot = tf.one_hot(selected_actions,
                                              self.action_space)
@@ -75,10 +84,14 @@ class QNetwork(tf.keras.Model):
             selected_action_values = tf.reduce_sum(
                 self(states) * selected_actions_onehot, axis=1)
 
-            loss = self.loss_func(target_values, selected_action_values)
+            td_errors = target_values - selected_action_values
+
+            loss = tf.reduce_mean(self.huber_loss(td_errors, weights))
 
         gradients = tape.gradient(loss, self.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.trainable_variables))
+
+        return td_errors
 
     def summary(self):
         """確認用: self.callのtf.functionを外さないとエラー吐くことに注意
