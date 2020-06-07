@@ -347,6 +347,6 @@ def play_only(n):
 
 if __name__ == "__main__":
 
-    main()
+    #main()
 
     play_only(n=10)
