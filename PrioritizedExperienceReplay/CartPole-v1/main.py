@@ -174,22 +174,6 @@ class DQNAgent:
 
         self.replay_buffer.update_priority(indices, td_errors)
 
-    def get_minibatch(self, batch_size):
-        """Experience Replay mechanism
-        """
-        indices = np.random.choice(len(self.experiences),
-                                   size=batch_size, replace=False)
-
-        selected_experiences = [self.experiences[i] for i in indices]
-
-        states = [exp.state for exp in selected_experiences]
-        actions = [exp.action for exp in selected_experiences]
-        rewards = [exp.reward for exp in selected_experiences]
-        next_states = [exp.next_state for exp in selected_experiences]
-        dones = [exp.done for exp in selected_experiences]
-
-        return (states, actions, rewards, next_states, dones)
-
 
 def main(copy_period, lr):
 
