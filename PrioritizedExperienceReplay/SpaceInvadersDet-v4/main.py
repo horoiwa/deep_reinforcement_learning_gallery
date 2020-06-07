@@ -53,10 +53,9 @@ def preprocess(frame):
 
 class DQNAgent:
 
-    MAX_EXPERIENCES = 300000
+    MAX_EXPERIENCES = 350000
 
-    #MIN_EXPERIENCES = 30000
-    MIN_EXPERIENCES = 100
+    MIN_EXPERIENCES = 30000
 
     ENV_ID = "SpaceInvadersDeterministic-v4"
 
@@ -66,13 +65,13 @@ class DQNAgent:
 
     BATCH_SIZE = 32
 
-    UPDATE_PERIOD = 4
+    UPDATE_PERIOD = 16
 
     COPY_PERIOD = 10000
 
     INPUT_SHAPE = (None, 84, 84, 4)
 
-    BETA_INIT = 0.5
+    BETA_INIT = 0.4
 
     def __init__(self, gamma=0.98):
         """
@@ -314,7 +313,6 @@ class DQNAgent:
 def main():
 
     TOTAL_EPISODES = 3500
-    TOTAL_EPISODES = 35
 
     start = datetime.now()
 
@@ -354,5 +352,4 @@ if __name__ == "__main__":
 
     main()
 
-    #play_only(n=10)
-    play_only(n=1)
+    play_only(n=10)

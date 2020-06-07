@@ -1,0 +1,948 @@
+WARNING:tensorflow:AutoGraph could not transform <bound method QNetwork.huber_loss of <tensorflow.python.eager.function.TfMethodTarget object at 0x7f477c275350>> and will run it as-is.
+Please report this to the TensorFlow team. When filing the bug, set the verbosity to 10 (on Linux, `export AUTOGRAPH_VERBOSITY=10`) and attach the full output.
+Cause: Bad argument number for Name: 3, expecting 4
+Episode 0: 4
+Local steps 352
+Experiences 352
+Current epsilon 1.0
+Current beta 0.5
+Current maxp 1.0
+Global step 352
+recent average score 4.0
+
+HISCORE Updated: 4.0
+Episode 1: 16
+Local steps 1156
+Experiences 1508
+Current epsilon 0.9993312
+Current beta 0.5001428571428571
+Current maxp 1.0
+Global step 1508
+recent average score 10.0
+
+HISCORE Updated: 10.0
+Episode 2: 8
+Local steps 920
+Experiences 2428
+Current epsilon 0.9971348
+Current beta 0.5002857142857143
+Current maxp 1.0
+Global step 2428
+recent average score 9.333333333333334
+
+Episode 3: 9
+Local steps 608
+Experiences 3036
+Current epsilon 0.9953868
+Current beta 0.5004285714285714
+Current maxp 1.0
+Global step 3036
+recent average score 9.25
+
+Episode 4: 6
+Local steps 704
+Experiences 3740
+Current epsilon 0.9942316
+Current beta 0.5005714285714286
+Current maxp 1.0
+Global step 3740
+recent average score 8.6
+
+Episode 5: 10
+Local steps 701
+Experiences 4441
+Current epsilon 0.992894
+Current beta 0.5007142857142857
+Current maxp 1.0
+Global step 4441
+recent average score 9.8
+
+Episode 6: 6
+Local steps 343
+Experiences 4784
+Current epsilon 0.9915621
+Current beta 0.5008571428571429
+Current maxp 1.0
+Global step 4784
+recent average score 7.8
+
+Episode 7: 18
+Local steps 694
+Experiences 5478
+Current epsilon 0.9909104
+Current beta 0.501
+Current maxp 1.0
+Global step 5478
+recent average score 9.8
+
+Episode 8: 8
+Local steps 680
+Experiences 6158
+Current epsilon 0.9895918
+Current beta 0.5011428571428571
+Current maxp 1.0
+Global step 6158
+recent average score 9.6
+
+Episode 9: 5
+Local steps 355
+Experiences 6513
+Current epsilon 0.9882998
+Current beta 0.5012857142857143
+Current maxp 1.0
+Global step 6513
+recent average score 9.4
+
+Episode 10: 12
+Local steps 593
+Experiences 7106
+Current epsilon 0.9876253
+Current beta 0.5014285714285714
+Current maxp 1.0
+Global step 7106
+recent average score 9.8
+
+Episode 11: 8
+Local steps 610
+Experiences 7716
+Current epsilon 0.9864986
+Current beta 0.5015714285714286
+Current maxp 1.0
+Global step 7716
+recent average score 10.2
+
+HISCORE Updated: 10.2
+Episode 12: 6
+Local steps 607
+Experiences 8323
+Current epsilon 0.9853396
+Current beta 0.5017142857142857
+Current maxp 1.0
+Global step 8323
+recent average score 7.8
+
+Episode 13: 8
+Local steps 635
+Experiences 8958
+Current epsilon 0.9841863
+Current beta 0.5018571428571429
+Current maxp 1.0
+Global step 8958
+recent average score 7.8
+
+Episode 14: 8
+Local steps 716
+Experiences 9674
+Current epsilon 0.9829798
+Current beta 0.502
+Current maxp 1.0
+Global step 9674
+recent average score 8.4
+
+==Update target newwork==
+Episode 15: 8
+Local steps 764
+Experiences 10438
+Current epsilon 0.9816194
+Current beta 0.5021428571428571
+Current maxp 1.0
+Global step 10438
+recent average score 7.6
+
+Episode 16: 11
+Local steps 752
+Experiences 11190
+Current epsilon 0.9801678
+Current beta 0.5022857142857143
+Current maxp 1.0
+Global step 11190
+recent average score 8.2
+
+Episode 17: 11
+Local steps 731
+Experiences 11921
+Current epsilon 0.978739
+Current beta 0.5024285714285714
+Current maxp 1.0
+Global step 11921
+recent average score 9.2
+
+Episode 18: 4
+Local steps 348
+Experiences 12269
+Current epsilon 0.9773501
+Current beta 0.5025714285714286
+Current maxp 1.0
+Global step 12269
+recent average score 8.4
+
+Episode 19: 10
+Local steps 744
+Experiences 13013
+Current epsilon 0.9766889
+Current beta 0.5027142857142857
+Current maxp 1.0
+Global step 13013
+recent average score 8.8
+
+Episode 20: 12
+Local steps 818
+Experiences 13831
+Current epsilon 0.9752753
+Current beta 0.5028571428571429
+Current maxp 1.0
+Global step 13831
+recent average score 9.6
+
+Episode 21: 6
+Local steps 521
+Experiences 14352
+Current epsilon 0.9737211
+Current beta 0.503
+Current maxp 1.0
+Global step 14352
+recent average score 8.6
+
+Episode 22: 8
+Local steps 579
+Experiences 14931
+Current epsilon 0.9727312
+Current beta 0.5031428571428571
+Current maxp 1.0
+Global step 14931
+recent average score 8.0
+
+Episode 23: 3
+Local steps 536
+Experiences 15467
+Current epsilon 0.9716311
+Current beta 0.5032857142857143
+Current maxp 1.0
+Global step 15467
+recent average score 7.8
+
+Episode 24: 9
+Local steps 603
+Experiences 16070
+Current epsilon 0.9706127
+Current beta 0.5034285714285714
+Current maxp 1.0
+Global step 16070
+recent average score 7.6
+
+Episode 25: 2
+Local steps 530
+Experiences 16600
+Current epsilon 0.969467
+Current beta 0.5035714285714286
+Current maxp 1.0
+Global step 16600
+recent average score 5.6
+
+Episode 26: 5
+Local steps 486
+Experiences 17086
+Current epsilon 0.96846
+Current beta 0.5037142857142857
+Current maxp 1.0
+Global step 17086
+recent average score 5.4
+
+Episode 27: 10
+Local steps 643
+Experiences 17729
+Current epsilon 0.9675366
+Current beta 0.5038571428571429
+Current maxp 1.0
+Global step 17729
+recent average score 5.8
+
+Episode 28: 24
+Local steps 1333
+Experiences 19062
+Current epsilon 0.9663149
+Current beta 0.504
+Current maxp 1.0
+Global step 19062
+recent average score 10.0
+
+Episode 29: 11
+Local steps 758
+Experiences 19820
+Current epsilon 0.9637822
+Current beta 0.5041428571428571
+Current maxp 1.0
+Global step 19820
+recent average score 10.4
+
+HISCORE Updated: 10.4
+==Update target newwork==
+Episode 30: 4
+Local steps 542
+Experiences 20362
+Current epsilon 0.962342
+Current beta 0.5042857142857143
+Current maxp 1.0
+Global step 20362
+recent average score 10.8
+
+HISCORE Updated: 10.8
+Episode 31: 3
+Local steps 504
+Experiences 20866
+Current epsilon 0.9613122000000001
+Current beta 0.5044285714285714
+Current maxp 1.0
+Global step 20866
+recent average score 10.4
+
+Episode 32: 9
+Local steps 709
+Experiences 21575
+Current epsilon 0.9603546
+Current beta 0.5045714285714286
+Current maxp 1.0
+Global step 21575
+recent average score 10.2
+
+Episode 33: 8
+Local steps 610
+Experiences 22185
+Current epsilon 0.9590075
+Current beta 0.5047142857142857
+Current maxp 1.0
+Global step 22185
+recent average score 7.0
+
+Episode 34: 6
+Local steps 517
+Experiences 22702
+Current epsilon 0.9578485
+Current beta 0.5048571428571429
+Current maxp 1.0
+Global step 22702
+recent average score 6.0
+
+Episode 35: 17
+Local steps 920
+Experiences 23622
+Current epsilon 0.9568662
+Current beta 0.505
+Current maxp 1.0
+Global step 23622
+recent average score 8.6
+
+Episode 36: 16
+Local steps 817
+Experiences 24439
+Current epsilon 0.9551182
+Current beta 0.5051428571428571
+Current maxp 1.0
+Global step 24439
+recent average score 11.2
+
+HISCORE Updated: 11.2
+Episode 37: 13
+Local steps 751
+Experiences 25190
+Current epsilon 0.9535659
+Current beta 0.5052857142857143
+Current maxp 1.0
+Global step 25190
+recent average score 12.0
+
+HISCORE Updated: 12.0
+Episode 38: 7
+Local steps 572
+Experiences 25762
+Current epsilon 0.952139
+Current beta 0.5054285714285714
+Current maxp 1.0
+Global step 25762
+recent average score 11.8
+
+Episode 39: 14
+Local steps 882
+Experiences 26644
+Current epsilon 0.9510522
+Current beta 0.5055714285714286
+Current maxp 1.0
+Global step 26644
+recent average score 13.4
+
+HISCORE Updated: 13.4
+Episode 40: 10
+Local steps 743
+Experiences 27387
+Current epsilon 0.9493764
+Current beta 0.5057142857142857
+Current maxp 1.0
+Global step 27387
+recent average score 12.0
+
+Episode 41: 4
+Local steps 389
+Experiences 27776
+Current epsilon 0.9479647
+Current beta 0.5058571428571429
+Current maxp 1.0
+Global step 27776
+recent average score 9.6
+
+Episode 42: 8
+Local steps 498
+Experiences 28274
+Current epsilon 0.9472256
+Current beta 0.506
+Current maxp 1.0
+Global step 28274
+recent average score 8.6
+
+Episode 43: 8
+Local steps 750
+Experiences 29024
+Current epsilon 0.9462794
+Current beta 0.5061428571428571
+Current maxp 1.0
+Global step 29024
+recent average score 8.8
+
+Episode 44: 9
+Local steps 650
+Experiences 29674
+Current epsilon 0.9448544
+Current beta 0.5062857142857143
+Current maxp 1.0
+Global step 29674
+recent average score 7.8
+
+==Update target newwork==
+Episode 45: 24
+Local steps 1198
+Experiences 30872
+Current epsilon 0.9436194
+Current beta 0.5064285714285715
+Current maxp 1.2510483264923096
+Global step 30872
+recent average score 10.6
+
+Episode 46: 10
+Local steps 536
+Experiences 31408
+Current epsilon 0.9413432
+Current beta 0.5065714285714286
+Current maxp 1.259580373764038
+Global step 31408
+recent average score 11.8
+
+Episode 47: 5
+Local steps 484
+Experiences 31892
+Current epsilon 0.9403248
+Current beta 0.5067142857142857
+Current maxp 1.2694422006607056
+Global step 31892
+recent average score 11.2
+
+Episode 48: 17
+Local steps 934
+Experiences 32826
+Current epsilon 0.9394052
+Current beta 0.5068571428571429
+Current maxp 1.3126939535140991
+Global step 32826
+recent average score 13.0
+
+Episode 49: 4
+Local steps 506
+Experiences 33332
+Current epsilon 0.9376306
+Current beta 0.507
+Current maxp 1.3154051303863525
+Global step 33332
+recent average score 12.0
+
+Episode 50: 18
+Local steps 1448
+Experiences 34780
+Current epsilon 0.9366692
+Current beta 0.5071428571428571
+Current maxp 1.3154051303863525
+Global step 34780
+recent average score 10.8
+
+Episode 51: 17
+Local steps 961
+Experiences 35741
+Current epsilon 0.933918
+Current beta 0.5072857142857143
+Current maxp 1.3241102695465088
+Global step 35741
+recent average score 12.2
+
+Episode 52: 19
+Local steps 889
+Experiences 36630
+Current epsilon 0.9320921
+Current beta 0.5074285714285715
+Current maxp 1.3241102695465088
+Global step 36630
+recent average score 15.0
+
+HISCORE Updated: 15.0
+Episode 53: 9
+Local steps 648
+Experiences 37278
+Current epsilon 0.930403
+Current beta 0.5075714285714286
+Current maxp 1.3241102695465088
+Global step 37278
+recent average score 13.4
+
+Episode 54: 7
+Local steps 392
+Experiences 37670
+Current epsilon 0.9291718
+Current beta 0.5077142857142857
+Current maxp 1.3241102695465088
+Global step 37670
+recent average score 14.0
+
+Episode 55: 10
+Local steps 789
+Experiences 38459
+Current epsilon 0.928427
+Current beta 0.5078571428571429
+Current maxp 1.3241102695465088
+Global step 38459
+recent average score 12.4
+
+Episode 56: 12
+Local steps 629
+Experiences 39088
+Current epsilon 0.9269279
+Current beta 0.508
+Current maxp 1.3241102695465088
+Global step 39088
+recent average score 11.4
+
+==Update target newwork==
+Episode 57: 30
+Local steps 1014
+Experiences 40102
+Current epsilon 0.9257328
+Current beta 0.5081428571428571
+Current maxp 1.3241102695465088
+Global step 40102
+recent average score 13.6
+
+Episode 58: 10
+Local steps 691
+Experiences 40793
+Current epsilon 0.9238062
+Current beta 0.5082857142857142
+Current maxp 1.3241102695465088
+Global step 40793
+recent average score 13.8
+
+Episode 59: 7
+Local steps 587
+Experiences 41380
+Current epsilon 0.9224933
+Current beta 0.5084285714285715
+Current maxp 1.325075626373291
+Global step 41380
+recent average score 13.8
+
+Episode 60: 8
+Local steps 567
+Experiences 41947
+Current epsilon 0.921378
+Current beta 0.5085714285714286
+Current maxp 1.325075626373291
+Global step 41947
+recent average score 13.4
+
+Episode 61: 11
+Local steps 683
+Experiences 42630
+Current epsilon 0.9203007
+Current beta 0.5087142857142857
+Current maxp 1.325075626373291
+Global step 42630
+recent average score 13.2
+
+Episode 62: 6
+Local steps 639
+Experiences 43269
+Current epsilon 0.919003
+Current beta 0.5088571428571429
+Current maxp 1.325075626373291
+Global step 43269
+recent average score 8.4
+
+Episode 63: 8
+Local steps 493
+Experiences 43762
+Current epsilon 0.9177889
+Current beta 0.509
+Current maxp 1.325075626373291
+Global step 43762
+recent average score 8.0
+
+Episode 64: 5
+Local steps 512
+Experiences 44274
+Current epsilon 0.9168522
+Current beta 0.5091428571428571
+Current maxp 1.325075626373291
+Global step 44274
+recent average score 7.6
+
+Episode 65: 5
+Local steps 349
+Experiences 44623
+Current epsilon 0.9158794
+Current beta 0.5092857142857143
+Current maxp 1.325075626373291
+Global step 44623
+recent average score 7.0
+
+Episode 66: 9
+Local steps 675
+Experiences 45298
+Current epsilon 0.9152163
+Current beta 0.5094285714285715
+Current maxp 1.325075626373291
+Global step 45298
+recent average score 6.6
+
+Episode 67: 7
+Local steps 482
+Experiences 45780
+Current epsilon 0.9139338
+Current beta 0.5095714285714286
+Current maxp 1.325075626373291
+Global step 45780
+recent average score 6.8
+
+Episode 68: 7
+Local steps 640
+Experiences 46420
+Current epsilon 0.913018
+Current beta 0.5097142857142857
+Current maxp 1.325075626373291
+Global step 46420
+recent average score 6.6
+
+Episode 69: 20
+Local steps 943
+Experiences 47363
+Current epsilon 0.911802
+Current beta 0.5098571428571429
+Current maxp 1.325075626373291
+Global step 47363
+recent average score 9.6
+
+Episode 70: 12
+Local steps 905
+Experiences 48268
+Current epsilon 0.9100103
+Current beta 0.51
+Current maxp 1.325075626373291
+Global step 48268
+recent average score 11.0
+
+Episode 71: 14
+Local steps 865
+Experiences 49133
+Current epsilon 0.9082908000000001
+Current beta 0.5101428571428571
+Current maxp 1.325075626373291
+Global step 49133
+recent average score 12.0
+
+Episode 72: 6
+Local steps 555
+Experiences 49688
+Current epsilon 0.9066473
+Current beta 0.5102857142857142
+Current maxp 1.325075626373291
+Global step 49688
+recent average score 11.8
+
+==Update target newwork==
+Episode 73: 8
+Local steps 700
+Experiences 50388
+Current epsilon 0.9055928
+Current beta 0.5104285714285715
+Current maxp 1.3280832767486572
+Global step 50388
+recent average score 12.0
+
+Episode 74: 7
+Local steps 355
+Experiences 50743
+Current epsilon 0.9042628
+Current beta 0.5105714285714286
+Current maxp 1.4196557998657227
+Global step 50743
+recent average score 9.4
+
+Episode 75: 17
+Local steps 814
+Experiences 51557
+Current epsilon 0.9035883
+Current beta 0.5107142857142857
+Current maxp 1.4196557998657227
+Global step 51557
+recent average score 10.4
+
+Episode 76: 8
+Local steps 531
+Experiences 52088
+Current epsilon 0.9020417000000001
+Current beta 0.5108571428571429
+Current maxp 1.4196557998657227
+Global step 52088
+recent average score 9.2
+
+Episode 77: 7
+Local steps 329
+Experiences 52417
+Current epsilon 0.9010328
+Current beta 0.511
+Current maxp 1.4196557998657227
+Global step 52417
+recent average score 9.4
+
+Episode 78: 13
+Local steps 865
+Experiences 53282
+Current epsilon 0.9004077
+Current beta 0.5111428571428571
+Current maxp 1.4196557998657227
+Global step 53282
+recent average score 10.4
+
+Episode 79: 7
+Local steps 472
+Experiences 53754
+Current epsilon 0.8987642
+Current beta 0.5112857142857142
+Current maxp 1.4196557998657227
+Global step 53754
+recent average score 10.4
+
+Episode 80: 10
+Local steps 727
+Experiences 54481
+Current epsilon 0.8978674
+Current beta 0.5114285714285715
+Current maxp 1.4196557998657227
+Global step 54481
+recent average score 9.0
+
+Episode 81: 4
+Local steps 547
+Experiences 55028
+Current epsilon 0.8964861
+Current beta 0.5115714285714286
+Current maxp 1.4196557998657227
+Global step 55028
+recent average score 8.2
+
+Episode 82: 4
+Local steps 391
+Experiences 55419
+Current epsilon 0.8954468
+Current beta 0.5117142857142857
+Current maxp 1.4196557998657227
+Global step 55419
+recent average score 7.6
+
+Episode 83: 6
+Local steps 648
+Experiences 56067
+Current epsilon 0.8947039
+Current beta 0.5118571428571429
+Current maxp 1.420798420906067
+Global step 56067
+recent average score 6.2
+
+Episode 84: 18
+Local steps 829
+Experiences 56896
+Current epsilon 0.8934727
+Current beta 0.512
+Current maxp 1.420798420906067
+Global step 56896
+recent average score 8.4
+
+Episode 85: 16
+Local steps 1117
+Experiences 58013
+Current epsilon 0.8918976000000001
+Current beta 0.5121428571428571
+Current maxp 1.420798420906067
+Global step 58013
+recent average score 9.6
+
+Episode 86: 6
+Local steps 650
+Experiences 58663
+Current epsilon 0.8897753
+Current beta 0.5122857142857142
+Current maxp 1.420798420906067
+Global step 58663
+recent average score 10.0
+
+Episode 87: 7
+Local steps 590
+Experiences 59253
+Current epsilon 0.8885403000000001
+Current beta 0.5124285714285715
+Current maxp 1.420798420906067
+Global step 59253
+recent average score 10.6
+
+==Update target newwork==
+Episode 88: 8
+Local steps 910
+Experiences 60163
+Current epsilon 0.8874193
+Current beta 0.5125714285714286
+Current maxp 1.420798420906067
+Global step 60163
+recent average score 11.0
+
+Episode 89: 2
+Local steps 428
+Experiences 60591
+Current epsilon 0.8856903
+Current beta 0.5127142857142857
+Current maxp 1.430585503578186
+Global step 60591
+recent average score 7.8
+
+Episode 90: 11
+Local steps 555
+Experiences 61146
+Current epsilon 0.8848771
+Current beta 0.5128571428571429
+Current maxp 1.599821925163269
+Global step 61146
+recent average score 6.8
+
+Episode 91: 9
+Local steps 667
+Experiences 61813
+Current epsilon 0.8838226
+Current beta 0.513
+Current maxp 1.6037508249282837
+Global step 61813
+recent average score 7.4
+
+Episode 92: 7
+Local steps 627
+Experiences 62440
+Current epsilon 0.8825553
+Current beta 0.5131428571428571
+Current maxp 1.6037508249282837
+Global step 62440
+recent average score 7.4
+
+Episode 93: 11
+Local steps 951
+Experiences 63391
+Current epsilon 0.881364
+Current beta 0.5132857142857142
+Current maxp 1.6037508249282837
+Global step 63391
+recent average score 8.0
+
+Episode 94: 5
+Local steps 484
+Experiences 63875
+Current epsilon 0.8795571
+Current beta 0.5134285714285715
+Current maxp 1.6037508249282837
+Global step 63875
+recent average score 8.6
+
+Episode 95: 4
+Local steps 407
+Experiences 64282
+Current epsilon 0.8786375
+Current beta 0.5135714285714286
+Current maxp 1.6037508249282837
+Global step 64282
+recent average score 7.2
+
+Episode 96: 13
+Local steps 697
+Experiences 64979
+Current epsilon 0.8778642
+Current beta 0.5137142857142857
+Current maxp 1.6037508249282837
+Global step 64979
+recent average score 8.0
+
+Traceback (most recent call last):
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/framework/op_def_library.py", line 468, in _apply_op_helper
+    preferred_dtype=default_dtype)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/framework/ops.py", line 1290, in convert_to_tensor
+    (dtype.name, value.dtype.name, value))
+ValueError: Tensor conversion requested dtype float32 for Tensor with dtype float64: <tf.Tensor 'weights:0' shape=(32,) dtype=float64>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "main.py", line 353, in <module>
+    main()
+  File "main.py", line 322, in main
+    history = agent.play(n_episodes=TOTAL_EPISODES)
+  File "main.py", line 115, in play
+    total_reward, localsteps = self.play_episode()
+  File "main.py", line 192, in play_episode
+    self.update_qnetwork()
+  File "main.py", line 248, in update_qnetwork
+    np.array(target_values), weights)
+  File "/home/horoi/tf2_DeepRL/PrioritizedExperienceReplay/SpaceInvadersDet-v4/models.py", line 89, in update
+    loss = tf.reduce_mean(self.huber_loss(td_errors, weights))
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/eager/def_function.py", line 568, in __call__
+    result = self._call(*args, **kwds)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/eager/def_function.py", line 606, in _call
+    results = self._stateful_fn(*args, **kwds)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/eager/function.py", line 2362, in __call__
+    graph_function, args, kwargs = self._maybe_define_function(args, kwargs)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/eager/function.py", line 2703, in _maybe_define_function
+    graph_function = self._create_graph_function(args, kwargs)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/eager/function.py", line 2593, in _create_graph_function
+    capture_by_value=self._capture_by_value),
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/framework/func_graph.py", line 978, in func_graph_from_py_func
+    func_outputs = python_func(*func_args, **func_kwargs)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/eager/def_function.py", line 439, in wrapped_fn
+    return weak_wrapped_fn().__wrapped__(*args, **kwds)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/eager/function.py", line 3211, in bound_method_wrapper
+    return wrapped_fn(*args, **kwargs)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/framework/func_graph.py", line 964, in wrapper
+    user_requested=True,
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/autograph/impl/api.py", line 406, in converted_call
+    return _call_unconverted(f, args, kwargs, options, False)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/autograph/impl/api.py", line 326, in _call_unconverted
+    return f.__self__.call(args, kwargs)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/eager/function.py", line 3173, in call
+    return wrapped_fn(self.weakrefself_target__(), *args, **kwargs)
+  File "/home/horoi/tf2_DeepRL/PrioritizedExperienceReplay/SpaceInvadersDet-v4/models.py", line 66, in huber_loss
+    errors = errors * weights
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/ops/math_ops.py", line 902, in binary_op_wrapper
+    return func(x, y, name=name)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/ops/math_ops.py", line 1201, in _mul_dispatch
+    return gen_math_ops.mul(x, y, name=name)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/ops/gen_math_ops.py", line 6125, in mul
+    "Mul", x=x, y=y, name=name)
+  File "/home/horoi/miniconda3/lib/python3.7/site-packages/tensorflow_core/python/framework/op_def_library.py", line 504, in _apply_op_helper
+    inferred_from[input_arg.type_attr]))
+TypeError: Input 'y' of 'Mul' Op has type float64 that does not match type float32 of argument 'x'.

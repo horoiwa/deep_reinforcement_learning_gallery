@@ -77,6 +77,10 @@ Deep reinforcement learning sample codes with tensorflow2
 [Reinforcement Learning for Improving Agent Design](https://arxiv.org/abs/1810.03779)
 
 
+バッチ強化学習
+[Off-Policy Deep Reinforcement Learning without Exploration](https://arxiv.org/abs/1812.02900)
+
+
 ### Atari emulator
 
 https://www.retrogames.cz/play_222-Atari2600.php

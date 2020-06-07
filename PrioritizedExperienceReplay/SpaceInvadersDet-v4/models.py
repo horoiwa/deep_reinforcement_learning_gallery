@@ -39,8 +39,6 @@ class QNetwork(tf.keras.Model):
 
         self.optimizer = tf.keras.optimizers.Adam(lr=0.00005)
 
-        self.loss_func = tf.losses.Huber()
-
     def call(self, x, training=True):
 
         x = self.conv1(x)
@@ -61,7 +59,6 @@ class QNetwork(tf.keras.Model):
 
         return q_values
 
-    @tf.function
     def huber_loss(self, errors, weights):
         errors = errors * weights
         is_smaller_error = tf.abs(errors) < 1.0

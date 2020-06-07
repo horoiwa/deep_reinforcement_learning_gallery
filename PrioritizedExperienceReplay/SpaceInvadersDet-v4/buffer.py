@@ -6,7 +6,7 @@ import numpy as np
 
 class PrioritizedReplayBuffer:
 
-    ALPHA = 0.7
+    ALPHA = 0.6
 
     EPSILON = 0.01
 
@@ -18,7 +18,7 @@ class PrioritizedReplayBuffer:
 
         self.experiences = []
 
-        self.priorities = np.zeros(self.max_experiences)
+        self.priorities = np.zeros(self.max_experiences, dtype=np.float32)
 
         self.max_priority = 1.0
 
