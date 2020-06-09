@@ -37,7 +37,7 @@ class QNetwork(tf.keras.Model):
         self.advantages = kl.Dense(self.action_space,
                                    kernel_initializer="he_normal")
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.00005)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00001)
 
     def call(self, x, training=True):
 

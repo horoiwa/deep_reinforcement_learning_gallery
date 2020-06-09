@@ -65,7 +65,7 @@ class DQNAgent:
 
     BATCH_SIZE = 32
 
-    UPDATE_PERIOD = 16
+    UPDATE_PERIOD = 4
 
     COPY_PERIOD = 10000
 
@@ -312,7 +312,7 @@ class DQNAgent:
 
 def main():
 
-    TOTAL_EPISODES = 3500
+    TOTAL_EPISODES = 7000
 
     start = datetime.now()
 
