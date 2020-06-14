@@ -4,7 +4,7 @@ Deep reinforcement learning sample codes with tensorflow2
 
 深層強化学習の主要な手法をtensorflow2.Xで実装します。
 
-どの実装も1フォルダで完結するようにしています。
+どの実装も1フォルダで完結するようにしているが、実装した実装した時期が古いものほど酷いコードになっていることには注意。
 
 
 ## Requirements
@@ -66,9 +66,14 @@ Deep reinforcement learning sample codes with tensorflow2
 [OpenAI baselines](https://openai.com/blog/baselines-acktr-a2c/)
 
 
+## DDPG
+
+[Deterministic Policy Gradient Algorithms](http://proceedings.mlr.press/v32/silver14.pdf)
+
+[Continuous control with deep reinforcement learning](https://arxiv.org/abs/1509.02971)
+
 ### PPO
 
-### DDPG
 
 ### DQFD
 
