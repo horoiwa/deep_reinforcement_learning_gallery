@@ -7,6 +7,7 @@ import gym
 from gym import wrappers
 
 from buffer import ReplayBuffer
+from models import ActorNetwork, CriticNetwork
 
 
 @dataclass
@@ -43,19 +44,25 @@ class DDPGAgent:
 
     ENV_ID = 'CarRacing-v0'
 
-    EPSILON_ANEALING = 50000
+    ACTION_SPACE = [(-1., 1.), (0., 1.), (0., 1.)]
 
     NUM_FRAMES = 4
 
+    UPDATE_PERIOD = 100
+
+    TAU = 0.01
+
     def __init__(self):
 
-        self.actor_network = None
+        self.env = gym.make(self.ENV_ID)
 
-        self.target_actor_network = None
+        self.actor_network = ActorNetwork(action_space=self.ACTION_SPACE)
 
-        self.critic_network = None
+        self.target_actor_network = ActorNetwork(action_space=self.ACTION_SPACE)
 
-        self.target_critic_network = None
+        self.critic_network = CriticNetwork(action_space=self.ACTION_SPACE)
+
+        self.target_critic_network = CriticNetwork(action_space=self.ACTION_SPACE)
 
         self.buffer = ReplayBuffer(max_experiences=self.MAX_EXPERIENCES)
 
@@ -70,8 +77,6 @@ class DDPGAgent:
         recent_scores = collections.deque(maxlen=5)
 
         for n in range(n_episodes):
-
-            self.epsilon = 1.0 - min(0.95, self.global_steps * 0.95 / self.EPSILON_ANEALING)
 
             total_reward, localsteps = self.play_episode()
 
@@ -112,19 +117,13 @@ class DDPGAgent:
         for _ in range(self.NUM_FRAMES):
             frames.append(preprocess(frame))
 
-        for _ in range(random.randint(45, 55)):
-            frame, reward, done, info = self.env.step(1)
-            frames.append(preprocess(frame))
-
-        lives = info["ale.lives"]
-
         state = np.stack(frames, axis=2)[np.newaxis, ...]
 
         while not done:
 
-            action = self.sample_action(state)
+            action = self.select_action(state)
 
-            frame, reward, done, info = self.env.step(action)
+            frame, reward, done, _ = self.env.step(action)
 
             #: reward clipping
             reward = 1 if reward else 0
@@ -133,13 +132,9 @@ class DDPGAgent:
 
             next_state = np.stack(frames, axis=2)[np.newaxis, ...]
 
-            if info["ale.lives"] != lives:
-                lives = info["ale.lives"]
-                exp = Experience(state, action, reward, next_state, True)
-            else:
-                exp = Experience(state, action, reward, next_state, done)
+            exp = Experience(state, action, reward, next_state, done)
 
-            self.replay_buffer.add_experience(exp)
+            self.buffer.add_experience(exp)
 
             state = next_state
 
@@ -150,13 +145,19 @@ class DDPGAgent:
             self.global_steps += 1
 
             if self.global_steps % self.UPDATE_PERIOD == 0:
-                self.update_qnetwork()
-
-            if self.global_steps % self.COPY_PERIOD == 0:
-                print("==Update target newwork==")
-                self.target_network.set_weights(self.q_network.get_weights())
+                self.update_network()
+                self.update_target_network()
 
         return total_reward, steps
+
+    def select_action(self, state):
+        return None
+
+    def update_network(self):
+        pass
+
+    def update_target_network(self):
+        pass
 
 
 def main():
