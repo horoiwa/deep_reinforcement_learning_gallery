@@ -24,33 +24,23 @@ class Experience:
     done: bool
 
 
-def preprocess(frame):
-
-    frame = Image.fromarray(frame)
-    frame = frame.convert("L")
-    frame = frame.crop((0, 0, 96, 84))
-    frame = frame.resize((84, 84))
-    frame = np.array(frame, dtype=np.float32)
-    frame = frame / 255
-
-    return frame
-
-
 class DDPGAgent:
 
     MAX_EXPERIENCES = 30000
 
     MIN_EXPERIENCES = 1000
 
-    ENV_ID = 'CarRacing-v0'
+    ENV_ID = 'BipedalWaker-v3'
 
-    ACTION_SPACE = [(-1., 1.), (0., 1.), (0., 1.)]
+    ACTION_SPACE = [(-1., 1.), (-1, 1), (-1, 1), (-1, 1)]
 
     NUM_FRAMES = 4
 
     UPDATE_PERIOD = 100
 
     TAU = 0.01
+
+    BATCH_SIZE = 64
 
     def __init__(self):
 
@@ -74,7 +64,7 @@ class DDPGAgent:
 
         total_rewards = []
 
-        recent_scores = collections.deque(maxlen=5)
+        recent_scores = collections.deque(maxlen=10)
 
         for n in range(n_episodes):
 
@@ -88,10 +78,7 @@ class DDPGAgent:
 
             print(f"Episode {n}: {total_reward}")
             print(f"Local steps {localsteps}")
-            print(f"Experiences {len(self.replay_buffer)}")
-            print(f"Current epsilon {self.epsilon}")
-            print(f"Current beta {self.beta}")
-            print(f"Current maxp {self.replay_buffer.max_priority}")
+            print(f"Experiences {len(self.buffer)}")
             print(f"Global step {self.global_steps}")
             print(f"recent average score {recent_average_score}")
             print()
@@ -111,26 +98,13 @@ class DDPGAgent:
 
         done = False
 
-        frames = collections.deque(maxlen=self.NUM_FRAMES)
-
-        frame = self.env.reset()
-        for _ in range(self.NUM_FRAMES):
-            frames.append(preprocess(frame))
-
-        state = np.stack(frames, axis=2)[np.newaxis, ...]
+        state = self.env.reset()
 
         while not done:
 
-            action = self.select_action(state)
+            action = self.actor_network.sample_action(state, noise=True)
 
-            frame, reward, done, _ = self.env.step(action)
-
-            #: reward clipping
-            reward = 1 if reward else 0
-
-            frames.append(preprocess(frame))
-
-            next_state = np.stack(frames, axis=2)[np.newaxis, ...]
+            next_state, reward, done, _ = self.env.step(action)
 
             exp = Experience(state, action, reward, next_state, done)
 
@@ -150,10 +124,7 @@ class DDPGAgent:
 
         return total_reward, steps
 
-    def select_action(self, state):
-        return None
-
-    def update_network(self):
+    def update_network(self, batch_size):
         pass
 
     def update_target_network(self):

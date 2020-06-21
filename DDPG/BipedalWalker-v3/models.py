@@ -18,71 +18,112 @@ class ActorNetwork(tf.keras.Model):
 
         self.action_space = action_space
 
-        self.conv1 = kl.Conv2D(32, 8, strides=4, activation="relu",
+        self.dense1 = kl.Dense(128, activation="relu",
                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
-        self.conv2 = kl.Conv2D(64, 4, strides=2, activation="relu",
+        self.bn1 = kl.BatchNormalization()
+
+        self.dense2 = kl.Dense(64, activation="relu",
                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
-        self.conv3 = kl.Conv2D(64, 3, strides=1, activation="relu",
-                               kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
-
-        self.flat1 = kl.Flatten()
-
-        self.dense1 = kl.Dense(512, activation="relu",
-                               kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
+        self.bn2 = kl.BatchNormalization()
 
         self.actions = kl.Dense(len(self.action_space), activation="tanh",
                                 kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
-    def call(self, x):
+    def call(self, s, training=True):
 
-        x = self.conv1(x)
+        x = self.dense1(s)
 
-        x = self.conv2(x)
+        x = self.bn1(x, training=training)
 
-        x = self.conv3(x)
+        x = self.dense2(x)
 
-        x = self.flat1(x)
+        x = self.bn2(x, training=training)
 
-        x = self.dense1(x)
+        actions = self.actions(x)
 
-        action = self.actions(x)
+        return actions
 
-        return action
-
-    def sample_action(self, state, noise=True):
+    def sample_action(self, state, noise):
         """ノイズつきアクションのサンプリング
         """
-        action = self(state)
+        state = np.atleast_2d(state).astype(np.float32)
+
+        action = self(state, training=False).numpy()[0]
+
+        if noise:
+            action += np.random.normal(0, 0.1, size=len(self.action_space))
+            action = np.clip(action, -1., 1.)
+
         return action
 
 
 class CriticNetwork(tf.keras.Model):
 
     def __init__(self, action_space):
-        pass
 
-    def call(self, X):
-        return X
+        super(CriticNetwork, self).__init__()
+
+        self.action_space = action_space
+
+        self.dense1 = kl.Dense(128, activation="relu",
+                               kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
+
+        self.bn1 = kl.BatchNormalization()
+
+        self.dense2 = kl.Dense(64, activation="relu",
+                               kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
+
+        self.bn2 = kl.BatchNormalization()
+
+        self.values = kl.Dense(1, kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
+
+    def call(self, s, a, training=True):
+
+        x = tf.concat([s, a], -1)
+
+        x = self.dense1(x)
+
+        x = self.bn1(x, training=training)
+
+        x = self.dense2(x)
+
+        x = self.bn2(x, training=training)
+
+        values = self.values(x)
+
+        return values
+
+    def evaluate(self, s, a):
+
+        s = np.atleast_2d(s).astype(np.float32)
+
+        a = np.atleast_2d(a).astype(np.float32)
+
+        q = self(s, a, training=False).numpy()[0][0]
+
+        return q
+
 
 
 if __name__ == "__main__":
-    physical_devices = tf.config.experimental.list_physical_devices('GPU')
-    tf.config.experimental.set_memory_growth(physical_devices[0], True)
+    import gym
+    #physical_devices = tf.config.experimental.list_physical_devices('GPU')
+    #tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
-    frames = []
+    actor = ActorNetwork(action_space=[(-1., 1.), (-1., 1.), (-1., 1.), (-1., 1.)])
 
-    for _ in range(4):
-        frame = np.random.random(size=(84, 84))
-        frames.append(frame)
+    critic = CriticNetwork(action_space=[(-1., 1.), (-1., 1.), (-1., 1.), (-1., 1.)])
 
-    obs = np.stack(frames, axis=2)[np.newaxis, ...]
+    env = gym.make("BipedalWalker-v3")
 
-    actor = ActorNetwork(action_space=[(-1., 1.), (0., 1.), (0., 1.)])
+    obs = env.reset()
 
-    action = actor.sample_action(obs)
+    action = actor.sample_action(obs, noise=True)
+
+    q = critic.evaluate(obs, action)
 
     print(action)
+    print(q)
 
-    #action = [-0.2, 0.8, 0.2]

@@ -72,6 +72,8 @@ Deep reinforcement learning sample codes with tensorflow2
 
 [Continuous control with deep reinforcement learning](https://arxiv.org/abs/1509.02971)
 
+## TD3
+
 ### PPO
 
 
