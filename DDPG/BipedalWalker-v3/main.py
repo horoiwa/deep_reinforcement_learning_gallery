@@ -30,7 +30,7 @@ class Experience:
 
 class DDPGAgent:
 
-    MAX_EXPERIENCES = 30000
+    MAX_EXPERIENCES = 10000
 
     MIN_EXPERIENCES = 1000
 
@@ -38,17 +38,19 @@ class DDPGAgent:
 
     ACTION_SPACE = [(-1., 1.), (-1, 1), (-1, 1), (-1, 1)]
 
-    UPDATE_PERIOD = 100
+    UPDATE_PERIOD = 4
 
     TAU = 0.01
 
     GAMMA = 0.99
 
-    BATCH_SIZE = 64
+    BATCH_SIZE = 32
 
     def __init__(self):
 
         self.env = gym.make(self.ENV_ID)
+
+        self.env.max_episode_steps = 1000
 
         self.actor_network = ActorNetwork(action_space=self.ACTION_SPACE)
 
