@@ -1,10 +1,14 @@
 from dataclasses import dataclass
 import collections
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 import numpy as np
+import tensorflow as tf
 from PIL import Image
 import gym
 from gym import wrappers
+import matplotlib.pyplot as plt
 
 from buffer import ReplayBuffer
 from models import ActorNetwork, CriticNetwork
@@ -30,15 +34,15 @@ class DDPGAgent:
 
     MIN_EXPERIENCES = 1000
 
-    ENV_ID = 'BipedalWaker-v3'
+    ENV_ID = "BipedalWalker-v3"
 
     ACTION_SPACE = [(-1., 1.), (-1, 1), (-1, 1), (-1, 1)]
-
-    NUM_FRAMES = 4
 
     UPDATE_PERIOD = 100
 
     TAU = 0.01
+
+    GAMMA = 0.99
 
     BATCH_SIZE = 64
 
@@ -59,6 +63,26 @@ class DDPGAgent:
         self.global_steps = 0
 
         self.hiscore = 0
+
+        self._build_networks()
+
+    def _build_networks(self):
+        """パラメータの初期化
+        """
+
+        dummy_state = np.random.normal(0, 0.1, size=24)
+        dummy_state = (dummy_state[np.newaxis, ...]).astype(np.float32)
+
+        dummy_action = np.random.normal(0, 0.1, size=4)
+        dummy_action = (dummy_action[np.newaxis, ...]).astype(np.float32)
+
+        self.actor_network.call(dummy_state)
+        self.target_actor_network.call(dummy_state)
+        self.target_actor_network.set_weights(self.actor_network.get_weights())
+
+        self.critic_network.call(dummy_state, dummy_action, training=False)
+        self.target_critic_network.call(dummy_state, dummy_action, training=False)
+        self.target_critic_network.set_weights(self.critic_network.get_weights())
 
     def play(self, n_episodes):
 
@@ -119,24 +143,86 @@ class DDPGAgent:
             self.global_steps += 1
 
             if self.global_steps % self.UPDATE_PERIOD == 0:
-                self.update_network()
+                self.update_network(self.BATCH_SIZE)
                 self.update_target_network()
 
         return total_reward, steps
 
     def update_network(self, batch_size):
-        pass
+
+        if len(self.buffer) < self.MIN_EXPERIENCES:
+            return
+
+        (states, actions, rewards,
+         next_states, dones) = self.buffer.get_minibatch(batch_size)
+
+        next_actions = self.target_actor_network(next_states)
+
+        next_qvalues = self.target_critic_network(next_states, next_actions).numpy().flatten()
+
+        #: Compute taeget values and update CriticNetwork
+        target_values = np.vstack(
+            [reward + self.GAMMA * qvalue if not done else reward
+             for reward, done, qvalue
+             in zip(rewards, dones, next_qvalues)]).astype(np.float32)
+
+        self.critic_network.update(target_values, states, actions)
+
+        #: Update ActorNetwork
+        with tf.GradientTape() as tape:
+            J = -1 * tf.reduce_mean(self.critic_network(states, self.actor_network(states)))
+
+        variables = self.actor_network.trainable_variables
+        gradients = tape.gradient(J, variables)
+        self.actor_network.optimizer.apply_gradients(zip(gradients, variables))
 
     def update_target_network(self):
-        pass
+
+        # soft-target update Actor
+        target_actor_weights = self.target_actor_network.get_weights()
+        actor_weights = self.actor_network.get_weights()
+
+        assert len(target_actor_weights) == len(actor_weights)
+
+        self.target_actor_network.set_weights(
+            [(1 - self.TAU) * w1 + (self.TAU) * w2
+             for w1, w2 in
+             zip(target_actor_weights, actor_weights)])
+
+        # soft-target update Critic
+        target_critic_weights = self.target_critic_network.get_weights()
+        critic_weights = self.critic_network.get_weights()
+
+        assert len(target_critic_weights) == len(critic_weights)
+
+        self.target_critic_network.set_weights(
+            [(1 - self.TAU) * w1 + (self.TAU) * w2
+             for w1, w2 in zip(target_critic_weights, critic_weights)])
+
+    def save_model(self):
+
+        self.actor_network.save_weights("checkpoints/actor")
+
+        self.critic_network.save_weights("checkpoints/critic")
+
+    def load_model(self):
+
+        self.actor_network.load_weights("checkpoints/actor")
+
+        self.target_actor_network.load_weights("checkpoints/actor")
+
+        self.critic_network.load_weights("checkpoints/critic")
+
+        self.target_critic_network.load_weights("checkpoints/critic")
 
 
 def main():
-    N_EPISODES = 30
+    N_EPISODES = 1000
     agent = DDPGAgent()
     history = agent.play(n_episodes=N_EPISODES)
     print(history)
-
+    plt.plot(range(len(history)), history)
+    plt.savefig("history/log.png")
 
 
 if __name__ == "__main__":

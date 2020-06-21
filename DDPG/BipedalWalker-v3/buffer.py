@@ -30,11 +30,22 @@ class ReplayBuffer:
 
         N = len(self.experiences)
 
-        indices = np.random.choice(np.arange(N), replace=False, size=batch_size)
+        indices = np.random.choice(np.arange(N), replace=False,
+                                   size=batch_size)
 
         selected_experiences = [self.experiences[idx] for idx in indices]
 
-        return selected_experiences
+        states = np.vstack([exp.state for exp in selected_experiences]).astype(np.float32)
+
+        actions = [exp.action for exp in selected_experiences]
+
+        rewards = [exp.reward for exp in selected_experiences]
+
+        next_states = np.vstack([exp.next_state for exp in selected_experiences]).astype(np.float32)
+
+        dones = [exp.done for exp in selected_experiences]
+
+        return (states, actions, rewards, next_states, dones)
 
     def __len__(self):
         return len(self.experiences)

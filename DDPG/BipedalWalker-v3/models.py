@@ -18,6 +18,8 @@ class ActorNetwork(tf.keras.Model):
 
         self.action_space = action_space
 
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0001)
+
         self.dense1 = kl.Dense(128, activation="relu",
                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
@@ -67,6 +69,8 @@ class CriticNetwork(tf.keras.Model):
 
         self.action_space = action_space
 
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
+
         self.dense1 = kl.Dense(128, activation="relu",
                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
@@ -95,16 +99,15 @@ class CriticNetwork(tf.keras.Model):
 
         return values
 
-    def evaluate(self, s, a):
+    def update(self, target_values, states, actions):
 
-        s = np.atleast_2d(s).astype(np.float32)
+        with tf.GradientTape() as tape:
+            qvalues = self(states, actions)
+            loss = tf.reduce_mean(tf.square(target_values - qvalues))
 
-        a = np.atleast_2d(a).astype(np.float32)
-
-        q = self(s, a, training=False).numpy()[0][0]
-
-        return q
-
+        variables = self.trainable_variables
+        gradients = tape.gradient(loss, variables)
+        self.optimizer.apply_gradients(zip(gradients, variables))
 
 
 if __name__ == "__main__":
