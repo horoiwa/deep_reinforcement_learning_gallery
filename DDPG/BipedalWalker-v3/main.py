@@ -30,7 +30,7 @@ class Experience:
 
 class DDPGAgent:
 
-    MAX_EXPERIENCES = 10000
+    MAX_EXPERIENCES = 30000
 
     MIN_EXPERIENCES = 1000
 
@@ -40,11 +40,11 @@ class DDPGAgent:
 
     UPDATE_PERIOD = 4
 
-    TAU = 0.01
+    TAU = 0.05
 
     GAMMA = 0.99
 
-    BATCH_SIZE = 32
+    BATCH_SIZE = 16
 
     def __init__(self):
 
@@ -168,7 +168,13 @@ class DDPGAgent:
              for reward, done, qvalue
              in zip(rewards, dones, next_qvalues)]).astype(np.float32)
 
-        self.critic_network.update(target_values, states, actions)
+        with tf.GradientTape() as tape:
+            qvalues = self.critic_network(states, actions)
+            loss = tf.reduce_mean(tf.square(target_values - qvalues))
+
+        variables = self.critic_network.trainable_variables
+        gradients = tape.gradient(loss, variables)
+        self.critic_network.optimizer.apply_gradients(zip(gradients, variables))
 
         #: Update ActorNetwork
         with tf.GradientTape() as tape:

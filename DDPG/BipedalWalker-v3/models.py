@@ -20,12 +20,12 @@ class ActorNetwork(tf.keras.Model):
 
         self.optimizer = tf.keras.optimizers.Adam(lr=0.0001)
 
-        self.dense1 = kl.Dense(128, activation="relu",
+        self.dense1 = kl.Dense(512, activation="relu",
                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
         self.bn1 = kl.BatchNormalization()
 
-        self.dense2 = kl.Dense(64, activation="relu",
+        self.dense2 = kl.Dense(512, activation="relu",
                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
         self.bn2 = kl.BatchNormalization()
@@ -71,12 +71,12 @@ class CriticNetwork(tf.keras.Model):
 
         self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
 
-        self.dense1 = kl.Dense(128, activation="relu",
+        self.dense1 = kl.Dense(512, activation="relu",
                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
         self.bn1 = kl.BatchNormalization()
 
-        self.dense2 = kl.Dense(64, activation="relu",
+        self.dense2 = kl.Dense(512, activation="relu",
                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
         self.bn2 = kl.BatchNormalization()
@@ -98,16 +98,6 @@ class CriticNetwork(tf.keras.Model):
         values = self.values(x)
 
         return values
-
-    def update(self, target_values, states, actions):
-
-        with tf.GradientTape() as tape:
-            qvalues = self(states, actions)
-            loss = tf.reduce_mean(tf.square(target_values - qvalues))
-
-        variables = self.trainable_variables
-        gradients = tape.gradient(loss, variables)
-        self.optimizer.apply_gradients(zip(gradients, variables))
 
 
 if __name__ == "__main__":
