@@ -8,9 +8,8 @@ import numpy as np
 
 
 class ActorNetwork(tf.keras.Model):
-    """memo
-        batchnorm
-    """
+
+    ACTION_RANGE = 2.0
 
     def __init__(self, action_space):
 
@@ -20,12 +19,12 @@ class ActorNetwork(tf.keras.Model):
 
         self.optimizer = tf.keras.optimizers.Adam(lr=0.0001)
 
-        self.dense1 = kl.Dense(512, activation="relu",
+        self.dense1 = kl.Dense(256, activation="relu",
                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
         self.bn1 = kl.BatchNormalization()
 
-        self.dense2 = kl.Dense(512, activation="relu",
+        self.dense2 = kl.Dense(256, activation="relu",
                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
         self.bn2 = kl.BatchNormalization()
@@ -45,9 +44,11 @@ class ActorNetwork(tf.keras.Model):
 
         actions = self.actions(x)
 
+        actions = actions * self.ACTION_RANGE
+
         return actions
 
-    def sample_action(self, state, noise):
+    def sample_action(self, state, noise=None):
         """ノイズつきアクションのサンプリング
         """
         state = np.atleast_2d(state).astype(np.float32)
@@ -55,8 +56,8 @@ class ActorNetwork(tf.keras.Model):
         action = self(state, training=False).numpy()[0]
 
         if noise:
-            action += np.random.normal(0, 0.1, size=self.action_space)
-            action = np.clip(action, -1., 1.)
+            action += np.random.normal(0, noise, size=self.action_space)
+            action = np.clip(action, -self.ACTION_RANGE, self.ACTION_RANGE)
 
         return action
 
@@ -71,12 +72,12 @@ class CriticNetwork(tf.keras.Model):
 
         self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
 
-        self.dense1 = kl.Dense(512, activation="relu",
+        self.dense1 = kl.Dense(256, activation="relu",
                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
         self.bn1 = kl.BatchNormalization()
 
-        self.dense2 = kl.Dense(512, activation="relu",
+        self.dense2 = kl.Dense(256, activation="relu",
                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
         self.bn2 = kl.BatchNormalization()

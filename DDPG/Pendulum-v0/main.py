@@ -34,19 +34,19 @@ class DDPGAgent:
 
     MIN_EXPERIENCES = 300
 
-    ENV_ID = "BipedalWalker-v3"
+    ENV_ID = "Pendulum-v0"
 
-    ACTION_SPACE = 4
+    ACTION_SPACE = 1
 
-    OBSERVATION_SPACE = 24
+    OBSERVATION_SPACE = 3
 
-    UPDATE_PERIOD = 4
+    UPDATE_PERIOD = 8
 
     TAU = 0.05
 
     GAMMA = 0.99
 
-    BATCH_SIZE = 16
+    BATCH_SIZE = 32
 
     def __init__(self):
 
@@ -65,6 +65,8 @@ class DDPGAgent:
         self.buffer = ReplayBuffer(max_experiences=self.MAX_EXPERIENCES)
 
         self.global_steps = 0
+
+        self.stdev_init = 0.4
 
         self.hiscore = None
 
@@ -96,6 +98,8 @@ class DDPGAgent:
 
         for n in range(n_episodes):
 
+            self.stdev = ((n_episodes - n) / n_episodes) * self.stdev_init
+
             total_reward, localsteps = self.play_episode()
 
             total_rewards.append(total_reward)
@@ -108,6 +112,7 @@ class DDPGAgent:
             print(f"Local steps {localsteps}")
             print(f"Experiences {len(self.buffer)}")
             print(f"Global step {self.global_steps}")
+            print(f"Noise stdev {self.stdev}")
             print(f"recent average score {recent_average_score}")
             print()
 
@@ -130,7 +135,7 @@ class DDPGAgent:
 
         while not done:
 
-            action = self.actor_network.sample_action(state, noise=True)
+            action = self.actor_network.sample_action(state, noise=self.stdev)
 
             next_state, reward, done, _ = self.env.step(action)
 
@@ -259,7 +264,6 @@ class DDPGAgent:
 
                 steps += 1
 
-                print(done)
 
             print()
             print(f"Test Play {i}: {total_reward}")
@@ -268,7 +272,7 @@ class DDPGAgent:
 
 
 def main():
-    N_EPISODES = 300
+    N_EPISODES = 100
     agent = DDPGAgent()
     history = agent.play(n_episodes=N_EPISODES)
     print(history)
