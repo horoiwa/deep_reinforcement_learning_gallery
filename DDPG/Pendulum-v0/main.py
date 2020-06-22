@@ -66,7 +66,7 @@ class DDPGAgent:
 
         self.global_steps = 0
 
-        self.stdev_init = 0.4
+        self.stdev_init = 0.5
 
         self.hiscore = None
 
@@ -98,7 +98,7 @@ class DDPGAgent:
 
         for n in range(n_episodes):
 
-            self.stdev = ((n_episodes - n) / n_episodes) * self.stdev_init
+            self.stdev = min(0, ((200 - n) / 200) * self.stdev_init)
 
             total_reward, localsteps = self.play_episode()
 
@@ -272,7 +272,7 @@ class DDPGAgent:
 
 
 def main():
-    N_EPISODES = 100
+    N_EPISODES = 500
     agent = DDPGAgent()
     history = agent.play(n_episodes=N_EPISODES)
     print(history)
