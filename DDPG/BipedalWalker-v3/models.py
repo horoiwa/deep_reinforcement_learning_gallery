@@ -30,7 +30,7 @@ class ActorNetwork(tf.keras.Model):
 
         self.bn2 = kl.BatchNormalization()
 
-        self.actions = kl.Dense(len(self.action_space), activation="tanh",
+        self.actions = kl.Dense(self.action_space, activation="tanh",
                                 kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
 
     def call(self, s, training=True):
@@ -55,7 +55,7 @@ class ActorNetwork(tf.keras.Model):
         action = self(state, training=False).numpy()[0]
 
         if noise:
-            action += np.random.normal(0, 0.1, size=len(self.action_space))
+            action += np.random.normal(0, 0.1, size=self.action_space)
             action = np.clip(action, -1., 1.)
 
         return action

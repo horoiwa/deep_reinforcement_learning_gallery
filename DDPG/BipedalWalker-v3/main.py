@@ -32,11 +32,13 @@ class DDPGAgent:
 
     MAX_EXPERIENCES = 30000
 
-    MIN_EXPERIENCES = 1000
+    MIN_EXPERIENCES = 300
 
     ENV_ID = "BipedalWalker-v3"
 
-    ACTION_SPACE = [(-1., 1.), (-1, 1), (-1, 1), (-1, 1)]
+    ACTION_SPACE = 4
+
+    OBSERVATION_SPACE = 24
 
     UPDATE_PERIOD = 4
 
@@ -64,7 +66,7 @@ class DDPGAgent:
 
         self.global_steps = 0
 
-        self.hiscore = 0
+        self.hiscore = None
 
         self._build_networks()
 
@@ -72,10 +74,10 @@ class DDPGAgent:
         """パラメータの初期化
         """
 
-        dummy_state = np.random.normal(0, 0.1, size=24)
+        dummy_state = np.random.normal(0, 0.1, size=self.OBSERVATION_SPACE)
         dummy_state = (dummy_state[np.newaxis, ...]).astype(np.float32)
 
-        dummy_action = np.random.normal(0, 0.1, size=4)
+        dummy_action = np.random.normal(0, 0.1, size=self.ACTION_SPACE)
         dummy_action = (dummy_action[np.newaxis, ...]).astype(np.float32)
 
         self.actor_network.call(dummy_state)
@@ -109,10 +111,10 @@ class DDPGAgent:
             print(f"recent average score {recent_average_score}")
             print()
 
-            if recent_average_score > self.hiscore:
+            if (self.hiscore is None) or (recent_average_score > self.hiscore):
                 self.hiscore = recent_average_score
                 print(f"HISCORE Updated: {self.hiscore}")
-                #self.save_model()
+                self.save_model()
 
         return total_rewards
 
@@ -164,8 +166,8 @@ class DDPGAgent:
 
         #: Compute taeget values and update CriticNetwork
         target_values = np.vstack(
-            [reward + self.GAMMA * qvalue if not done else reward
-             for reward, done, qvalue
+            [reward + self.GAMMA * next_qvalue if not done else reward
+             for reward, done, next_qvalue
              in zip(rewards, dones, next_qvalues)]).astype(np.float32)
 
         with tf.GradientTape() as tape:
@@ -223,14 +225,56 @@ class DDPGAgent:
 
         self.target_critic_network.load_weights("checkpoints/critic")
 
+    def test_play(self, n, monitordir, load_model=False):
+
+        if load_model:
+            self.load_model()
+
+        if monitordir:
+            env = wrappers.Monitor(gym.make(self.ENV_ID),
+                                   monitordir, force=True,
+                                   video_callable=(lambda ep: ep % 1 == 0))
+        else:
+            env = gym.make(self.ENV_ID)
+
+        for i in range(n):
+
+            total_reward = 0
+
+            steps = 0
+
+            done = False
+
+            state = env.reset()
+
+            while not done:
+
+                action = self.actor_network.sample_action(state, noise=False)
+
+                next_state, reward, done, _ = env.step(action)
+
+                state = next_state
+
+                total_reward += reward
+
+                steps += 1
+
+                print(done)
+
+            print()
+            print(f"Test Play {i}: {total_reward}")
+            print(f"Steps:", steps)
+            print()
+
 
 def main():
-    N_EPISODES = 1000
+    N_EPISODES = 300
     agent = DDPGAgent()
     history = agent.play(n_episodes=N_EPISODES)
     print(history)
     plt.plot(range(len(history)), history)
     plt.savefig("history/log.png")
+    agent.test_play(n=5, monitordir="history", load_model=True)
 
 
 if __name__ == "__main__":
