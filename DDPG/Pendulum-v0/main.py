@@ -40,9 +40,11 @@ class DDPGAgent:
 
     OBSERVATION_SPACE = 3
 
-    UPDATE_PERIOD = 8
+    UPDATE_PERIOD = 4
 
-    TAU = 0.05
+    START_EPISODES = 100
+
+    TAU = 0.01
 
     GAMMA = 0.99
 
@@ -58,9 +60,11 @@ class DDPGAgent:
 
         self.target_actor_network = ActorNetwork(action_space=self.ACTION_SPACE)
 
-        self.critic_network = CriticNetwork(action_space=self.ACTION_SPACE)
+        self.critic_network = CriticNetwork()
 
-        self.target_critic_network = CriticNetwork(action_space=self.ACTION_SPACE)
+        self.target_critic_network = CriticNetwork()
+
+        self.stdev = 0.1
 
         self.buffer = ReplayBuffer(max_experiences=self.MAX_EXPERIENCES)
 
@@ -98,9 +102,11 @@ class DDPGAgent:
 
         for n in range(n_episodes):
 
-            self.stdev = min(0, ((200 - n) / 200) * self.stdev_init)
 
-            total_reward, localsteps = self.play_episode()
+            if n <= self.START_EPISODES:
+                total_reward, localsteps = self.play_episode(random=True)
+            else:
+                total_reward, localsteps = self.play_episode()
 
             total_rewards.append(total_reward)
 
@@ -123,7 +129,7 @@ class DDPGAgent:
 
         return total_rewards
 
-    def play_episode(self):
+    def play_episode(self, random=False):
 
         total_reward = 0
 
@@ -135,7 +141,10 @@ class DDPGAgent:
 
         while not done:
 
-            action = self.actor_network.sample_action(state, noise=self.stdev)
+            if random:
+                action = np.random.uniform(-2, 2, size=self.ACTION_SPACE)
+            else:
+                action = self.actor_network.sample_action(state, noise=self.stdev)
 
             next_state, reward, done, _ = self.env.step(action)
 
@@ -200,9 +209,8 @@ class DDPGAgent:
         assert len(target_actor_weights) == len(actor_weights)
 
         self.target_actor_network.set_weights(
-            [(1 - self.TAU) * w1 + (self.TAU) * w2
-             for w1, w2 in
-             zip(target_actor_weights, actor_weights)])
+            (1 - self.TAU) * np.array(target_actor_weights)
+            + (self.TAU) * np.array(actor_weights))
 
         # soft-target update Critic
         target_critic_weights = self.target_critic_network.get_weights()
@@ -211,8 +219,8 @@ class DDPGAgent:
         assert len(target_critic_weights) == len(critic_weights)
 
         self.target_critic_network.set_weights(
-            [(1 - self.TAU) * w1 + (self.TAU) * w2
-             for w1, w2 in zip(target_critic_weights, critic_weights)])
+            (1 - self.TAU) * np.array(target_critic_weights)
+            + (self.TAU) * np.array(critic_weights))
 
     def save_model(self):
 
@@ -264,7 +272,6 @@ class DDPGAgent:
 
                 steps += 1
 
-
             print()
             print(f"Test Play {i}: {total_reward}")
             print(f"Steps:", steps)
@@ -272,12 +279,16 @@ class DDPGAgent:
 
 
 def main():
-    N_EPISODES = 500
+    N_EPISODES = 1000
     agent = DDPGAgent()
     history = agent.play(n_episodes=N_EPISODES)
+
     print(history)
     plt.plot(range(len(history)), history)
+    plt.xlabel("Episodes")
+    plt.ylabel("Total Rewards")
     plt.savefig("history/log.png")
+
     agent.test_play(n=5, monitordir="history", load_model=True)
 
 
