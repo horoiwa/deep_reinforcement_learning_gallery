@@ -42,9 +42,9 @@ class DDPGAgent:
 
     UPDATE_PERIOD = 4
 
-    START_EPISODES = 100
+    START_EPISODES = 20
 
-    TAU = 0.01
+    TAU = 0.02
 
     GAMMA = 0.99
 
@@ -64,13 +64,11 @@ class DDPGAgent:
 
         self.target_critic_network = CriticNetwork()
 
-        self.stdev = 0.1
+        self.stdev = 0.2
 
         self.buffer = ReplayBuffer(max_experiences=self.MAX_EXPERIENCES)
 
         self.global_steps = 0
-
-        self.stdev_init = 0.5
 
         self.hiscore = None
 
@@ -279,7 +277,7 @@ class DDPGAgent:
 
 
 def main():
-    N_EPISODES = 1000
+    N_EPISODES = 150
     agent = DDPGAgent()
     history = agent.play(n_episodes=N_EPISODES)
 
@@ -289,7 +287,7 @@ def main():
     plt.ylabel("Total Rewards")
     plt.savefig("history/log.png")
 
-    agent.test_play(n=5, monitordir="history", load_model=True)
+    agent.test_play(n=8, monitordir="history", load_model=True)
 
 
 if __name__ == "__main__":

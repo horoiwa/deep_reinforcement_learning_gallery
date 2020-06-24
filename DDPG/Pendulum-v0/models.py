@@ -17,20 +17,17 @@ class ActorNetwork(tf.keras.Model):
 
         self.action_space = action_space
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.0001)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
 
-        self.dense1 = kl.Dense(256, activation="relu")
-                               #kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
+        self.dense1 = kl.Dense(64, activation="relu")
 
         self.bn1 = kl.BatchNormalization()
 
-        self.dense2 = kl.Dense(256, activation="relu")
-                               #kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
+        self.dense2 = kl.Dense(64, activation="relu")
 
         self.bn2 = kl.BatchNormalization()
 
-        self.actions = kl.Dense(self.action_space, activation="tanh",
-                                kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
+        self.actions = kl.Dense(self.action_space, activation="tanh")
 
     def call(self, s, training=True):
 
@@ -70,17 +67,15 @@ class CriticNetwork(tf.keras.Model):
 
         self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
 
-        self.dense1 = kl.Dense(256, activation="relu",
-                               kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
+        self.dense1 = kl.Dense(64, activation="relu")
 
         self.bn1 = kl.BatchNormalization()
 
-        self.dense2 = kl.Dense(256, activation="relu",
-                               kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
+        self.dense2 = kl.Dense(64, activation="relu")
 
         self.bn2 = kl.BatchNormalization()
 
-        self.values = kl.Dense(1, kernel_initializer=RandomUniform(minval=-3e-3, maxval=3e-3))
+        self.values = kl.Dense(1)
 
     def call(self, s, a, training=True):
 

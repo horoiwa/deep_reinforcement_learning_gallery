@@ -36,3 +36,8 @@ actorはrelu活性化だがさいごだけtanh
 探索ノイズはN(0, 0.1)で固定でOK
 
 https://towardsdatascience.com/teach-your-ai-how-to-walk-5ad55fce8bca
+
+
+noise
+
+https://openai.com/blog/better-exploration-with-parameter-noise/
