@@ -32,7 +32,6 @@ if __name__ == "__main__":
     print()
     print("Observation space", env.observation_space)
 
-
     for n in range(3):
         done = False
         observation = env.reset()
