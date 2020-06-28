@@ -50,7 +50,7 @@ class TD3Agent:
 
     GAMMA = 0.99
 
-    BATCH_SIZE = 32
+    BATCH_SIZE = 64
 
     NOISE_STDDEV = 0.2
 
@@ -116,7 +116,7 @@ class TD3Agent:
             print(f"Local steps {localsteps}")
             print(f"Experiences {len(self.buffer)}")
             print(f"Global step {self.global_steps}")
-            print(f"Noise stdev {self.stdev}")
+            print(f"Noise stdev {self.NOISE_STDDEV}")
             print(f"recent average score {recent_average_score}")
             print()
 
@@ -155,9 +155,13 @@ class TD3Agent:
 
             self.global_steps += 1
 
-            if self.global_steps % self.UPDATE_PERIOD == 0:
-                self.update_network(self.BATCH_SIZE)
-                self.update_target_network()
+            #: Delayed Policy update
+            if self.global_steps % self.CRITIC_UPDATE_PERIOD == 0:
+                if self.global_steps % self.POLICY_UPDATE_PERIOD == 0:
+                    self.update_network(self.BATCH_SIZE, update_policy=True)
+                    self.update_target_network()
+                else:
+                    self.update_network(self.BATCH_SIZE)
 
         return total_reward, steps
 
@@ -233,9 +237,7 @@ class TD3Agent:
 
         self.actor.save_weights("checkpoints/actor")
 
-        self.critic1.save_weights("checkpoints/critic1")
-
-        self.critic2.save_weights("checkpoints/critic2")
+        self.critic.save_weights("checkpoints/critic")
 
     def load_model(self):
 
@@ -243,13 +245,9 @@ class TD3Agent:
 
         self.target_actor.load_weights("checkpoints/actor")
 
-        self.critic1.load_weights("checkpoints/critic1")
+        self.critic.load_weights("checkpoints/critic")
 
-        self.target_critic1.load_weights("checkpoints/critic1")
-
-        self.critic2.load_weights("checkpoints/critic2")
-
-        self.target_critic2.load_weights("checkpoints/critic2")
+        self.target_critic.load_weights("checkpoints/critic")
 
     def test_play(self, n, monitordir, load_model=False):
 
@@ -275,7 +273,7 @@ class TD3Agent:
 
             while not done:
 
-                action = self.actor_network.sample_action(state, noise=False)
+                action = self.actor.sample_action(state, noise=False)
 
                 next_state, reward, done, _ = env.step(action)
 
@@ -302,7 +300,7 @@ def main():
     plt.ylabel("Total Rewards")
     plt.savefig("history/log.png")
 
-    agent.test_play(n=3, monitordir="history", load_model=True)
+    agent.test_play(n=5, monitordir="history", load_model=True)
 
 
 if __name__ == "__main__":
