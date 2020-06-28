@@ -38,11 +38,13 @@ class TD3Agent:
 
     ACTION_SPACE = 1
 
+    MAX_ACTION = 2
+
     OBSERVATION_SPACE = 3
 
-    UPDATE_PERIOD = 4
+    CRITIC_UPDATE_PERIOD = 4
 
-    START_EPISODES = 20
+    POLICY_UPDATE_PERIOD = 8
 
     TAU = 0.02
 
@@ -50,21 +52,23 @@ class TD3Agent:
 
     BATCH_SIZE = 32
 
+    NOISE_STDDEV = 0.2
+
     def __init__(self):
 
         self.env = gym.make(self.ENV_ID)
 
-        self.env.max_episode_steps = 1000
+        self.env.max_episode_steps = 3000
 
-        self.actor_network = ActorNetwork(action_space=self.ACTION_SPACE)
+        self.actor = ActorNetwork(action_space=self.ACTION_SPACE,
+                                  max_action=self.MAX_ACTION)
 
-        self.target_actor_network = ActorNetwork(action_space=self.ACTION_SPACE)
+        self.target_actor = ActorNetwork(action_space=self.ACTION_SPACE,
+                                         max_action=self.MAX_ACTION)
 
-        self.critic_network = CriticNetwork()
+        self.critic = CriticNetwork()
 
-        self.target_critic_network = CriticNetwork()
-
-        self.stdev = 0.2
+        self.target_critic = CriticNetwork()
 
         self.buffer = ReplayBuffer(max_experiences=self.MAX_EXPERIENCES)
 
@@ -84,13 +88,13 @@ class TD3Agent:
         dummy_action = np.random.normal(0, 0.1, size=self.ACTION_SPACE)
         dummy_action = (dummy_action[np.newaxis, ...]).astype(np.float32)
 
-        self.actor_network.call(dummy_state)
-        self.target_actor_network.call(dummy_state)
-        self.target_actor_network.set_weights(self.actor_network.get_weights())
+        self.actor.call(dummy_state)
+        self.target_actor.call(dummy_state)
+        self.target_actor.set_weights(self.actor.get_weights())
 
-        self.critic_network.call(dummy_state, dummy_action, training=False)
-        self.target_critic_network.call(dummy_state, dummy_action, training=False)
-        self.target_critic_network.set_weights(self.critic_network.get_weights())
+        self.critic.call(dummy_state, dummy_action, training=False)
+        self.target_critic.call(dummy_state, dummy_action, training=False)
+        self.target_critic.set_weights(self.critic.get_weights())
 
     def play(self, n_episodes):
 
@@ -100,11 +104,7 @@ class TD3Agent:
 
         for n in range(n_episodes):
 
-
-            if n <= self.START_EPISODES:
-                total_reward, localsteps = self.play_episode(random=True)
-            else:
-                total_reward, localsteps = self.play_episode()
+            total_reward, localsteps = self.play_episode()
 
             total_rewards.append(total_reward)
 
@@ -127,7 +127,7 @@ class TD3Agent:
 
         return total_rewards
 
-    def play_episode(self, random=False):
+    def play_episode(self):
 
         total_reward = 0
 
@@ -139,10 +139,7 @@ class TD3Agent:
 
         while not done:
 
-            if random:
-                action = np.random.uniform(-2, 2, size=self.ACTION_SPACE)
-            else:
-                action = self.actor_network.sample_action(state, noise=self.stdev)
+            action = self.actor.sample_action(state, noise=self.NOISE_STDDEV)
 
             next_state, reward, done, _ = self.env.step(action)
 
@@ -164,7 +161,7 @@ class TD3Agent:
 
         return total_reward, steps
 
-    def update_network(self, batch_size):
+    def update_network(self, batch_size, update_policy=False):
 
         if len(self.buffer) < self.MIN_EXPERIENCES:
             return
@@ -172,9 +169,15 @@ class TD3Agent:
         (states, actions, rewards,
          next_states, dones) = self.buffer.get_minibatch(batch_size)
 
-        next_actions = self.target_actor_network(next_states)
+        clipped_noise = np.clip(
+            np.random.normal(0, 0.2, self.ACTION_SPACE), -0.5, 0.5)
 
-        next_qvalues = self.target_critic_network(next_states, next_actions).numpy().flatten()
+        next_actions = self.target_actor(next_states) + clipped_noise * self.MAX_ACTION
+
+        q1, q2 = self.target_critic(next_states, next_actions)
+
+        next_qvalues = [min(q1, q2) for q1, q2
+                        in zip(q1.numpy().flatten(), q2.numpy().flatten())]
 
         #: Compute taeget values and update CriticNetwork
         target_values = np.vstack(
@@ -182,59 +185,71 @@ class TD3Agent:
              for reward, done, next_qvalue
              in zip(rewards, dones, next_qvalues)]).astype(np.float32)
 
+        #: Update Critic
         with tf.GradientTape() as tape:
-            qvalues = self.critic_network(states, actions)
-            loss = tf.reduce_mean(tf.square(target_values - qvalues))
+            q1, q2 = self.critic(states, actions)
+            loss1 = tf.reduce_mean(tf.square(target_values - q1))
+            loss2 = tf.reduce_mean(tf.square(target_values - q2))
+            loss = loss1 + loss2
 
-        variables = self.critic_network.trainable_variables
+        variables = self.critic.trainable_variables
         gradients = tape.gradient(loss, variables)
-        self.critic_network.optimizer.apply_gradients(zip(gradients, variables))
+        self.critic.optimizer.apply_gradients(zip(gradients, variables))
 
-        #: Update ActorNetwork
-        with tf.GradientTape() as tape:
-            J = -1 * tf.reduce_mean(self.critic_network(states, self.actor_network(states)))
+        #: Delayed Update ActorNetwork
+        if update_policy:
 
-        variables = self.actor_network.trainable_variables
-        gradients = tape.gradient(J, variables)
-        self.actor_network.optimizer.apply_gradients(zip(gradients, variables))
+            with tf.GradientTape() as tape:
+                q1, _ = self.critic(states, self.actor(states))
+                J = -1 * tf.reduce_mean(q1)
+
+            variables = self.actor.trainable_variables
+            gradients = tape.gradient(J, variables)
+            self.actor.optimizer.apply_gradients(zip(gradients, variables))
 
     def update_target_network(self):
 
         # soft-target update Actor
-        target_actor_weights = self.target_actor_network.get_weights()
-        actor_weights = self.actor_network.get_weights()
+        target_actor_weights = self.target_actor.get_weights()
+        actor_weights = self.actor.get_weights()
 
         assert len(target_actor_weights) == len(actor_weights)
 
-        self.target_actor_network.set_weights(
+        self.target_actor.set_weights(
             (1 - self.TAU) * np.array(target_actor_weights)
             + (self.TAU) * np.array(actor_weights))
 
         # soft-target update Critic
-        target_critic_weights = self.target_critic_network.get_weights()
-        critic_weights = self.critic_network.get_weights()
+        target_critic_weights = self.target_critic.get_weights()
+        critic_weights = self.critic.get_weights()
 
         assert len(target_critic_weights) == len(critic_weights)
 
-        self.target_critic_network.set_weights(
+        self.target_critic.set_weights(
             (1 - self.TAU) * np.array(target_critic_weights)
             + (self.TAU) * np.array(critic_weights))
 
     def save_model(self):
 
-        self.actor_network.save_weights("checkpoints/actor")
+        self.actor.save_weights("checkpoints/actor")
 
-        self.critic_network.save_weights("checkpoints/critic")
+        self.critic1.save_weights("checkpoints/critic1")
+
+        self.critic2.save_weights("checkpoints/critic2")
 
     def load_model(self):
 
-        self.actor_network.load_weights("checkpoints/actor")
+        self.actor.load_weights("checkpoints/actor")
 
-        self.target_actor_network.load_weights("checkpoints/actor")
+        self.target_actor.load_weights("checkpoints/actor")
 
-        self.critic_network.load_weights("checkpoints/critic")
+        self.critic1.load_weights("checkpoints/critic1")
 
-        self.target_critic_network.load_weights("checkpoints/critic")
+        self.target_critic1.load_weights("checkpoints/critic1")
+
+        self.critic2.load_weights("checkpoints/critic2")
+
+        self.target_critic2.load_weights("checkpoints/critic2")
 
     def test_play(self, n, monitordir, load_model=False):
 
@@ -287,7 +302,7 @@ def main():
     plt.ylabel("Total Rewards")
     plt.savefig("history/log.png")
 
-    agent.test_play(n=8, monitordir="history", load_model=True)
+    agent.test_play(n=3, monitordir="history", load_model=True)
 
 
 if __name__ == "__main__":

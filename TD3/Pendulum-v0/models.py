@@ -9,23 +9,19 @@ import numpy as np
 
 class ActorNetwork(tf.keras.Model):
 
-    ACTION_RANGE = 2.0
-
-    def __init__(self, action_space):
+    def __init__(self, action_space, max_action):
 
         super(ActorNetwork, self).__init__()
 
         self.action_space = action_space
 
+        self.max_action = max_action
+
         self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
 
         self.dense1 = kl.Dense(64, activation="relu")
 
-        self.bn1 = kl.BatchNormalization()
-
         self.dense2 = kl.Dense(64, activation="relu")
-
-        self.bn2 = kl.BatchNormalization()
 
         self.actions = kl.Dense(self.action_space, activation="tanh")
 
@@ -33,15 +29,11 @@ class ActorNetwork(tf.keras.Model):
 
         x = self.dense1(s)
 
-        #x = self.bn1(x, training=training)
-
         x = self.dense2(x)
-
-        #x = self.bn2(x, training=training)
 
         actions = self.actions(x)
 
-        actions = actions * self.ACTION_RANGE
+        actions = actions * self.max_action
 
         return actions
 
@@ -53,8 +45,9 @@ class ActorNetwork(tf.keras.Model):
         action = self(state, training=False).numpy()[0]
 
         if noise:
-            action += np.random.normal(0, noise*self.ACTION_RANGE, size=self.action_space)
-            action = np.clip(action, -self.ACTION_RANGE, self.ACTION_RANGE)
+            action += np.random.normal(0, noise*self.max_action,
+                                       size=self.action_space)
+            action = np.clip(action, -self.max_action, self.max_action)
 
         return action
 
@@ -69,29 +62,33 @@ class CriticNetwork(tf.keras.Model):
 
         self.dense1 = kl.Dense(64, activation="relu")
 
-        self.bn1 = kl.BatchNormalization()
-
         self.dense2 = kl.Dense(64, activation="relu")
 
-        self.bn2 = kl.BatchNormalization()
+        self.out1 = kl.Dense(1)
 
-        self.values = kl.Dense(1)
+        self.dense3 = kl.Dense(64, activation="relu")
+
+        self.dense4 = kl.Dense(64, activation="relu")
+
+        self.out2 = kl.Dense(1)
 
     def call(self, s, a, training=True):
 
         x = tf.concat([s, a], 1)
 
-        x = self.dense1(x)
+        x1 = self.dense1(x)
 
-        #x = self.bn1(x, training=training)
+        x1 = self.dense2(x1)
 
-        x = self.dense2(x)
+        q1 = self.out1(x1)
 
-        #x = self.bn2(x, training=training)
+        x2 = self.dense3(x)
 
-        values = self.values(x)
+        x2 = self.dense4(x2)
 
-        return values
+        q2 = self.out2(x2)
+
+        return q1, q2
 
 
 if __name__ == "__main__":
@@ -99,7 +96,7 @@ if __name__ == "__main__":
     #physical_devices = tf.config.experimental.list_physical_devices('GPU')
     #tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
-    actor = ActorNetwork(action_space=1)
+    actor = ActorNetwork(action_space=1, max_action=2)
 
     critic = CriticNetwork()
 
@@ -117,22 +114,11 @@ if __name__ == "__main__":
 
     s2, r, done, _ = env.step([-1])
 
-    print(s)
-    print(a)
-    print(q)
+    s_ = np.vstack([s]*5)
+    a_ = np.vstack([a]*5)
 
-    w = actor.get_weights()
-    print(np.array(w).shape)
+    q1, q2 = critic(s_, a_)
 
-    w = actor.get_weights()[0]
-    print(w[0, 0])
-
-    actor.set_weights(np.array(actor.get_weights()) +100)
-
-    w = actor.get_weights()[0]
-    print(w[0, 0])
-
-    w = actor.get_weights()
-    print(np.array(w)[0].shape)
-
-    print(env.action_space.__dict__)
+    print(q1)
+    for q in q1.numpy().flatten():
+        print(q)
