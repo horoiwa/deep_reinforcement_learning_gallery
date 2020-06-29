@@ -306,7 +306,7 @@ def main():
     plt.ylabel("Total Rewards")
     plt.savefig("history/log.png")
 
-    agent.test_play(n=10, monitordir="history", load_model=True)
+    agent.test_play(n=4, monitordir="history", load_model=True)
 
 
 if __name__ == "__main__":
