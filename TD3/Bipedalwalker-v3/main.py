@@ -42,15 +42,17 @@ class TD3Agent:
 
     OBSERVATION_SPACE = 24
 
-    POLICY_UPDATE_PERIOD = 2
+    CRITIC_UPDATE_PERIOD = 4
 
-    TAU = 0.005
+    POLICY_UPDATE_PERIOD = 8
+
+    TAU = 0.005*4
 
     GAMMA = 0.99
 
-    BATCH_SIZE = 100
+    BATCH_SIZE = 64
 
-    EXPLORATION_NOISE = 0.1
+    EXPLORATION_NOISE = 0.4
 
     POLICY_NOISE = 0.2
 
@@ -155,11 +157,12 @@ class TD3Agent:
             self.global_steps += 1
 
             #: Delayed Policy update
-            if self.global_steps % self.POLICY_UPDATE_PERIOD == 0:
-                self.update_network(self.BATCH_SIZE, update_policy=True)
-                self.update_target_network()
-            else:
-                self.update_network(self.BATCH_SIZE)
+            if self.global_steps % self.CRITIC_UPDATE_PERIOD == 0:
+                if self.global_steps % self.POLICY_UPDATE_PERIOD == 0:
+                    self.update_network(self.BATCH_SIZE, update_policy=True)
+                    self.update_target_network()
+                else:
+                    self.update_network(self.BATCH_SIZE, update_policy=False)
 
         return total_reward, steps
 
@@ -292,7 +295,7 @@ class TD3Agent:
 
 def main():
 
-    N_EPISODES = 9000
+    N_EPISODES = 2500
 
     agent = TD3Agent()
     history = agent.play(n_episodes=N_EPISODES)
@@ -303,7 +306,7 @@ def main():
     plt.ylabel("Total Rewards")
     plt.savefig("history/log.png")
 
-    agent.test_play(n=5, monitordir="history", load_model=True)
+    agent.test_play(n=10, monitordir="history", load_model=True)
 
 
 if __name__ == "__main__":

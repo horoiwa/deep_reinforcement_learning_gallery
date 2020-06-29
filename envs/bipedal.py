@@ -38,7 +38,7 @@ if __name__ == "__main__":
         total_rewards = 0
         for i in range(1000):
             action = np.random.uniform(-1, 1, 4)
-            action = np.array([1,0,0,1])
+            #action = np.array([1,0,0,1])
 
             observation, reward, done, info = env.step(action)
             print(i, reward)

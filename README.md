@@ -76,12 +76,13 @@ Deep reinforcement learning sample codes with tensorflow2
 
 [Addressing Function Approximation Error in Actor-Critic Methods](https://arxiv.org/abs/1802.09477)
 
+## TRPO
+
+## PPO
+
+## World Model
 
 ### DRQN
-
-### PPO
-
-### World Model
 
 ### DQFD
 
