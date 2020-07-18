@@ -9,6 +9,8 @@ ref/
 # C extensions
 *.so
 
+*memo.md
+
 # Distribution / packaging
 .Python
 build/
