@@ -31,6 +31,9 @@ https://drive.google.com/file/d/0BxXI_RttTZAhMVhsNk5VSXU0U3c/view
 http://rail.eecs.berkeley.edu/deeprlcourse-fa17/f17docs/lecture_13_advanced_pg.pdf
 
 
+HVPの実装
+https://www.telesens.co/2018/06/09/efficiently-computing-the-fisher-vector-product-in-trpo/
+
 テイラー展開が詳しい
 
 http://www.andrew.cmu.edu/course/10-703/slides/Lecture_NaturalPolicyGradientsTRPOPPO.pdf
@@ -82,3 +85,15 @@ L(threta) - C KL(pi , piold)
 
 
 ヘッセ行列は計算量ヤバい
+
+
+Hx = g = grad(sum(x.dot(grad(KL))))
+x = H-1g
+
+https://roosephu.github.io/2016/11/19/TRPO/#:~:text=Fisher%2Dvector%20product,%CE%B8)%E2%8A%A4%7C%CE%B8%5D.
+
+
+F ≒ hessian-1 と近似している
+
+
+This mathematical principled method to compute the step size and direction is the major contribution of TRPO. Compare this with the ad hoc “learning rate schedule” typically used in training neural networks.
