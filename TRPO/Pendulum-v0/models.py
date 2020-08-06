@@ -8,8 +8,8 @@ class PolicyNetwork(tf.keras.Model):
 
         super(PolicyNetwork, self).__init__()
 
-    def sample_action(self):
-        return np.random.uniform(-1, 1)
+    def sample_action(self, state):
+        return [np.random.uniform(-1, 1)]
 
 
 class ValueNetwork(tf.keras.Model):

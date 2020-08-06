@@ -3,7 +3,6 @@ import collections
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-from models import PolicyNetwork, ValueNetwork
 
 import numpy as np
 import tensorflow as tf
@@ -12,7 +11,7 @@ from gym import wrappers
 import matplotlib.pyplot as plt
 
 from buffer import ReplayBuffer
-from models import ActorNetwork, CriticNetwork
+from models import PolicyNetwork, ValueNetwork
 
 
 @dataclass
@@ -43,7 +42,7 @@ class TRPOAgent:
 
         self.buffer = ReplayBuffer(max_experiences=self.MAX_EXPERIENCES)
 
-        self.env = gym.make(ENV_ID)
+        self.env = gym.make(self.ENV_ID)
 
         self.global_steps = 0
 
@@ -114,15 +113,15 @@ class TRPOAgent:
 
     def save_model(self):
 
-        self.actor.save_weights("checkpoints/actor")
+        self.policy.save_weights("checkpoints/actor")
 
-        self.critic.save_weights("checkpoints/critic")
+        self.value_network.save_weights("checkpoints/critic")
 
     def load_model(self):
 
-        self.actor.load_weights("checkpoints/actor")
+        self.policy.load_weights("checkpoints/actor")
 
-        self.critic.load_weights("checkpoints/critic")
+        self.value_network.load_weights("checkpoints/critic")
 
     def test_play(self, n, monitordir, load_model=False):
 
@@ -148,7 +147,7 @@ class TRPOAgent:
 
             while not done:
 
-                action = self.actor.sample_action(state, noise=False)
+                action = self.policy.sample_action(state)
 
                 next_state, reward, done, _ = env.step(action)
 
@@ -174,10 +173,9 @@ def main():
     plt.plot(range(len(history)), history)
     plt.xlabel("Episodes")
     plt.ylabel("Total Rewards")
-    plt.show()
-    #plt.savefig("history/log.png")
+    plt.savefig("history/log.png")
 
-    #agent.test_play(n=5, monitordir="history", load_model=True)
+    agent.test_play(n=1, monitordir="history", load_model=False)
 
 
 if __name__ == "__main__":
