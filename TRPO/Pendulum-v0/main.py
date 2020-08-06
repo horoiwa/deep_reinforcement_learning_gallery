@@ -108,8 +108,16 @@ class TRPOAgent:
 
         return total_reward, steps
 
-    def update(self):
+    def calc_logprob(self, actions, action_means, action_logvars):
         pass
+
+    def update(self):
+
+        def hvp_wrapper(g):
+            def hvp_func(x):
+                pass
+
+            return hvp_func
 
     def save_model(self):
 
