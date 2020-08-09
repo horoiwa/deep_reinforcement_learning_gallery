@@ -22,6 +22,8 @@ class TRPOAgent:
 
     ENV_ID = "Pendulum-v0"
 
+    OBS_SPACE = 3
+
     ACTION_SPACE = 1
 
     def __init__(self):
@@ -42,6 +44,8 @@ class TRPOAgent:
 
         self.epi_reward = 0
 
+        self.epi_steps = 0
+
         self.state = self.env.reset()
 
         for n in range(n_iters):
@@ -50,15 +54,17 @@ class TRPOAgent:
 
             print(trajectory)
 
+        return self.history
+
     def generate_trajectory(self):
         """generate trajectory on current policy
         """
 
-        trajectory = {"s": np.zeros((self.BATCH_SIZE, self.ACTION_SPACE), dtype=np.float32),
+        trajectory = {"s": np.zeros((self.BATCH_SIZE, self.OBS_SPACE), dtype=np.float32),
                       "a": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32),
                       "r": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32),
                       "done": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32),
-                      "s2": np.zeros((self.BATCH_SIZE, self.ACTION_SPACE), dtype=np.float32)}
+                      "s2": np.zeros((self.BATCH_SIZE, self.OBS_SPACE), dtype=np.float32)}
 
         state = self.state
 
@@ -72,13 +78,15 @@ class TRPOAgent:
 
             trajectory["a"][i] = action
 
-            trajectory["reward"][i] = reward
+            trajectory["r"][i] = reward
 
             trajectory["s2"][i] = next_state
 
             trajectory["done"][i] = done
 
             self.epi_reward += reward
+
+            self.epi_steps += 1
 
             self.global_steps += 1
 
@@ -87,18 +95,20 @@ class TRPOAgent:
 
                 self.history.append(self.epi_reward)
 
-                recent_score = self.history[-10:] / 10
+                recent_score = sum(self.history[-10:]) / 10
 
                 print("===="*5)
                 print("Episode:", len(self.history))
                 print("Episode reward:", self.epi_reward)
                 print("Global steps:", self.global_steps)
 
-                if len(self.hiscore) > 100 and recent_score > self.hiscore:
+                if len(self.history) > 100 and recent_score > self.hiscore:
                     print("*HISCORE UPDATED:", recent_score)
                     self.save_model()
 
                 self.epi_reward = 0
+
+                self.epi_steps = 0
 
             else:
                 state = next_state
