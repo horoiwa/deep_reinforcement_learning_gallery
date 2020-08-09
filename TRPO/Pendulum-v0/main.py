@@ -175,7 +175,7 @@ def main():
 
     agent = TRPOAgent()
 
-    history = agent.play(n_episodes=30)
+    history = agent.play(n_episodes=3)
 
     print(history)
     plt.plot(range(len(history)), history)
