@@ -6,13 +6,13 @@ import tensorflow_probability as tfp
 
 class PolicyNetwork(tf.keras.Model):
 
-    ACTION_SPACE = 1
-
     MAX_KL = 0.01
 
-    def __init__(self):
+    def __init__(self, action_space):
 
         super(PolicyNetwork, self).__init__()
+
+        self.action_space = action_space
 
         self.dense1 = kl.Dense(64, activation="tanh",
                                kernel_initializer="he_normal")
@@ -20,10 +20,10 @@ class PolicyNetwork(tf.keras.Model):
         self.dense2 = kl.Dense(64, activation="tanh",
                                kernel_initializer="he_normal")
 
-        self.pi_mean = kl.Dense(self.ACTION_SPACE,
+        self.pi_mean = kl.Dense(self.action_space,
                                 kernel_initializer="he_normal")
 
-        self.pi_std = kl.Dense(self.ACTION_SPACE,
+        self.pi_std = kl.Dense(self.action_space,
                                kernel_initializer="he_normal")
 
     def call(self, s):
@@ -41,10 +41,7 @@ class PolicyNetwork(tf.keras.Model):
 
         mean, std = self(state)
 
-        s = tfp.distributions.Sample(
-            tfp.distributions.Normal(loc=mean, scale=std))
-
-        sampled_action = s.sample()
+        sampled_action = mean + std * tf.random.normal(tf.shape(mean))
 
         return sampled_action.numpy()[0]
 
@@ -74,7 +71,7 @@ class ValueNetwork(tf.keras.Model):
 
 if __name__ == "__main__":
 
-    policy = PolicyNetwork()
+    policy = PolicyNetwork(action_space=1)
     s = np.array([[1, 2, 3, 4]])
     out = policy(s)
     a = policy.sample_action(s)

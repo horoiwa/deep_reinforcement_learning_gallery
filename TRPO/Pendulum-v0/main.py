@@ -14,99 +14,98 @@ from buffer import ReplayBuffer
 from models import PolicyNetwork, ValueNetwork
 
 
-@dataclass
-class Experience:
-
-    state: np.ndarray
-
-    action: int
-
-    reward: float
-
-    next_state: np.ndarray
-
-    done: bool
-
-
 class TRPOAgent:
 
     MAX_EXPERIENCES = 1000
 
+    BATCH_SIZE = 1024
+
     ENV_ID = "Pendulum-v0"
+
+    ACTION_SPACE = 1
 
     def __init__(self):
 
-        self.policy = PolicyNetwork()
+        self.policy = PolicyNetwork(action_space=self.ACTION_SPACE)
 
         self.value_network = ValueNetwork()
-
-        self.buffer = ReplayBuffer(max_experiences=self.MAX_EXPERIENCES)
 
         self.env = gym.make(self.ENV_ID)
 
         self.global_steps = 0
 
-        self.hiscore = None
+        self.history = []
 
-    def play(self, n_episodes):
+        self.hiscore = 0
 
-        total_rewards = []
+    def play(self, n_iters):
 
-        recent_scores = collections.deque(maxlen=10)
+        self.epi_reward = 0
 
-        for n in range(n_episodes):
+        self.state = self.env.reset()
 
-            total_reward, localsteps = self.play_episode()
+        for n in range(n_iters):
 
-            total_rewards.append(total_reward)
+            trajectory = self.generate_trajectory()
 
-            recent_scores.append(total_reward)
+            print(trajectory)
 
-            recent_average_score = sum(recent_scores) / len(recent_scores)
+    def generate_trajectory(self):
+        """generate trajectory on current policy
+        """
 
-            print(f"Episode {n}: {total_reward}")
-            print(f"Local steps {localsteps}")
-            print(f"Experiences {len(self.buffer)}")
-            print(f"Global step {self.global_steps}")
-            print(f"recent average score {recent_average_score}")
-            print()
+        trajectory = {"s": np.zeros((self.BATCH_SIZE, self.ACTION_SPACE), dtype=np.float32),
+                      "a": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32),
+                      "r": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32),
+                      "done": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32),
+                      "s2": np.zeros((self.BATCH_SIZE, self.ACTION_SPACE), dtype=np.float32)}
 
-            if (self.hiscore is None) or (recent_average_score > self.hiscore):
-                self.hiscore = recent_average_score
-                print(f"HISCORE Updated: {self.hiscore}")
-                #self.save_model()
+        state = self.state
 
-        return total_rewards
-
-    def play_episode(self):
-
-        total_reward = 0
-
-        steps = 0
-
-        done = False
-
-        state = self.env.reset()
-
-        while not done:
+        for i in range(self.BATCH_SIZE):
 
             action = self.policy.sample_action(state)
 
             next_state, reward, done, _ = self.env.step(action)
 
-            exp = (state, action, reward, next_state, done)
+            trajectory["s"][i] = state
 
-            self.buffer.add_experience(exp)
+            trajectory["a"][i] = action
 
-            state = next_state
+            trajectory["reward"][i] = reward
 
-            total_reward += reward
+            trajectory["s2"][i] = next_state
 
-            steps += 1
+            trajectory["done"][i] = done
+
+            self.epi_reward += reward
 
             self.global_steps += 1
 
-        return total_reward, steps
+            if done:
+                state = self.env.reset()
+
+                self.history.append(self.epi_reward)
+
+                recent_score = self.history[-10:] / 10
+
+                print("===="*5)
+                print("Episode:", len(self.history))
+                print("Episode reward:", self.epi_reward)
+                print("Global steps:", self.global_steps)
+
+                if len(self.hiscore) > 100 and recent_score > self.hiscore:
+                    print("*HISCORE UPDATED:", recent_score)
+                    self.save_model()
+
+                self.epi_reward = 0
+
+            else:
+                state = next_state
+
+        self.state = state
+
+        return trajectory
 
     def calc_logprob(self, actions, action_means, action_logvars):
         pass
@@ -175,9 +174,10 @@ def main():
 
     agent = TRPOAgent()
 
-    history = agent.play(n_episodes=3)
+    history = agent.play(n_iters=1)
 
     print(history)
+
     plt.plot(range(len(history)), history)
     plt.xlabel("Episodes")
     plt.ylabel("Total Rewards")
