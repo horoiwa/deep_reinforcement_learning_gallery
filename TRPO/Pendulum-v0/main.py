@@ -148,9 +148,9 @@ class TRPOAgent:
             lastgae = deltas[i] + self.GAMMA * self.GAE_LAMBDA * is_nonterminals[i] * lastgae
             advantages[i] = lastgae
 
-        trajectory["adv"] = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        trajectory["vftarget"] = advantages + trajectory["vpred"]
 
-        trajectory["vftarget"] = trajectory["adv"] + trajectory["vpred"]
+        trajectory["adv"] = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         return trajectory
 
@@ -159,19 +159,18 @@ class TRPOAgent:
 
     def update_vf(self, trajectory):
 
-
         for _ in range(self.TRAJECTORY_SIZE // self.VF_BATCHSIZE):
 
             indx = np.random.choice(self.TRAJECTORY_SIZE, self.VF_BATCHSIZE, replace=True)
 
             with tf.GradientTape() as tape:
                 vpred = self.value_network(trajectory["s"][indx])
-                loss = tf.reduce_mean(tf.square(trajectory["vftarget"][indx] - vpred))
+                vtarget = trajectory["vftarget"][indx]
+                loss = tf.reduce_mean(tf.square(vtarget - vpred))
 
             variables = self.value_network.trainable_variables
             grads = tape.gradient(loss, variables)
             self.value_network.optimizer.apply_gradients(zip(grads, variables))
-            print(loss)
 
     def save_model(self):
 
