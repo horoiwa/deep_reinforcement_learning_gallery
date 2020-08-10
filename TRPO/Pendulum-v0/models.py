@@ -48,6 +48,8 @@ class PolicyNetwork(tf.keras.Model):
 
 class ValueNetwork(tf.keras.Model):
 
+    LR = 0.001
+
     def __init__(self):
 
         super(ValueNetwork, self).__init__()
@@ -59,6 +61,8 @@ class ValueNetwork(tf.keras.Model):
                                kernel_initializer="he_normal")
 
         self.out = kl.Dense(1, kernel_initializer="he_normal")
+
+        self.optimizer = tf.keras.optimizers.Adam(lr=self.LR)
 
     def call(self, s):
 

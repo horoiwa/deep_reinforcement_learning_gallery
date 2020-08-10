@@ -16,7 +16,9 @@ from models import PolicyNetwork, ValueNetwork
 
 class TRPOAgent:
 
-    BATCH_SIZE = 12
+    TRAJECTORY_SIZE = 1024
+
+    VF_BATCHSIZE = 64
 
     GAMMA = 0.99
 
@@ -56,7 +58,9 @@ class TRPOAgent:
 
             trajectory = self.compute_advantage(trajectory)
 
-            self.update(trajectory)
+            self.update_policy(trajectory)
+
+            self.update_vf(trajectory)
 
         return self.history
 
@@ -64,15 +68,15 @@ class TRPOAgent:
         """generate trajectory on current policy
         """
 
-        trajectory = {"s": np.zeros((self.BATCH_SIZE, self.OBS_SPACE), dtype=np.float32),
-                      "a": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32),
-                      "r": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32),
-                      "s2": np.zeros((self.BATCH_SIZE, self.OBS_SPACE), dtype=np.float32),
-                      "done": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32)}
+        trajectory = {"s": np.zeros((self.TRAJECTORY_SIZE, self.OBS_SPACE), dtype=np.float32),
+                      "a": np.zeros((self.TRAJECTORY_SIZE, 1), dtype=np.float32),
+                      "r": np.zeros((self.TRAJECTORY_SIZE, 1), dtype=np.float32),
+                      "s2": np.zeros((self.TRAJECTORY_SIZE, self.OBS_SPACE), dtype=np.float32),
+                      "done": np.zeros((self.TRAJECTORY_SIZE, 1), dtype=np.float32)}
 
         state = self.state
 
-        for i in range(self.BATCH_SIZE):
+        for i in range(self.TRAJECTORY_SIZE):
 
             action = self.policy.sample_action(state)
 
@@ -144,12 +148,30 @@ class TRPOAgent:
             lastgae = deltas[i] + self.GAMMA * self.GAE_LAMBDA * is_nonterminals[i] * lastgae
             advantages[i] = lastgae
 
-        trajectory["adv"] = advantages
+        trajectory["adv"] = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+        trajectory["vftarget"] = trajectory["adv"] + trajectory["vpred"]
 
         return trajectory
 
-    def update(self, trajectory):
+    def update_policy(self, trajectory):
         pass
+
+    def update_vf(self, trajectory):
+
+
+        for _ in range(self.TRAJECTORY_SIZE // self.VF_BATCHSIZE):
+
+            indx = np.random.choice(self.TRAJECTORY_SIZE, self.VF_BATCHSIZE, replace=True)
+
+            with tf.GradientTape() as tape:
+                vpred = self.value_network(trajectory["s"][indx])
+                loss = tf.reduce_mean(tf.square(trajectory["vftarget"][indx] - vpred))
+
+            variables = self.value_network.trainable_variables
+            grads = tape.gradient(loss, variables)
+            self.value_network.optimizer.apply_gradients(zip(grads, variables))
+            print(loss)
 
     def save_model(self):
 
