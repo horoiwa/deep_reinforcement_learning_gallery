@@ -16,9 +16,11 @@ from models import PolicyNetwork, ValueNetwork
 
 class TRPOAgent:
 
-    MAX_EXPERIENCES = 1000
+    BATCH_SIZE = 12
 
-    BATCH_SIZE = 1024
+    GAMMA = 0.99
+
+    GAE_LAMBDA = 0.98
 
     ENV_ID = "Pendulum-v0"
 
@@ -48,11 +50,13 @@ class TRPOAgent:
 
         self.state = self.env.reset()
 
-        for n in range(n_iters):
+        for _ in range(n_iters):
 
             trajectory = self.generate_trajectory()
 
-            print(trajectory)
+            trajectory = self.compute_advantage(trajectory)
+
+            self.update(trajectory)
 
         return self.history
 
@@ -63,8 +67,8 @@ class TRPOAgent:
         trajectory = {"s": np.zeros((self.BATCH_SIZE, self.OBS_SPACE), dtype=np.float32),
                       "a": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32),
                       "r": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32),
-                      "done": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32),
-                      "s2": np.zeros((self.BATCH_SIZE, self.OBS_SPACE), dtype=np.float32)}
+                      "s2": np.zeros((self.BATCH_SIZE, self.OBS_SPACE), dtype=np.float32),
+                      "done": np.zeros((self.BATCH_SIZE, 1), dtype=np.float32)}
 
         state = self.state
 
@@ -105,6 +109,7 @@ class TRPOAgent:
                 if len(self.history) > 100 and recent_score > self.hiscore:
                     print("*HISCORE UPDATED:", recent_score)
                     self.save_model()
+                    self.hiscore = recent_score
 
                 self.epi_reward = 0
 
@@ -117,16 +122,34 @@ class TRPOAgent:
 
         return trajectory
 
-    def calc_logprob(self, actions, action_means, action_logvars):
+    def compute_advantage(self, trajectory):
+        """Compute
+
+        Args:
+            trajectory ([type]): [description]
+        """
+
+        trajectory["vpred"] = self.value_network(trajectory["s"]).numpy()
+
+        trajectory["vpred_next"] = self.value_network(trajectory["s2"]).numpy()
+
+        is_nonterminals = 1 - trajectory["done"]
+
+        deltas = trajectory["r"] + is_nonterminals * trajectory["vpred_next"] - trajectory["vpred"]
+
+        advantages = np.zeros_like(deltas, dtype=np.float32)
+
+        lastgae = 0
+        for i in reversed(range(len(deltas))):
+            lastgae = deltas[i] + self.GAMMA * self.GAE_LAMBDA * is_nonterminals[i] * lastgae
+            advantages[i] = lastgae
+
+        trajectory["adv"] = advantages
+
+        return trajectory
+
+    def update(self, trajectory):
         pass
-
-    def update(self):
-
-        def hvp_wrapper(g):
-            def hvp_func(x):
-                pass
-
-            return hvp_func
 
     def save_model(self):
 
@@ -193,7 +216,7 @@ def main():
     plt.ylabel("Total Rewards")
     plt.savefig("history/log.png")
 
-    agent.test_play(n=1, monitordir="history", load_model=False)
+    #agent.test_play(n=1, monitordir="history", load_model=False)
 
 
 if __name__ == "__main__":
