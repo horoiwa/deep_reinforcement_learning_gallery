@@ -6,19 +6,24 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 import numpy as np
 import tensorflow as tf
+import tensorflow_probability
 import gym
 from gym import wrappers
 import matplotlib.pyplot as plt
 
 from buffer import ReplayBuffer
 from models import PolicyNetwork, ValueNetwork
+from util import compute_logprob, compute_kl, cg
 
 
 class TRPOAgent:
 
-    TRAJECTORY_SIZE = 1024
+    TRAJECTORY_SIZE = 128
+    #TRAJECTORY_SIZE = 1024
 
     VF_BATCHSIZE = 64
+
+    MAX_KL = 0.01
 
     GAMMA = 0.99
 
@@ -139,7 +144,7 @@ class TRPOAgent:
 
         is_nonterminals = 1 - trajectory["done"]
 
-        deltas = trajectory["r"] + is_nonterminals * trajectory["vpred_next"] - trajectory["vpred"]
+        deltas = trajectory["r"] + self.GAMMA * is_nonterminals * trajectory["vpred_next"] - trajectory["vpred"]
 
         advantages = np.zeros_like(deltas, dtype=np.float32)
 
@@ -148,14 +153,67 @@ class TRPOAgent:
             lastgae = deltas[i] + self.GAMMA * self.GAE_LAMBDA * is_nonterminals[i] * lastgae
             advantages[i] = lastgae
 
-        trajectory["vftarget"] = advantages + trajectory["vpred"]
+        #trajectory["adv"] = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        trajectory["adv"] = advantages
 
-        trajectory["adv"] = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        trajectory["vftarget"] = trajectory["adv"] + trajectory["vpred"]
 
         return trajectory
 
     def update_policy(self, trajectory):
-        pass
+
+        def flattengrads(grads):
+            flatgrads_list = [tf.reshape(grad, shape=[1, -1])for grad in grads]
+            flatgrads = tf.concat(flatgrads_list, axis=1)
+            return flatgrads
+
+        actions = tf.convert_to_tensor(trajectory["a"], dtype=tf.float32)
+        states = tf.convert_to_tensor(trajectory["s"], dtype=tf.float32)
+        advantages = tf.convert_to_tensor(trajectory["adv"], dtype=tf.float32)
+
+        old_means, old_stdevs = self.policy(states)
+        old_logp = compute_logprob(old_means, old_stdevs, actions)
+
+        with tf.GradientTape() as tape:
+            new_means, new_stdevs = self.policy(states)
+            new_logp = compute_logprob(new_means, new_stdevs, actions)
+
+            loss = tf.exp(new_logp - old_logp) * advantages
+            loss = tf.reduce_mean(loss)
+
+        g = tape.gradient(loss, self.policy.trainable_variables)
+        g = tf.transpose(flattengrads(g))
+
+        @tf.function
+        def hvp_func(vector):
+            """Compute hessian-vector product
+            """
+            with tf.GradientTape() as t2:
+                with tf.GradientTape() as t1:
+                    new_means, new_stdevs = self.policy(states)
+                    kl = compute_kl(old_means, old_stdevs, new_means, new_stdevs)
+                    meankl = tf.reduce_mean(kl)
+
+                kl_grads = t1.gradient(meankl, self.policy.trainable_variables)
+                kl_grads = flattengrads(kl_grads)
+                grads_vector_product = tf.matmul(kl_grads, vector)
+
+            hvp = t2.gradient(grads_vector_product, self.policy.trainable_variables)
+            hvp = tf.transpose(flattengrads(hvp))
+
+            return hvp + vector * 1e-2 #: 共役勾配法の安定化のために微小量を加える
+
+        step_direction = cg(hvp_func, g)
+
+        shs = tf.matmul(tf.transpose(step_direction), hvp_func(step_direction))
+        lm = tf.sqrt(2 * self.MAX_KL / shs)
+        fullstep = lm * step_direction
+        fullstep = restore_shape(fullstep, self.policy.trainable_variables)
+
+        expected_improve = tf.matmul(tf.transpose(g), fullstep)
+        current_params = [v.numpy() for v in self.policy.trainable_variables]
+        step_size = 1.0
+
 
     def update_vf(self, trajectory):
 
