@@ -13,13 +13,12 @@ import matplotlib.pyplot as plt
 
 from buffer import ReplayBuffer
 from models import PolicyNetwork, ValueNetwork
-from util import compute_logprob, compute_kl, cg
+from util import compute_logprob, compute_kl, cg, restore_shape
 
 
 class TRPOAgent:
 
-    TRAJECTORY_SIZE = 128
-    #TRAJECTORY_SIZE = 1024
+    TRAJECTORY_SIZE = 1024
 
     VF_BATCHSIZE = 64
 
@@ -47,7 +46,7 @@ class TRPOAgent:
 
         self.history = []
 
-        self.hiscore = 0
+        self.hiscore = None
 
     def play(self, n_iters):
 
@@ -115,7 +114,7 @@ class TRPOAgent:
                 print("Episode reward:", self.epi_reward)
                 print("Global steps:", self.global_steps)
 
-                if len(self.history) > 100 and recent_score > self.hiscore:
+                if len(self.history) > 100 and (self.hiscore is None or recent_score > self.hiscore):
                     print("*HISCORE UPDATED:", recent_score)
                     self.save_model()
                     self.hiscore = recent_score
@@ -153,8 +152,8 @@ class TRPOAgent:
             lastgae = deltas[i] + self.GAMMA * self.GAE_LAMBDA * is_nonterminals[i] * lastgae
             advantages[i] = lastgae
 
-        #trajectory["adv"] = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
-        trajectory["adv"] = advantages
+        trajectory["adv"] = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        #trajectory["adv"] = advantages
 
         trajectory["vftarget"] = trajectory["adv"] + trajectory["vpred"]
 
@@ -163,7 +162,7 @@ class TRPOAgent:
     def update_policy(self, trajectory):
 
         def flattengrads(grads):
-            flatgrads_list = [tf.reshape(grad, shape=[1, -1])for grad in grads]
+            flatgrads_list = [tf.reshape(grad, shape=[1, -1]) for grad in grads]
             flatgrads = tf.concat(flatgrads_list, axis=1)
             return flatgrads
 
@@ -208,12 +207,39 @@ class TRPOAgent:
         shs = tf.matmul(tf.transpose(step_direction), hvp_func(step_direction))
         lm = tf.sqrt(2 * self.MAX_KL / shs)
         fullstep = lm * step_direction
-        fullstep = restore_shape(fullstep, self.policy.trainable_variables)
 
         expected_improve = tf.matmul(tf.transpose(g), fullstep)
-        current_params = [v.numpy() for v in self.policy.trainable_variables]
-        step_size = 1.0
+        fullstep = restore_shape(fullstep, self.policy.trainable_variables)
 
+        params_old = [var.numpy() for var in self.policy.trainable_variables]
+        old_loss = loss
+
+        for stepsize in [0.5 ** i for i in range(10)]:
+            params_new = [p + step * stepsize for p, step in zip(params_old, fullstep)]
+            self.policy.set_weights(params_new)
+
+            new_means, new_stdevs = self.policy(states)
+            new_logp = compute_logprob(new_means, new_stdevs, actions)
+
+            new_loss = tf.reduce_mean(tf.exp(new_logp - old_logp) * advantages)
+            improve = new_loss - old_loss
+
+            kl = compute_kl(old_means, old_stdevs, new_means, new_stdevs)
+            mean_kl = tf.reduce_mean(kl)
+
+            print(f"Expected: {expected_improve} Actual: {improve}")
+            print(f"KL {mean_kl}")
+
+            if mean_kl > self.MAX_KL * 1.5:
+                print("violated KL constraint. shrinking step.")
+            elif improve < 0:
+                print("surrogate didn't improve. shrinking step.")
+            else:
+                print("Stepsize OK!")
+                break
+        else:
+            print("更新に失敗")
+            self.policy.set_weights(params_old)
 
     def update_vf(self, trajectory):
 
@@ -235,6 +261,10 @@ class TRPOAgent:
         self.policy.save_weights("checkpoints/actor")
 
         self.value_network.save_weights("checkpoints/critic")
+
+        print()
+        print("Model Saved")
+        print()
 
     def load_model(self):
 
@@ -286,7 +316,7 @@ def main():
 
     agent = TRPOAgent()
 
-    history = agent.play(n_iters=1)
+    history = agent.play(n_iters=200)
 
     print(history)
 
@@ -295,7 +325,7 @@ def main():
     plt.ylabel("Total Rewards")
     plt.savefig("history/log.png")
 
-    #agent.test_play(n=1, monitordir="history", load_model=False)
+    agent.test_play(n=3, monitordir="history", load_model=True)
 
 
 if __name__ == "__main__":

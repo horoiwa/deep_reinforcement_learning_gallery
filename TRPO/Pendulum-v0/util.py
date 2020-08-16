@@ -48,8 +48,17 @@ def cg(hvp_func, g, iters=25):
     return x
 
 
-def restore_shape(flatvars, target_shape):
-    pass
+def restore_shape(flatvars, target_variables):
+    n = 0
+    weights = []
+    for var in target_variables:
+        size = var.shape[0] * var.shape[1] if len(var.shape) == 2 else var.shape[0]
+        tmp = flatvars[n:n+size].numpy().reshape(var.shape)
+        weights.append(tmp)
+        n += size
+
+    assert n == flatvars.shape[0]
+    return weights
 
 
 def main():

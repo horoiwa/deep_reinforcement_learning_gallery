@@ -6,25 +6,22 @@ import tensorflow_probability as tfp
 
 class PolicyNetwork(tf.keras.Model):
 
-    MAX_KL = 0.01
-
     def __init__(self, action_space):
+        """
+          Note: 出力層のactivationにtanhとかを使うのはKLが意味をなさなくなるのでNG
+        """
 
         super(PolicyNetwork, self).__init__()
 
         self.action_space = action_space
 
-        self.dense1 = kl.Dense(64, activation="tanh",
-                               kernel_initializer="he_normal")
+        self.dense1 = kl.Dense(64, activation="tanh")
 
-        self.dense2 = kl.Dense(64, activation="tanh",
-                               kernel_initializer="he_normal")
+        self.dense2 = kl.Dense(64, activation="tanh")
 
-        self.pi_mean = kl.Dense(self.action_space,
-                                kernel_initializer="he_normal")
+        self.pi_mean = kl.Dense(self.action_space)
 
-        self.pi_logstdev = kl.Dense(self.action_space,
-                                    kernel_initializer="he_normal")
+        self.pi_logstdev = kl.Dense(self.action_space)
 
     @tf.function
     def call(self, s):
@@ -50,19 +47,17 @@ class PolicyNetwork(tf.keras.Model):
 
 class ValueNetwork(tf.keras.Model):
 
-    LR = 0.0001
+    LR = 0.005
 
     def __init__(self):
 
         super(ValueNetwork, self).__init__()
 
-        self.dense1 = kl.Dense(64, activation="relu",
-                               kernel_initializer="he_normal")
+        self.dense1 = kl.Dense(64, activation="relu")
 
-        self.dense2 = kl.Dense(64, activation="relu",
-                               kernel_initializer="he_normal")
+        self.dense2 = kl.Dense(64, activation="relu")
 
-        self.out = kl.Dense(1, kernel_initializer="he_normal")
+        self.out = kl.Dense(1)
 
         self.optimizer = tf.keras.optimizers.Adam(lr=self.LR)
 
