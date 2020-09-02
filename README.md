@@ -80,12 +80,6 @@ Deep reinforcement learning sample codes with tensorflow2
 
 ## PPO
 
-## World Model
-
-### DRQN
-
-### DQFD
-
 ### その他
 
 [Reinforcement Learning for Improving Agent Design](https://arxiv.org/abs/1810.03779)
