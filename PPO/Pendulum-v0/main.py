@@ -10,15 +10,23 @@ import numpy as np
 from multiprocessing import Process, Pipe
 import matplotlib.pyplot as plt
 
-from env import MPIVecEnv
-from models import ActorCriticNet
+from env import SubProcVecEnv
+from models import PolicyNetwork, ValueNetwork
+
+
+def env_func():
+    return gym.make("Pendulum-v0")
 
 
 class PPOAgent:
 
     TRAJECTORY_SIZE = 64
 
-    ACTION_SPACE = 2
+    ACTION_SPACE = 1
+
+    GAMMA = 0.99
+
+    LAMBDA = 0.95
 
     VALUE_COEF = 0.5
 
@@ -26,11 +34,15 @@ class PPOAgent:
 
     def __init__(self, n_envs):
 
-        self.vecenvs = MPIVecEnv(n_envs)
+        self.n_envs = n_envs
 
-        self.states = self.vecenvs.reset()
+        self.policy = PolicyNetwork(action_space=self.ACTION_SPACE)
 
-        self.ACNet = ActorCriticNet(action_space=self.ACTION_SPACE)
+        self.value_network = ValueNetwork()
+
+        self.vecenv = SubProcVecEnv([env_func for i in range(self.n_envs)])
+
+        self.states = self.vecenv.reset()
 
         self.hiscore = 0
 
@@ -42,13 +54,13 @@ class PPOAgent:
 
             print("EPOCH:", n)
 
-            mb_states, mb_actions, mb_target_values, mb_advantages = self.run_nsteps(self.TRAJECTORY_SIZE)
+            trajectory = self.run_nsteps(trajectory_size=self.TRAJECTORY_SIZE)
 
-            self.update(mb_states, mb_actions, mb_target_values, mb_advantages)
+            self.update(trajectory)
 
             test_score = np.array(self.play(5)).mean()
 
-            history["steps"].append(n*self.TRAJECTORY_SIZE)
+            history["steps"].append(n*self.TRAJECTORY_SIZE*self.n_envs)
 
             history["scores"].append(test_score)
 
@@ -61,17 +73,21 @@ class PPOAgent:
 
         return history
 
-    def run_nsteps(self):
+    def run_nsteps(self, trajectory_size):
 
         mb_states, mb_values, mb_actions, mb_rewards, mb_dones = [], [], [], [], []
 
-        for _ in range(self.TRAJECTORY_SIZE):
+        for _ in range(trajectory_size):
 
             states = np.array(self.states)
 
-            actions = self.ACNet.sample_action(states)
+            actions = self.policy.sample_action(states)
 
-            rewards, next_states, dones, infos = self.vecenv.step(actions)
+            rewards, next_states, dones, info = self.vecenv.step(actions)
+
+            print(states)
+            import sys
+            sys.exit()
 
             mb_states.append(states)
             mb_actions.append(actions)
@@ -99,6 +115,11 @@ class PPOAgent:
             mb_discounted_rewards[n] = discounted_rewards
 
         return (mb_states, mb_actions, mb_discounted_rewards)
+
+    def update(self, trajectory):
+
+        mb_states, mb_actions, mb_target_values, mb_advantages = trajectory
+
     def save_model(self):
 
         self.ACNet.save_weights("checkpoints/best")
@@ -138,42 +159,21 @@ class PPOAgent:
         return total_rewards
 
 
-
 def main():
 
     MONITOR_DIR = Path(__file__).parent / "log"
 
-    total_steps = 200000
-
-    test_freq = 2000
-
     agent = PPOAgent(n_envs=5)
 
-    log_testplay = agent.run(total_steps=total_steps, test_freq=test_freq)
+    history = agent.run(n_epochs=10)
 
-    agent.load_model("checkpoints/best")
-    agent.play(5, monitordir=MONITOR_DIR)
+    #agent.load_model("checkpoints/best")
+    #agent.play(5, monitordir=MONITOR_DIR)
 
-    steps = np.arange(1, total_steps+1, test_freq)
-    #steps = steps / 1000
-
-    plt.plot(steps, log_testplay)
+    plt.plot(history["steps"], history["scores"])
     plt.xlabel("steps")
     plt.ylabel("Total rewards")
     plt.savefig(MONITOR_DIR / "testplay.png")
-
-
-def play():
-
-    MONITOR_DIR = Path(__file__).parent / "log"
-
-    agent = A2CAgent(n_procs=1)
-
-    agent.load_model("checkpoints/best")
-
-    agent.play(10, monitordir=MONITOR_DIR)
-
-
 
 
 if __name__ == "__main__":
