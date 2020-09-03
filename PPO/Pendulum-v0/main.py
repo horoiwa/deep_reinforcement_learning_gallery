@@ -22,6 +22,8 @@ class PPOAgent:
 
     TRAJECTORY_SIZE = 64
 
+    OBS_SPACE = 3
+
     ACTION_SPACE = 1
 
     GAMMA = 0.99
@@ -75,9 +77,14 @@ class PPOAgent:
 
     def run_nsteps(self, trajectory_size):
 
-        mb_states, mb_values, mb_actions, mb_rewards, mb_dones = [], [], [], [], []
+        trajectories = [{"s": np.zeros((self.TRAJECTORY_SIZE, self.OBS_SPACE), dtype=np.float32),
+                         "a": np.zeros((self.TRAJECTORY_SIZE, self.ACTION_SPACE), dtype=np.float32),
+                         "r": np.zeros((self.TRAJECTORY_SIZE, 1), dtype=np.float32),
+                         "s2": np.zeros((self.TRAJECTORY_SIZE, self.OBS_SPACE), dtype=np.float32),
+                         "done": np.zeros((self.TRAJECTORY_SIZE, 1), dtype=np.float32)}
+                         for _ in range(self.n_envs)]
 
-        for _ in range(trajectory_size):
+        for step in range(trajectory_size):
 
             states = np.array(self.states)
 
@@ -85,36 +92,19 @@ class PPOAgent:
 
             rewards, next_states, dones, info = self.vecenv.step(actions)
 
-            print(states)
-            import sys
-            sys.exit()
-
-            mb_states.append(states)
-            mb_actions.append(actions)
-            mb_rewards.append(rewards)
-            mb_dones.append(dones)
+            for i in range(self.n_envs):
+                trajectories[i]["s"][step] = states[i]
+                trajectories[i]["a"][step] = actions[i]
+                trajectories[i]["r"][step] = rewards[i]
+                trajectories[i]["s2"][step] = next_states[i]
+                trajectories[i]["done"][step] = dones[i]
 
             self.states = next_states
 
-        mb_states = np.array(mb_states).swapaxes(0, 1)
-        mb_actions = np.array(mb_actions).T
-        mb_rewards = np.array(mb_rewards).T
-        mb_values = np.array(mb_values).T
-        mb_dones = np.array(mb_dones).T
-
-        """Calculate Discounted Rewards
-        """
-        last_values, _ = self.ACNet.predict(self.states)
-
-        mb_discounted_rewards = np.zeros(mb_rewards.shape)
-        for n, (rewards, dones, last_value) in enumerate(zip(mb_rewards, mb_dones, last_values.flatten())):
-            rewards = rewards.tolist()
-            dones = dones.tolist()
-
-            discounted_rewards = self.discount_with_dones(rewards, dones, last_value)
-            mb_discounted_rewards[n] = discounted_rewards
-
-        return (mb_states, mb_actions, mb_discounted_rewards)
+        for trajectory in trajectories:
+            self.compute_advantage(trajectory)
+            import sys
+            sys.exit()
 
     def update(self, trajectory):
 

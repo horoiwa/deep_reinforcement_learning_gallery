@@ -73,7 +73,7 @@ class TRPOAgent:
         """
 
         trajectory = {"s": np.zeros((self.TRAJECTORY_SIZE, self.OBS_SPACE), dtype=np.float32),
-                      "a": np.zeros((self.TRAJECTORY_SIZE, 1), dtype=np.float32),
+                      "a": np.zeros((self.TRAJECTORY_SIZE, self.ACTION_SPACE), dtype=np.float32),
                       "r": np.zeros((self.TRAJECTORY_SIZE, 1), dtype=np.float32),
                       "s2": np.zeros((self.TRAJECTORY_SIZE, self.OBS_SPACE), dtype=np.float32),
                       "done": np.zeros((self.TRAJECTORY_SIZE, 1), dtype=np.float32)}
