@@ -2,9 +2,6 @@ import numpy as np
 import ray
 import gym
 
-from collections import namedtuple
-
-
 
 @ray.remote
 class Agent:

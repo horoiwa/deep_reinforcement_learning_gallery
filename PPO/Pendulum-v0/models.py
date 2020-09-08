@@ -6,11 +6,6 @@ import tensorflow.keras.layers as kl
 import tensorflow_probability as tfp
 import numpy as np
 
-import numpy as np
-import tensorflow as tf
-import tensorflow.keras.layers as kl
-import tensorflow_probability as tfp
-
 
 class PolicyNetwork(tf.keras.Model):
 
@@ -42,11 +37,11 @@ class PolicyNetwork(tf.keras.Model):
 
         return mean, stdev
 
-    def sample_action(self, state):
+    def sample_action(self, states):
 
-        state = np.atleast_2d(state).astype(np.float32)
+        states = np.atleast_2d(states).astype(np.float32)
 
-        mean, stdev = self(state)
+        mean, stdev = self(states)
 
         sampled_action = mean + stdev * tf.random.normal(tf.shape(mean))
 
@@ -55,9 +50,7 @@ class PolicyNetwork(tf.keras.Model):
 
 class ValueNetwork(tf.keras.Model):
 
-    LR = 0.005
-
-    def __init__(self):
+    def __init__(self, lr=0.005):
 
         super(ValueNetwork, self).__init__()
 
@@ -67,7 +60,7 @@ class ValueNetwork(tf.keras.Model):
 
         self.out = kl.Dense(1)
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=self.LR)
+        self.optimizer = tf.keras.optimizers.Adam(lr=lr)
 
     def call(self, s):
 

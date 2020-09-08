@@ -1,112 +1,89 @@
-import collections
-from dataclasses import dataclass
-
 import numpy as np
-from multiprocessing import Pipe, Process
+import ray
+import gym
 
 
-@dataclass
-class Step:
+@ray.remote
+class Agent:
 
-    reward: float
+    def __init__(self, env_id):
 
-    next_state: np.ndarray
+        self.env = gym.make(env_id)
 
-    done: bool
+        self.trajectory = {"s": [], "a": [], "r": [], "s2": [], "done": []}
 
-    info: dict
+    def reset(self):
+
+        self.state = self.env.reset()
+
+        return self.state
+
+    def step(self, action):
+
+        state = self.state
+
+        next_state, reward, done, _ = self.env.step(action)
+
+        if done:
+            next_state = self.env.reset()
+
+        self.trajectory["s"].append(state)
+        self.trajectory["a"].append(action)
+        self.trajectory["r"].append(reward)
+        self.trajectory["s2"].append(next_state)
+        self.trajectory["done"].append(done)
+
+        self.state = next_state
+
+        return next_state
+
+    def get_trajectory(self):
+
+        trajectory = self.trajectory
+
+        trajectory["s"] = np.array(trajectory["s"], dtype=np.float32)
+        trajectory["a"] = np.array(trajectory["a"], dtype=np.float32)
+        trajectory["r"] = np.array(trajectory["r"], dtype=np.float32).reshape(-1, 1)
+        trajectory["s2"] = np.array(trajectory["s2"], dtype=np.float32)
+        trajectory["done"] = np.array(trajectory["done"], dtype=np.float32).reshape(-1, 1)
+
+        self.trajectory = {"s": [], "a": [], "r": [], "s2": [], "done": []}
+
+        return trajectory
 
 
-def workerfunc(conn, env_func):
+class VecEnv:
 
-    env = env_func()
+    def __init__(self, env_id, n_envs):
 
-    while True:
+        ray.init()
 
-        cmd, action = conn.recv()
+        self.env_id = env_id
 
-        if cmd == 'step':
-            next_state, reward, done, info = env.step(action)
+        self.n_envs = n_envs
 
-            if done:
-                next_state = env.reset()
-
-            conn.send(Step(reward, next_state, done, info))
-
-        elif cmd == 'reset':
-            next_state = env.reset()
-            conn.send(next_state)
-
-        elif cmd == 'close':
-            conn.close()
-            break
-
-        elif cmd == "connect_test":
-            conn.send(f"Connection OK: worker{env.seed}")
-
-        else:
-            raise NotImplementedError()
-
-
-class SubProcVecEnv:
-
-    def __init__(self, env_funcs):
-
-        self.closed = False
-
-        self.n_envs = len(env_funcs)
-
-        pipes = [Pipe() for _ in range(self.n_envs)]
-
-        self.conns = [pipe[0] for pipe in pipes]
-
-        self.worker_conns = [pipe[1] for pipe in pipes]
-
-        self.workers = [Process(target=workerfunc, args=(worker_conn, env_func))
-                        for (worker_conn, env_func)
-                        in zip(self.worker_conns, env_funcs)]
-
-        for worker in self.workers:
-            worker.daemon = True
-            worker.start()
-
-        for conn in self.conns:
-            conn.send(("connect_test", None))
-            print(conn.recv())
+        self.agents = [Agent.remote(self.env_id) for _ in range(self.n_envs)]
 
     def step(self, actions):
 
-        for conn, action in zip(self.conns, actions):
-            conn.send(('step', action))
+        states = ray.get(
+            [agent.step.remote(action) for agent, action in zip(self.agents, actions)])
 
-        steps = [conn.recv() for conn in self.conns]
-
-        rewards = [step.reward for step in steps]
-
-        next_states = [step.next_state for step in steps]
-
-        dones = [step.done for step in steps]
-
-        infos = [step.info for step in steps]
-
-        return rewards, next_states, dones, infos
+        return np.array(states)
 
     def reset(self):
-        for conn in self.conns:
-            conn.send(('reset', None))
 
-        states = [conn.recv() for conn in self.conns]
+        states = ray.get([agent.reset.remote() for agent in self.agents])
 
-        return states
+        return np.array(states)
 
-    def close(self):
-        if self.closed:
-            return
+    def get_trajectories(self):
 
-        for conn in self.conns:
-            conn.send(('close', None))
+        trajectories = ray.get([agent.get_trajectory.remote() for agent in self.agents])
 
-        for worker in self.workers:
-            worker.join()
+        return trajectories
 
-        self.closed = True
+    def __len__(self):
+
+        return self.n_envs
+

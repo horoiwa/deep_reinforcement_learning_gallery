@@ -1,7 +1,5 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-import functools
-import random
 from pathlib import Path
 
 import gym
@@ -10,7 +8,7 @@ import numpy as np
 from multiprocessing import Process, Pipe
 import matplotlib.pyplot as plt
 
-from env import SubProcVecEnv
+from env import VecEnv
 from models import PolicyNetwork, ValueNetwork
 
 
@@ -24,112 +22,104 @@ class PPOAgent:
 
     OBS_SPACE = 3
 
-    ACTION_SPACE = 1
-
     GAMMA = 0.99
 
     LAMBDA = 0.95
 
-    VALUE_COEF = 0.5
+    def __init__(self, env_id, action_space, n_envs):
 
-    ENTROPY_COEF = 0.01
-
-    def __init__(self, n_envs):
+        self.env_id = env_id
 
         self.n_envs = n_envs
 
-        self.policy = PolicyNetwork(action_space=self.ACTION_SPACE)
+        self.vecenv = VecEnv(env_id=self.env_id, n_envs=self.n_envs)
 
-        self.value_network = ValueNetwork()
+        self.policy = PolicyNetwork(action_space=action_space)
 
-        self.vecenv = SubProcVecEnv([env_func for i in range(self.n_envs)])
+        self.value = ValueNetwork()
 
-        self.states = self.vecenv.reset()
+    def run(self, n_epochs, trajectory_size):
 
-        self.hiscore = 0
+        history = {"steps": [], "scores": []}
 
-    def run(self, n_epochs):
+        states = self.vecenv.reset()
 
-        history = {"steps": [0], "scores": [0]}
+        hiscore = 0
 
-        for n in range(1, n_epochs+1):
+        for epoch in range(n_epochs):
 
-            print("EPOCH:", n)
+            for _ in range(trajectory_size):
 
-            trajectory = self.run_nsteps(trajectory_size=self.TRAJECTORY_SIZE)
+                actions = self.policy(states)
 
-            self.update(trajectory)
+                states = self.vecenv.step(actions)
 
-            test_score = np.array(self.play(5)).mean()
+            trajectories = self.vecenv.get_trajectories()
+            trajectories = self.compute_advantage(trajectories)
 
-            history["steps"].append(n*self.TRAJECTORY_SIZE*self.n_envs)
+            states, actions, advantages = self.create_minibatch(trajectories)
 
+            self.update_policy(states, actions, advantages)
+            self.update_value(states, advantages)
+
+            global_steps = (epoch+1) * trajectory_size * self.n_envs
+            test_score = np.array(self.play(n=3)).mean()
+            history["steos"].append(global_steps)
             history["scores"].append(test_score)
 
-            print("Test score:", test_score)
-
-            if n > 10 and test_score > self.hiscore:
-                self.hiscore = test_score
+            ma_score = sum(history["scores"][-10:]) / 10
+            if epoch > 10 and ma_score > hiscore:
                 self.save_model()
-                print("Hi Score Update:", self.hiscore)
+                print("Model Saved")
+
+            print(f"Epoch {epoch}, {global_steps//1000}K, {test_score}")
 
         return history
 
-    def run_nsteps(self, trajectory_size):
-
-        trajectories = [{"s": np.zeros((self.TRAJECTORY_SIZE, self.OBS_SPACE), dtype=np.float32),
-                         "a": np.zeros((self.TRAJECTORY_SIZE, self.ACTION_SPACE), dtype=np.float32),
-                         "r": np.zeros((self.TRAJECTORY_SIZE, 1), dtype=np.float32),
-                         "s2": np.zeros((self.TRAJECTORY_SIZE, self.OBS_SPACE), dtype=np.float32),
-                         "done": np.zeros((self.TRAJECTORY_SIZE, 1), dtype=np.float32)}
-                         for _ in range(self.n_envs)]
-
-        for step in range(trajectory_size):
-
-            states = np.array(self.states)
-
-            actions = self.policy.sample_action(states)
-
-            rewards, next_states, dones, info = self.vecenv.step(actions)
-
-            for i in range(self.n_envs):
-                trajectories[i]["s"][step] = states[i]
-                trajectories[i]["a"][step] = actions[i]
-                trajectories[i]["r"][step] = rewards[i]
-                trajectories[i]["s2"][step] = next_states[i]
-                trajectories[i]["done"][step] = dones[i]
-
-            self.states = next_states
-
+    def compute_advantage(self, trajectories):
         for trajectory in trajectories:
-            self.compute_advantage(trajectory)
-            import sys
-            sys.exit()
+            pass
+        return trajectories
 
-    def update(self, trajectory):
+    def create_minibatch(self, trajectory):
 
-        mb_states, mb_actions, mb_target_values, mb_advantages = trajectory
+        states = None
+        actions = None
+        advantages = None
+
+        return states, actions, advantages
+
+    def update_policy(self, states, actions, advantages):
+        raise NotImplementedError()
+
+    def update_value(self, states, advantages):
+        raise NotImplementedError()
 
     def save_model(self):
 
-        self.ACNet.save_weights("checkpoints/best")
+        self.policy.save_weights("checkpoints/policy")
+
+        self.value.save_weights("checkpoints/value")
 
     def load_model(self, weights_path):
 
-        self.ACNet.load_weights(weights_path)
+        self.policy.load_weights("checkpoints/policy")
+
+        self.value.load_weights("checkpoints/value")
 
     def play(self, n=1, monitordir=None):
 
         if monitordir:
-            env = wrappers.Monitor(gym.make("CartPole-v1"),
+            env = wrappers.Monitor(gym.make(self.env_id),
                                    monitordir, force=True,
                                    video_callable=(lambda ep: True))
         else:
-            env = gym.make("CartPole-v1")
+            env = gym.make(self.env_id)
 
         total_rewards = []
 
         for _ in range(n):
+
             obs = env.reset()
 
             done = False
@@ -138,9 +128,9 @@ class PPOAgent:
 
             while not done:
 
-                action = self.ACNet.sample_action(obs)
+                action = self.policy.sample_action(obs)
 
-                obs, reward, done, info = env.step(action[0])
+                obs, reward, done, _ = env.step(action)
 
                 total_reward += reward
 
@@ -153,11 +143,11 @@ def main():
 
     MONITOR_DIR = Path(__file__).parent / "log"
 
-    agent = PPOAgent(n_envs=5)
+    agent = PPOAgent(env_id="Pendulum-v0", action_space=1, n_envs=4)
 
-    history = agent.run(n_epochs=10)
+    history = agent.run(n_epochs=10, trajectory_size=512)
 
-    #agent.load_model("checkpoints/best")
+    #agent.load_model()
     #agent.play(5, monitordir=MONITOR_DIR)
 
     plt.plot(history["steps"], history["scores"])
