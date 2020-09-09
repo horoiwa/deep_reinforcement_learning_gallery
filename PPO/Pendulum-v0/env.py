@@ -2,6 +2,9 @@ import numpy as np
 import ray
 import gym
 
+import warnings
+warnings.filterwarnings("ignore")
+
 
 @ray.remote
 class Agent:
