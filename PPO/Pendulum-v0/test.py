@@ -1,32 +1,19 @@
-import ray
-
-
-@ray.remote
-class Counter(object):
-    def __init__(self):
-        self.x = 0
-
-    def inc(self):
-        self.x += 1
-
-    def get_value(self):
-        return self.x
+import gym
 
 
 def main():
-    ray.init()
-    # Create an actor process.
-    c = Counter.remote()
+    env = gym.make("Pendulum-v0")
+    state = env.reset()
+    while True:
+        action = [1]
+        next_state, reward, done, _ = env.step(state)
 
-    # Check the actor's counter value.
-    print(ray.get(c.get_value.remote()))  # 0
+        print(state, next_state)
 
-    # Increment the counter twice and check the value again.
-    c.inc.remote()
-    c.inc.remote()
-    print(ray.get(c.get_value.remote()))  # 2
-
-    ray.shutdown()
+        if done:
+            break
+        else:
+            state = next_state
 
 
 if __name__ == "__main__":

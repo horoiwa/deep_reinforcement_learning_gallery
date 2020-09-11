@@ -28,6 +28,8 @@ class PPOAgent:
 
     GAE_LAMBDA = 0.95
 
+    CLIPRANGE = 0.2
+
     def __init__(self, env_id, action_space, n_envs):
 
         self.env_id = env_id
@@ -69,9 +71,9 @@ class PPOAgent:
             self.update_value(states, vtargs)
 
             global_steps = (epoch+1) * trajectory_size * self.n_envs
-            test_score = np.array(self.play(n=3)).mean()
+            test_scores = np.array(self.play(n=3))
             history["steos"].append(global_steps)
-            history["scores"].append(test_score)
+            history["scores"].append(test_scores.mean())
 
             ma_score = sum(history["scores"][-10:]) / 10
             if epoch > 10 and ma_score > hiscore:
@@ -113,26 +115,42 @@ class PPOAgent:
 
         old_means, old_stdevs = self.policy(states)
 
-        old_logprob = compute_logprob(old_means, old_stdevs, actions)
+        old_logprob = self.compute_logprob(old_means, old_stdevs, actions)
 
         with tf.GradientTape() as tape:
 
             new_means, new_stdevs = self.policy(states)
 
-            new_logprob = compute_logprob(means, stdevs, actions)
+            new_logprob = self.compute_logprob(new_means, new_stdevs, actions)
 
-            r = tf.exp(new_logprob - old_logprob)
+            ratio = tf.exp(new_logprob - old_logprob)
+            ratio_clipped = tf.clip_by_value(ratio,
+                                             1 - self.CLIPRANGE,
+                                             1 + self.CLIPRANGE)
+            loss_unclipped = ratio * advantages
+            loss_clipped = ratio_clipped * advantages
+            loss = tf.minimum(loss_unclipped, loss_clipped)
 
-            r_clip = tf.where(r, 1+self.POLICY_CLIP, 1-self.POLICY_CLIP)
+            #: 最大化したいので-1倍する
+            loss *= -1
 
-            loss = -1 * r_clip * advantages
-
-        grads = tape.gradient(loss, self.policy.trainable_variables)
-
-        raise NotImplementedError()
+        variables = self.policy.trainable_variables
+        grads = tape.gradient(loss, variables)
+        self.policy.optimizer.apply_gradients(zip(grads, variables))
 
     def update_value(self, states, v_targs):
-        raise NotImplementedError()
+        return None
+
+    @tf.function
+    def compute_logprob(self, means, stdevs, actions):
+        """ガウス分布の確率密度関数よりlogp(x)を計算
+            logp(x) = -0.5 log(2π) - log(std)  -0.5 * ((x - mean) / std )^2
+        """
+        logprob = - 0.5 * np.log(2*np.pi)
+        logprob += - tf.math.log(stdevs)
+        logprob += - 0.5 * tf.square((actions - means) / stdevs)
+        logprob = tf.reduce_sum(logprob, axis=1, keepdims=True)
+        return logprob
 
     def create_minibatch(self, trajectories):
 
@@ -171,7 +189,7 @@ class PPOAgent:
 
         for _ in range(n):
 
-            obs = env.reset()
+            state = env.reset()
 
             done = False
 
@@ -179,11 +197,16 @@ class PPOAgent:
 
             while not done:
 
-                action = self.policy.sample_action(obs)
+                action = self.policy.sample_action(state)
 
-                obs, reward, done, _ = env.step(action)
+                next_state, reward, done, _ = env.step(action[0])
 
                 total_reward += reward
+
+                if done:
+                    break
+                else:
+                    state = next_state
 
             total_rewards.append(total_reward)
 
@@ -209,9 +232,10 @@ def testplay():
     MONITOR_DIR = Path(__file__).parent / "log"
 
     agent = PPOAgent(env_id="Pendulum-v0", action_space=1, n_envs=4)
-    agent.load_model()
+    #agent.load_model()
     agent.play(n=1, monitordir=MONITOR_DIR)
 
 
 if __name__ == "__main__":
-    main()
+    #main()
+    testplay()

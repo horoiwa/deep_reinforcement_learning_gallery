@@ -9,7 +9,7 @@ import numpy as np
 
 class PolicyNetwork(tf.keras.Model):
 
-    def __init__(self, action_space):
+    def __init__(self, action_space, lr=0.0003):
         """
           Note: 出力層のactivationにtanhとかを使うのはKLが意味をなさなくなるのでNG
         """
@@ -25,6 +25,8 @@ class PolicyNetwork(tf.keras.Model):
         self.pi_mean = kl.Dense(self.action_space)
 
         self.pi_logstdev = kl.Dense(self.action_space)
+
+        self.optimizer = tf.optimizers.Adam(lr=lr)
 
     @tf.function
     def call(self, s):
@@ -50,7 +52,7 @@ class PolicyNetwork(tf.keras.Model):
 
 class ValueNetwork(tf.keras.Model):
 
-    def __init__(self, lr=0.005):
+    def __init__(self, lr=0.001):
 
         super(ValueNetwork, self).__init__()
 

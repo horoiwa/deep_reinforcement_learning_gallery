@@ -69,10 +69,10 @@ class VecEnv:
 
     def step(self, actions):
 
-        states = ray.get(
+        next_states = ray.get(
             [agent.step.remote(action) for agent, action in zip(self.agents, actions)])
 
-        return np.array(states)
+        return np.array(next_states)
 
     def reset(self):
 
