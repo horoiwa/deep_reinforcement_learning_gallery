@@ -9,7 +9,7 @@ import numpy as np
 
 class PolicyNetwork(tf.keras.Model):
 
-    def __init__(self, action_space, lr=0.0003):
+    def __init__(self, action_space, lr=0.001):
         """
           Note: 出力層のactivationにtanhとかを使うのはKLが意味をなさなくなるのでNG
         """

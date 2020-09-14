@@ -90,3 +90,5 @@ class VecEnv:
 
         return self.n_envs
 
+    def __del__(self):
+        ray.shutdown()

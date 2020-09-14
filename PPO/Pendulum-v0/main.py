@@ -1,11 +1,13 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 from pathlib import Path
+import shutil
 
 import gym
 from gym import wrappers
 import numpy as np
 import tensorflow as tf
+import numpy as np
 import matplotlib.pyplot as plt
 
 from env import VecEnv
@@ -18,10 +20,6 @@ def env_func():
 
 class PPOAgent:
 
-    TRAJECTORY_SIZE = 64
-
-    V_BATCH_SIZE = 64
-
     OBS_SPACE = 3
 
     GAMMA = 0.99
@@ -30,11 +28,14 @@ class PPOAgent:
 
     CLIPRANGE = 0.2
 
-    def __init__(self, env_id, action_space, n_envs):
+    def __init__(self, env_id, action_space, logdir,
+                 n_envs=1, trajectory_size=256):
 
         self.env_id = env_id
 
         self.n_envs = n_envs
+
+        self.trajectory_size = trajectory_size
 
         self.vecenv = VecEnv(env_id=self.env_id, n_envs=self.n_envs)
 
@@ -42,17 +43,21 @@ class PPOAgent:
 
         self.value = ValueNetwork()
 
-    def run(self, n_epochs, trajectory_size):
+        self.logdir = logdir
+
+        self.summary_writer = tf.summary.create_file_writer(str(logdir))
+
+    def run(self, n_updates):
 
         history = {"steps": [], "scores": []}
 
         states = self.vecenv.reset()
 
-        hiscore = 0
+        hiscore = None
 
-        for epoch in range(n_epochs):
+        for epoch in range(n_updates):
 
-            for _ in range(trajectory_size):
+            for _ in range(self.trajectory_size):
 
                 actions = self.policy.sample_action(states)
 
@@ -66,21 +71,27 @@ class PPOAgent:
 
             states, actions, advantages, vtargs = self.create_minibatch(trajectories)
 
-            self.update_policy(states, actions, advantages)
+            vloss = self.update_value(states, vtargs)
 
-            self.update_value(states, vtargs)
+            ploss = self.update_policy(states, actions, advantages)
 
-            global_steps = (epoch+1) * trajectory_size * self.n_envs
+            global_steps = (epoch+1) * self.trajectory_size * self.n_envs
             test_scores = np.array(self.play(n=3))
-            history["steos"].append(global_steps)
+            history["steps"].append(global_steps)
             history["scores"].append(test_scores.mean())
 
             ma_score = sum(history["scores"][-10:]) / 10
-            if epoch > 10 and ma_score > hiscore:
+            if epoch > 10 and (hiscore is None or ma_score > hiscore):
                 self.save_model()
+                hiscore = ma_score
                 print("Model Saved")
 
-            print(f"Epoch {epoch}, {global_steps//1000}K, {test_score}")
+            with self.summary_writer.as_default():
+                tf.summary.scalar("value_loss", vloss, step=epoch)
+                tf.summary.scalar("policy_loss", ploss, step=epoch)
+                tf.summary.scalar("score", ma_score, step=epoch)
+
+            print(f"Epoch {epoch}, {global_steps//1000}K, {test_scores.mean()}")
 
         return history
 
@@ -130,16 +141,35 @@ class PPOAgent:
             loss_unclipped = ratio * advantages
             loss_clipped = ratio_clipped * advantages
             loss = tf.minimum(loss_unclipped, loss_clipped)
+            loss = -1 * tf.reduce_mean(loss)
 
-            #: 最大化したいので-1倍する
-            loss *= -1
+        grads = tape.gradient(loss, self.policy.trainable_variables)
+        self.policy.optimizer.apply_gradients(
+            zip(grads, self.policy.trainable_variables))
 
-        variables = self.policy.trainable_variables
-        grads = tape.gradient(loss, variables)
-        self.policy.optimizer.apply_gradients(zip(grads, variables))
+        return loss
 
     def update_value(self, states, v_targs):
-        return None
+
+        losses = []
+
+        indices = np.random.choice(np.arange(self.n_envs * self.trajectory_size),
+                                   (self.n_envs, self.trajectory_size),
+                                   replace=False)
+        indices = [indices[i] for i in range(indices.shape[0])]
+
+        for idx in indices:
+            with tf.GradientTape() as tape:
+                pred = self.value(states[idx])
+                target = v_targs[idx]
+                loss = tf.reduce_mean(tf.square(target - pred))
+
+            grads = tape.gradient(loss, self.value.trainable_variables)
+            self.value.optimizer.apply_gradients(
+                zip(grads, self.value.trainable_variables))
+            losses.append(loss)
+
+        return np.array(losses).mean()
 
     @tf.function
     def compute_logprob(self, means, stdevs, actions):
@@ -198,7 +228,6 @@ class PPOAgent:
             while not done:
 
                 action = self.policy.sample_action(state)
-
                 next_state, reward, done, _ = env.step(action[0])
 
                 total_reward += reward
@@ -216,10 +245,14 @@ class PPOAgent:
 def main():
 
     MONITOR_DIR = Path(__file__).parent / "log"
+    LOGDIR = MONITOR_DIR / "summary"
+    if LOGDIR.exists():
+        shutil.rmtree(LOGDIR)
 
-    agent = PPOAgent(env_id="Pendulum-v0", action_space=1, n_envs=4)
+    agent = PPOAgent(env_id="Pendulum-v0", action_space=1,
+                     n_envs=4, trajectory_size=64, logdir=LOGDIR)
 
-    history = agent.run(n_epochs=10, trajectory_size=256)
+    history = agent.run(n_updates=50)
 
     plt.plot(history["steps"], history["scores"])
     plt.xlabel("steps")
@@ -231,11 +264,11 @@ def testplay():
 
     MONITOR_DIR = Path(__file__).parent / "log"
 
-    agent = PPOAgent(env_id="Pendulum-v0", action_space=1, n_envs=4)
-    #agent.load_model()
-    agent.play(n=1, monitordir=MONITOR_DIR)
+    agent = PPOAgent(env_id="Pendulum-v0", action_space=1, logdir=None)
+    agent.load_model()
+    agent.play(n=3, monitordir=MONITOR_DIR)
 
 
 if __name__ == "__main__":
-    #main()
+    main()
     testplay()
