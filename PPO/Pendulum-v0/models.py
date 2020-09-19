@@ -9,33 +9,36 @@ import numpy as np
 
 class PolicyNetwork(tf.keras.Model):
 
-    def __init__(self, action_space, lr=0.001):
-        """
-          Note: 出力層のactivationにtanhとかを使うのはKLが意味をなさなくなるのでNG
-        """
+    def __init__(self, action_space, lr=0.0003):
 
         super(PolicyNetwork, self).__init__()
 
         self.action_space = action_space
 
-        self.dense1 = kl.Dense(64, activation="tanh")
+        self.dense1 = kl.Dense(64, activation="tanh",
+                               kernel_initializer="Orthogonal")
 
-        self.dense2 = kl.Dense(64, activation="tanh")
+        self.dense2 = kl.Dense(64, activation="tanh",
+                               kernel_initializer="Orthogonal")
 
-        self.pi_mean = kl.Dense(self.action_space)
+        self.pi_mean = kl.Dense(self.action_space, activation="tanh",
+                                kernel_initializer="Orthogonal")
 
-        self.pi_logstdev = kl.Dense(self.action_space)
+        self.pi_stdev = kl.Dense(self.action_space, activation="softplus",
+                                 kernel_initializer="Orthogonal")
 
         self.optimizer = tf.optimizers.Adam(lr=lr)
 
     @tf.function
-    def call(self, s):
+    def call(self, x):
 
-        x = self.dense1(s)
+        x = self.dense1(x)
+
         x = self.dense2(x)
-        mean = self.pi_mean(x)
-        logstdev = self.pi_logstdev(x)
-        stdev = tf.exp(logstdev)
+
+        mean = 2 * self.pi_mean(x)
+
+        stdev = self.pi_stdev(x)
 
         return mean, stdev
 
@@ -47,12 +50,14 @@ class PolicyNetwork(tf.keras.Model):
 
         sampled_action = mean + stdev * tf.random.normal(tf.shape(mean))
 
+        sampled_action = tf.clip_by_value(sampled_action, -1.9, 1.9)
+
         return sampled_action.numpy()
 
 
 class ValueNetwork(tf.keras.Model):
 
-    def __init__(self, lr=0.001):
+    def __init__(self, lr=0.0003):
 
         super(ValueNetwork, self).__init__()
 
@@ -64,9 +69,9 @@ class ValueNetwork(tf.keras.Model):
 
         self.optimizer = tf.keras.optimizers.Adam(lr=lr)
 
-    def call(self, s):
+    def call(self, x):
 
-        x = self.dense1(s)
+        x = self.dense1(x)
         x = self.dense2(x)
         out = self.out(x)
 

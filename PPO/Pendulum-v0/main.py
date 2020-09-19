@@ -22,13 +22,17 @@ class PPOAgent:
 
     OBS_SPACE = 3
 
-    GAMMA = 0.99
+    GAMMA = 0.95
 
-    GAE_LAMBDA = 0.95
+    GAE_LAMBDA = 0.1
 
     CLIPRANGE = 0.2
 
-    def __init__(self, env_id, action_space, logdir,
+    SGD_BATCH_SIZE = 64
+
+    SGD_ITER = 10
+
+    def __init__(self, env_id, action_space,
                  n_envs=1, trajectory_size=256):
 
         self.env_id = env_id
@@ -43,11 +47,9 @@ class PPOAgent:
 
         self.value = ValueNetwork()
 
-        self.logdir = logdir
+    def run(self, n_updates, logdir):
 
         self.summary_writer = tf.summary.create_file_writer(str(logdir))
-
-    def run(self, n_updates):
 
         history = {"steps": [], "scores": []}
 
@@ -73,25 +75,28 @@ class PPOAgent:
 
             vloss = self.update_value(states, vtargs)
 
-            ploss = self.update_policy(states, actions, advantages)
+            self.update_policy(states, actions, advantages)
 
             global_steps = (epoch+1) * self.trajectory_size * self.n_envs
-            test_scores = np.array(self.play(n=3))
-            history["steps"].append(global_steps)
-            history["scores"].append(test_scores.mean())
+            train_scores = np.array([traj["r"].sum() for traj in trajectories])
 
-            ma_score = sum(history["scores"][-10:]) / 10
-            if epoch > 10 and (hiscore is None or ma_score > hiscore):
+            if epoch % 10 == 0:
+                test_scores = np.array(self.play(n=1))
+                history["steps"].append(global_steps)
+                history["scores"].append(test_scores.mean())
+                ma_score = sum(history["scores"][-10:]) / 10
+                with self.summary_writer.as_default():
+                    tf.summary.scalar("test_score", test_scores.mean(), step=epoch)
+                print(f"Epoch {epoch}, {global_steps//1000}K, {test_scores.mean()}")
+
+            if epoch // 10 > 10 and (hiscore is None or ma_score > hiscore):
                 self.save_model()
                 hiscore = ma_score
                 print("Model Saved")
 
             with self.summary_writer.as_default():
                 tf.summary.scalar("value_loss", vloss, step=epoch)
-                tf.summary.scalar("policy_loss", ploss, step=epoch)
-                tf.summary.scalar("score", ma_score, step=epoch)
-
-            print(f"Epoch {epoch}, {global_steps//1000}K, {test_scores.mean()}")
+                tf.summary.scalar("train_score", train_scores.mean(), step=epoch)
 
         return history
 
@@ -116,49 +121,53 @@ class PPOAgent:
                 lastgae = deltas[i] + self.GAMMA * self.GAE_LAMBDA * is_nonterminals[i] * lastgae
                 advantages[i] = lastgae
 
-            trajectory["v_target"] = advantages + trajectory["v_pred"]
-
             trajectory["advantage"] = advantages
 
         return trajectories
 
     def update_policy(self, states, actions, advantages):
 
-        old_means, old_stdevs = self.policy(states)
+        for _ in range(self.SGD_ITER):
 
-        old_logprob = self.compute_logprob(old_means, old_stdevs, actions)
+            idx = np.random.choice(
+                np.arange(self.n_envs * self.trajectory_size),
+                self.SGD_BATCH_SIZE, replace=False)
 
-        with tf.GradientTape() as tape:
+            old_means, old_stdevs = self.policy(states[idx])
 
-            new_means, new_stdevs = self.policy(states)
+            old_logprob = self.compute_logprob(old_means, old_stdevs, actions[idx])
 
-            new_logprob = self.compute_logprob(new_means, new_stdevs, actions)
+            with tf.GradientTape() as tape:
 
-            ratio = tf.exp(new_logprob - old_logprob)
-            ratio_clipped = tf.clip_by_value(ratio,
-                                             1 - self.CLIPRANGE,
-                                             1 + self.CLIPRANGE)
-            loss_unclipped = ratio * advantages
-            loss_clipped = ratio_clipped * advantages
-            loss = tf.minimum(loss_unclipped, loss_clipped)
-            loss = -1 * tf.reduce_mean(loss)
+                new_means, new_stdevs = self.policy(states[idx])
 
-        grads = tape.gradient(loss, self.policy.trainable_variables)
-        self.policy.optimizer.apply_gradients(
-            zip(grads, self.policy.trainable_variables))
+                new_logprob = self.compute_logprob(new_means, new_stdevs, actions[idx])
 
-        return loss
+                ratio = tf.exp(new_logprob - old_logprob)
+
+                ratio_clipped = tf.clip_by_value(
+                    ratio, 1 - self.CLIPRANGE, 1 + self.CLIPRANGE)
+
+                loss_unclipped = ratio * advantages[idx]
+                loss_clipped = ratio_clipped * advantages[idx]
+
+                loss = tf.minimum(loss_unclipped, loss_clipped)
+                loss = -1 * tf.reduce_mean(loss)
+
+            grads = tape.gradient(loss, self.policy.trainable_variables)
+            self.policy.optimizer.apply_gradients(
+                zip(grads, self.policy.trainable_variables))
 
     def update_value(self, states, v_targs):
 
         losses = []
 
-        indices = np.random.choice(np.arange(self.n_envs * self.trajectory_size),
-                                   (self.n_envs, self.trajectory_size),
-                                   replace=False)
-        indices = [indices[i] for i in range(indices.shape[0])]
+        for _ in range(self.SGD_ITER):
 
-        for idx in indices:
+            idx = np.random.choice(
+                np.arange(self.n_envs * self.trajectory_size),
+                self.SGD_BATCH_SIZE, replace=False)
+
             with tf.GradientTape() as tape:
                 pred = self.value(states[idx])
                 target = v_targs[idx]
@@ -167,6 +176,7 @@ class PPOAgent:
             grads = tape.gradient(loss, self.value.trainable_variables)
             self.value.optimizer.apply_gradients(
                 zip(grads, self.value.trainable_variables))
+
             losses.append(loss)
 
         return np.array(losses).mean()
@@ -186,11 +196,14 @@ class PPOAgent:
 
         states = np.vstack([traj["s"] for traj in trajectories])
         actions = np.vstack([traj["a"] for traj in trajectories])
+        rewards = np.vstack([traj["r"] for traj in trajectories])
+        is_nonterminals = 1 - np.vstack([traj["done"] for traj in trajectories])
 
         advantages = np.vstack([traj["advantage"] for traj in trajectories])
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        advantages = (advantages - advantages.mean()) / (advantages.std())
 
-        v_targs = np.vstack([traj["v_target"] for traj in trajectories])
+        v_pred_next = np.vstack([traj["v_pred_next"] for traj in trajectories])
+        v_targs = rewards / rewards.std() + is_nonterminals * self.GAMMA * v_pred_next
 
         return states, actions, advantages, v_targs
 
@@ -206,7 +219,7 @@ class PPOAgent:
 
         self.value.load_weights("checkpoints/value")
 
-    def play(self, n=1, monitordir=None):
+    def play(self, n=1, monitordir=None, verbose=False):
 
         if monitordir:
             env = wrappers.Monitor(gym.make(self.env_id),
@@ -228,6 +241,10 @@ class PPOAgent:
             while not done:
 
                 action = self.policy.sample_action(state)
+                if verbose:
+                    mean, sd = self.policy(np.atleast_2d(state))
+                    print(action, mean.numpy(), sd.numpy())
+
                 next_state, reward, done, _ = env.step(action[0])
 
                 total_reward += reward
@@ -250,9 +267,9 @@ def main():
         shutil.rmtree(LOGDIR)
 
     agent = PPOAgent(env_id="Pendulum-v0", action_space=1,
-                     n_envs=4, trajectory_size=64, logdir=LOGDIR)
+                     n_envs=4, trajectory_size=512)
 
-    history = agent.run(n_updates=50)
+    history = agent.run(n_updates=3000, logdir=LOGDIR)
 
     plt.plot(history["steps"], history["scores"])
     plt.xlabel("steps")
@@ -264,11 +281,17 @@ def testplay():
 
     MONITOR_DIR = Path(__file__).parent / "log"
 
-    agent = PPOAgent(env_id="Pendulum-v0", action_space=1, logdir=None)
+    agent = PPOAgent(env_id="Pendulum-v0", action_space=1)
     agent.load_model()
-    agent.play(n=3, monitordir=MONITOR_DIR)
+    agent.play(n=3, monitordir=MONITOR_DIR, verbose=True)
 
 
 if __name__ == "__main__":
+    """Todo
+        - VTARG実装の確認
+        - あとstdevは定数のほうがよさそうだ
+        - それでも無理ならA2C型へ切り替え
+    """
     main()
     testplay()
+

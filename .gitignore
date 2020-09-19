@@ -8,7 +8,7 @@ ref/
 
 # C extensions
 *.so
-
+checkpoints/
 *memo.md
 
 memo.md
