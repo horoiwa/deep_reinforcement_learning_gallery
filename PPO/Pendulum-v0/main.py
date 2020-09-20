@@ -20,11 +20,9 @@ def env_func():
 
 class PPOAgent:
 
-    OBS_SPACE = 3
+    GAMMA = 0.99
 
-    GAMMA = 0.95
-
-    GAE_LAMBDA = 0.1
+    GAE_LAMBDA = 0.95
 
     CLIPRANGE = 0.2
 
@@ -102,7 +100,7 @@ class PPOAgent:
 
     def compute_advantage(self, trajectories):
         """
-            compute Generalized Advantage Estimation (GAE, 2016)
+            Generalized Advantage Estimation (GAE, 2016)
         """
         for trajectory in trajectories:
 
@@ -122,6 +120,13 @@ class PPOAgent:
                 advantages[i] = lastgae
 
             trajectory["advantage"] = advantages
+
+            trajectory["R"] = np.zeros_like(trajectory["r"])
+
+            R = (1 - trajectory["done"][-1]) * trajectory["v_pred_next"][-1]
+            for i in reversed(range(trajectory["r"].shape[0])):
+                R = trajectory["r"][i] + (1 - trajectory["done"][i]) * self.GAMMA * R
+                trajectory["R"][i] = R
 
         return trajectories
 
@@ -168,10 +173,13 @@ class PPOAgent:
                 np.arange(self.n_envs * self.trajectory_size),
                 self.SGD_BATCH_SIZE, replace=False)
 
+            old_vpred = self.value(states[idx])
             with tf.GradientTape() as tape:
-                pred = self.value(states[idx])
+                vpred = self.value(states[idx])
+                vpred_clipped = old_vpred + tf.clip_by_value(vpred - old_vpred, -self.CLIPRANGE, self.CLIPRANGE)
                 target = v_targs[idx]
-                loss = tf.reduce_mean(tf.square(target - pred))
+                loss = tf.maximum(tf.square(target - vpred), tf.square(target - vpred_clipped))
+                loss = tf.reduce_mean(loss)
 
             grads = tape.gradient(loss, self.value.trainable_variables)
             self.value.optimizer.apply_gradients(
@@ -196,14 +204,11 @@ class PPOAgent:
 
         states = np.vstack([traj["s"] for traj in trajectories])
         actions = np.vstack([traj["a"] for traj in trajectories])
-        rewards = np.vstack([traj["r"] for traj in trajectories])
-        is_nonterminals = 1 - np.vstack([traj["done"] for traj in trajectories])
 
         advantages = np.vstack([traj["advantage"] for traj in trajectories])
         advantages = (advantages - advantages.mean()) / (advantages.std())
 
-        v_pred_next = np.vstack([traj["v_pred_next"] for traj in trajectories])
-        v_targs = rewards / rewards.std() + is_nonterminals * self.GAMMA * v_pred_next
+        v_targs = np.vstack([traj["R"] for traj in trajectories])
 
         return states, actions, advantages, v_targs
 
@@ -241,6 +246,7 @@ class PPOAgent:
             while not done:
 
                 action = self.policy.sample_action(state)
+
                 if verbose:
                     mean, sd = self.policy(np.atleast_2d(state))
                     print(action, mean.numpy(), sd.numpy())
@@ -255,21 +261,27 @@ class PPOAgent:
                     state = next_state
 
             total_rewards.append(total_reward)
+            print()
+            print(total_reward)
+            print()
 
         return total_rewards
 
 
-def main():
+def main(env_id, action_space):
 
     MONITOR_DIR = Path(__file__).parent / "log"
     LOGDIR = MONITOR_DIR / "summary"
     if LOGDIR.exists():
         shutil.rmtree(LOGDIR)
 
-    agent = PPOAgent(env_id="Pendulum-v0", action_space=1,
-                     n_envs=4, trajectory_size=512)
+    #agent = PPOAgent(env_id="BipedalWalker-v3", action_space=4,
+    #                 n_envs=5, trajectory_size=1024)
 
-    history = agent.run(n_updates=3000, logdir=LOGDIR)
+    agent = PPOAgent(env_id=env_id, action_space=action_space,
+                     n_envs=5, trajectory_size=400)
+
+    history = agent.run(n_updates=1000, logdir=LOGDIR)
 
     plt.plot(history["steps"], history["scores"])
     plt.xlabel("steps")
@@ -277,21 +289,21 @@ def main():
     plt.savefig(MONITOR_DIR / "testplay.png")
 
 
-def testplay():
+def testplay(env_id):
 
     MONITOR_DIR = Path(__file__).parent / "log"
 
-    agent = PPOAgent(env_id="Pendulum-v0", action_space=1)
+    agent = PPOAgent(env_id=env_id, action_space=1)
     agent.load_model()
     agent.play(n=3, monitordir=MONITOR_DIR, verbose=True)
 
 
 if __name__ == "__main__":
     """Todo
-        - VTARG実装の確認
-        - あとstdevは定数のほうがよさそうだ
-        - それでも無理ならA2C型へ切り替え
+        - V実装の確認@tfagents
     """
-    main()
-    testplay()
+    env_id = "Pendulum-v0"
+    action_space = 1
+    main(env_id, action_space)
+    testplay(env_id)
 

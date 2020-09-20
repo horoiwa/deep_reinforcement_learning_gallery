@@ -15,17 +15,13 @@ class PolicyNetwork(tf.keras.Model):
 
         self.action_space = action_space
 
-        self.dense1 = kl.Dense(64, activation="tanh",
-                               kernel_initializer="Orthogonal")
+        self.dense1 = kl.Dense(64, activation="tanh")
 
-        self.dense2 = kl.Dense(64, activation="tanh",
-                               kernel_initializer="Orthogonal")
+        self.dense2 = kl.Dense(64, activation="tanh")
 
-        self.pi_mean = kl.Dense(self.action_space, activation="tanh",
-                                kernel_initializer="Orthogonal")
+        self.pi_mean = kl.Dense(self.action_space)
 
-        self.pi_stdev = kl.Dense(self.action_space, activation="softplus",
-                                 kernel_initializer="Orthogonal")
+        self.pi_stdev = kl.Dense(self.action_space, activation="softplus")
 
         self.optimizer = tf.optimizers.Adam(lr=lr)
 
@@ -36,9 +32,9 @@ class PolicyNetwork(tf.keras.Model):
 
         x = self.dense2(x)
 
-        mean = 2 * self.pi_mean(x)
+        mean = self.pi_mean(x)
 
-        stdev = self.pi_stdev(x)
+        stdev = self.pi_stdev(x) + 0.15
 
         return mean, stdev
 
@@ -50,14 +46,12 @@ class PolicyNetwork(tf.keras.Model):
 
         sampled_action = mean + stdev * tf.random.normal(tf.shape(mean))
 
-        sampled_action = tf.clip_by_value(sampled_action, -1.9, 1.9)
-
         return sampled_action.numpy()
 
 
 class ValueNetwork(tf.keras.Model):
 
-    def __init__(self, lr=0.0003):
+    def __init__(self, lr=0.001):
 
         super(ValueNetwork, self).__init__()
 
