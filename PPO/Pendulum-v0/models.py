@@ -9,19 +9,23 @@ import numpy as np
 
 class PolicyNetwork(tf.keras.Model):
 
-    def __init__(self, action_space, lr=0.0003):
+    def __init__(self, action_space, lr=0.00005):
 
         super(PolicyNetwork, self).__init__()
 
         self.action_space = action_space
 
-        self.dense1 = kl.Dense(64, activation="tanh")
+        self.dense1 = kl.Dense(64, activation="tanh",
+                               kernel_initializer="Orthogonal")
 
-        self.dense2 = kl.Dense(64, activation="tanh")
+        self.dense2 = kl.Dense(64, activation="tanh",
+                               kernel_initializer="Orthogonal")
 
-        self.pi_mean = kl.Dense(self.action_space)
+        self.pi_mean = kl.Dense(self.action_space, activation="tanh",
+                                kernel_initializer="Orthogonal")
 
-        self.pi_stdev = kl.Dense(self.action_space, activation="softplus")
+        self.pi_sigma = kl.Dense(self.action_space, activation="softplus",
+                                 kernel_initializer="Orthogonal")
 
         self.optimizer = tf.optimizers.Adam(lr=lr)
 
@@ -32,9 +36,9 @@ class PolicyNetwork(tf.keras.Model):
 
         x = self.dense2(x)
 
-        mean = self.pi_mean(x)
+        mean = self.pi_mean(x) * 2
 
-        stdev = self.pi_stdev(x) + 0.15
+        stdev = self.pi_sigma(x) + 0.1
 
         return mean, stdev
 
@@ -42,18 +46,22 @@ class PolicyNetwork(tf.keras.Model):
 
         states = np.atleast_2d(states).astype(np.float32)
 
-        mean, stdev = self(states)
+        mean, sigma = self(states)
 
-        sampled_action = mean + stdev * tf.random.normal(tf.shape(mean))
+        dist = tfp.distributions.Normal(loc=mean, scale=sigma)
 
-        return sampled_action.numpy()
+        sampled_action = dist.sample()
+
+        assert len(sampled_action) == states.shape[0]
+
+        return sampled_action.numpy().reshape(-1, 1)
 
 
-class ValueNetwork(tf.keras.Model):
+class CriticNetwork(tf.keras.Model):
 
-    def __init__(self, lr=0.001):
+    def __init__(self, lr=0.0001):
 
-        super(ValueNetwork, self).__init__()
+        super(CriticNetwork, self).__init__()
 
         self.dense1 = kl.Dense(64, activation="relu")
 
