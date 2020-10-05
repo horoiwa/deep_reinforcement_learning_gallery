@@ -9,7 +9,7 @@ import numpy as np
 
 class PolicyNetwork(tf.keras.Model):
 
-    def __init__(self, action_space, lr=0.00005):
+    def __init__(self, action_space, lr=0.00003):
 
         super(PolicyNetwork, self).__init__()
 

@@ -277,9 +277,9 @@ def main(env_id, action_space):
         shutil.rmtree(LOGDIR)
 
     agent = PPOAgent(env_id=env_id, action_space=action_space,
-                     n_envs=8, trajectory_size=32)
+                     n_envs=10, trajectory_size=16)
 
-    history = agent.run(n_updates=1500, logdir=LOGDIR)
+    history = agent.run(n_updates=2500, logdir=LOGDIR)
 
     plt.plot(history["steps"], history["scores"])
     plt.xlabel("steps")
