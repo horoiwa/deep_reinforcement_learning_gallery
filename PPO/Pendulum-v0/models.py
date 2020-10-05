@@ -38,7 +38,7 @@ class PolicyNetwork(tf.keras.Model):
 
         mean = self.pi_mean(x) * 2
 
-        stdev = self.pi_sigma(x) + 0.1
+        stdev = self.pi_sigma(x) + 0.3
 
         return mean, stdev
 
