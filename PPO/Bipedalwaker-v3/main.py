@@ -131,7 +131,6 @@ class PPOAgent:
 
             is_nonterminals = 1 - trajectory["done"]
 
-            #normed_rewards = ((trajectory["r"] - self.r_running_stats.mean) / (np.sqrt(self.r_running_stats.var) + 1e-4))
             normed_rewards = (trajectory["r"] / (np.sqrt(self.r_running_stats.var) + 1e-4))
 
             deltas = normed_rewards + self.GAMMA * is_nonterminals * trajectory["v_pred_next"] - trajectory["v_pred"]
