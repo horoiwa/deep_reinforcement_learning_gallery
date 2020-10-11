@@ -35,7 +35,8 @@ class Agent:
 
         if done:
             next_state = self.env.reset()
-            reward = -1   #: bipedalwalkerの転倒時-100はreward_scalingを狂わせる
+            #: bipedalwalkerの転倒時ペナルティ-100はreward_scalingを狂わせるため大幅緩和
+            reward = -1
         elif self.count == self.max_timesteps:
             done = True
             next_state = self.env.reset()

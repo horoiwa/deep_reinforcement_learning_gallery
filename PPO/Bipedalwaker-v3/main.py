@@ -29,7 +29,7 @@ class PPOAgent:
     BATCH_SIZE = 2048
 
     def __init__(self, env_id, action_space, trajectory_size=256,
-                 n_envs=1, max_timesteps=1400):
+                 n_envs=1, max_timesteps=1500):
 
         self.env_id = env_id
 
@@ -42,9 +42,23 @@ class PPOAgent:
 
         self.policy = PolicyNetwork(action_space=action_space)
 
+        self.old_policy = PolicyNetwork(action_space=action_space)
+
         self.critic = CriticNetwork()
 
         self.r_running_stats = util.RunningStats(shape=(action_space,))
+
+        self._init_network()
+
+    def _init_network(self):
+
+        env = gym.make(self.env_id)
+
+        state = np.atleast_2d(env.reset())
+
+        self.policy(state)
+
+        self.old_policy(state)
 
     def run(self, n_updates, logdir):
 
@@ -133,17 +147,11 @@ class PPOAgent:
 
             trajectory["R"] = advantages + trajectory["v_pred"]
 
-            """経験的return
-            trajectory["R"] = np.zeros_like(trajectory["r"])
-            R = (1 - trajectory["done"][-1]) * trajectory["v_pred_next"][-1]
-            for i in reversed(range(trajectory["r"].shape[0])):
-                R = trajectory["r"][i] / reward_std + (1 - trajectory["done"][i]) * self.GAMMA * R
-                trajectory["R"][i] = R
-            """
-
         return trajectories
 
     def update_policy(self, states, actions, advantages):
+
+        self.old_policy.set_weights(self.policy.get_weights())
 
         indices = np.random.choice(
             range(states.shape[0]), (self.OPT_ITER, self.BATCH_SIZE))
@@ -152,7 +160,7 @@ class PPOAgent:
 
             idx = indices[i]
 
-            old_means, old_stdevs = self.policy(states[idx])
+            old_means, old_stdevs = self.old_policy(states[idx])
 
             old_logprob = self.compute_logprob(
                 old_means, old_stdevs, actions[idx])
