@@ -9,7 +9,7 @@ import numpy as np
 
 class PolicyNetwork(tf.keras.Model):
 
-    def __init__(self, action_space, lr=0.0001):
+    def __init__(self, action_space, lr=0.00005):
 
         super(PolicyNetwork, self).__init__()
 
@@ -18,7 +18,7 @@ class PolicyNetwork(tf.keras.Model):
         self.dense1 = kl.Dense(128, activation="tanh",
                                kernel_initializer="Orthogonal")
 
-        self.dense2 = kl.Dense(128, activation="tanh",
+        self.dense2 = kl.Dense(64, activation="tanh",
                                kernel_initializer="Orthogonal")
 
         self.pi_mean = kl.Dense(self.action_space, activation="tanh",
@@ -38,7 +38,8 @@ class PolicyNetwork(tf.keras.Model):
 
         mean = self.pi_mean(x)
 
-        stdev = self.pi_sigma(x) + 0.4
+        #stdev = self.pi_sigma(x) + 0.4
+        stdev = 0.5
 
         return mean, stdev
 
@@ -59,13 +60,13 @@ class PolicyNetwork(tf.keras.Model):
 
 class CriticNetwork(tf.keras.Model):
 
-    def __init__(self, lr=0.0002):
+    def __init__(self, lr=0.0001):
 
         super(CriticNetwork, self).__init__()
 
         self.dense1 = kl.Dense(128, activation="relu")
 
-        self.dense2 = kl.Dense(128, activation="relu")
+        self.dense2 = kl.Dense(64, activation="relu")
 
         self.out = kl.Dense(1)
 

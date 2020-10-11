@@ -26,8 +26,10 @@ class PPOAgent:
 
     OPT_ITER = 20
 
+    BATCH_SIZE = 2048
+
     def __init__(self, env_id, action_space, trajectory_size=256,
-                 n_envs=1, max_timesteps=1000):
+                 n_envs=1, max_timesteps=1400):
 
         self.env_id = env_id
 
@@ -81,12 +83,14 @@ class PPOAgent:
             train_scores = np.array([traj["r"].sum() for traj in trajectories])
 
             if epoch % 1 == 0:
-                test_scores = np.array(self.play(n=1))
+                test_scores, total_steps = self.play(n=1)
+                test_scores, total_steps = np.array(test_scores), np.array(total_steps)
                 history["steps"].append(global_steps)
                 history["scores"].append(test_scores.mean())
                 ma_score = sum(history["scores"][-10:]) / 10
                 with self.summary_writer.as_default():
                     tf.summary.scalar("test_score", test_scores.mean(), step=epoch)
+                    tf.summary.scalar("test_steps", total_steps.mean(), step=epoch)
                 print(f"Epoch {epoch}, {global_steps//1000}K, {test_scores.mean()}")
 
             if epoch // 10 > 10 and (hiscore is None or ma_score > hiscore):
@@ -141,27 +145,36 @@ class PPOAgent:
 
     def update_policy(self, states, actions, advantages):
 
-        for _ in range(self.OPT_ITER):
+        indices = np.random.choice(
+            range(states.shape[0]), (self.OPT_ITER, self.BATCH_SIZE))
 
-            old_means, old_stdevs = self.policy(states)
+        for i in range(self.OPT_ITER):
 
-            old_logprob = self.compute_logprob(old_means, old_stdevs, actions)
+            idx = indices[i]
+
+            old_means, old_stdevs = self.policy(states[idx])
+
+            old_logprob = self.compute_logprob(
+                old_means, old_stdevs, actions[idx])
 
             with tf.GradientTape() as tape:
 
-                new_means, new_stdevs = self.policy(states)
+                new_means, new_stdevs = self.policy(states[idx])
 
-                new_logprob = self.compute_logprob(new_means, new_stdevs, actions)
+                new_logprob = self.compute_logprob(
+                    new_means, new_stdevs, actions[idx])
 
                 ratio = tf.exp(new_logprob - old_logprob)
 
                 ratio_clipped = tf.clip_by_value(
                     ratio, 1 - self.CLIPRANGE, 1 + self.CLIPRANGE)
 
-                loss_unclipped = ratio * advantages
-                loss_clipped = ratio_clipped * advantages
+                loss_unclipped = ratio * advantages[idx]
+
+                loss_clipped = ratio_clipped * advantages[idx]
 
                 loss = tf.minimum(loss_unclipped, loss_clipped)
+
                 loss = -1 * tf.reduce_mean(loss)
 
             grads = tape.gradient(loss, self.policy.trainable_variables)
@@ -173,14 +186,26 @@ class PPOAgent:
 
         losses = []
 
-        for _ in range(self.OPT_ITER):
+        indices = np.random.choice(
+            range(states.shape[0]), (self.OPT_ITER, self.BATCH_SIZE))
 
-            old_vpred = self.critic(states)
+        for i in range(self.OPT_ITER):
+
+            idx = indices[i]
+
+            old_vpred = self.critic(states[idx])
+
             with tf.GradientTape() as tape:
-                vpred = self.critic(states)
+
+                vpred = self.critic(states[idx])
+
                 vpred_clipped = old_vpred + tf.clip_by_value(
                     vpred - old_vpred, -self.CLIPRANGE, self.CLIPRANGE)
-                loss = tf.maximum(tf.square(v_targs - vpred), tf.square(v_targs - vpred_clipped))
+
+                loss = tf.maximum(
+                    tf.square(v_targs[idx] - vpred),
+                    tf.square(v_targs[idx] - vpred_clipped))
+
                 loss = tf.reduce_mean(loss)
 
             grads = tape.gradient(loss, self.critic.trainable_variables)
@@ -236,6 +261,7 @@ class PPOAgent:
             env = gym.make(self.env_id)
 
         total_rewards = []
+        total_steps = []
 
         for _ in range(n):
 
@@ -245,7 +271,11 @@ class PPOAgent:
 
             total_reward = 0
 
+            steps = 0
+
             while not done:
+
+                steps += 1
 
                 action = self.policy.sample_action(state)
 
@@ -264,11 +294,12 @@ class PPOAgent:
                     state = next_state
 
             total_rewards.append(total_reward)
+            total_steps.append(steps)
             print()
-            print(total_reward)
+            print(total_reward, steps)
             print()
 
-        return total_rewards
+        return total_rewards, total_steps
 
 
 def main(env_id, action_space):
@@ -279,7 +310,7 @@ def main(env_id, action_space):
         shutil.rmtree(LOGDIR)
 
     agent = PPOAgent(env_id=env_id, action_space=action_space,
-                     n_envs=10, trajectory_size=512)
+                     n_envs=10, trajectory_size=1000)
 
     history = agent.run(n_updates=1000, logdir=LOGDIR)
 
