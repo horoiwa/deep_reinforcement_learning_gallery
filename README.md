@@ -1,15 +1,15 @@
 # DeepRL_TF2
 
-Deep reinforcement learning sample codes with tensorflow2
+Deep reinforcement learning examples with tensorflow2
 
-深層強化学習の主要な手法をtensorflow2.Xで実装します。
+深層強化学習の主要な手法をtensorflow2で実装します。
 
-どの実装も1フォルダで完結するようにしているが、実装した実装した時期が古いものほど酷いコードになっていることには注意。
+どの実装も1フォルダで完結するようにしているのでコードの重複が多いことに留意ください
 
 
 ## Requirements
 
-`python==3.7` and `tensorflow==2.1.0`
+`python==3.7`, `tensorflow==2.1.0` , `ray==0.8.7`
 
 <br>
 
@@ -78,7 +78,11 @@ Deep reinforcement learning sample codes with tensorflow2
 
 ## TRPO
 
+[Trust Region Policy Optimization](https://arxiv.org/abs/1502.05477)
+
 ## PPO
+
+[Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)
 
 ### その他
 
