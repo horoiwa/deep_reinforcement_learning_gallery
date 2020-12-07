@@ -6,19 +6,16 @@ import tensorflow as tf
 import gym
 from gym import wrappers
 
-from models import Actor, Critic
+from models import GaussianPolicy, DualQNetwork
 from buffer import ReplayBuffer, Experience
 
 
 class SAC:
 
-    ACTION_SPACE = 1
-
-    ACTION_SCALE = 2
-
     MAX_EXPERIENCES = 100000
 
-    MIN_EXPERIENCES = 2500
+    #MIN_EXPERIENCES = 2500
+    MIN_EXPERIENCES = 512
 
     UPDATE_PERIOD = 4
 
@@ -28,35 +25,26 @@ class SAC:
 
     BATCH_SIZE = 256
 
-    def __init__(self, env_id, action_space, action_scale):
+    def __init__(self, env_id, action_space, action_bound):
 
         self.env_id = env_id
 
         self.action_space = action_space
 
-        self.action_scale = action_scale
+        self.action_bound = action_bound
 
         self.env = gym.make(self.env_id)
 
         self.replay_buffer = ReplayBuffer(max_len=self.MAX_EXPERIENCES)
 
-        self.actor = Actor(action_space=self.action_space,
-                           action_scale=self.action_scale)
+        self.policy = GaussianPolicy(action_space=self.action_space,
+                                     action_bound=self.action_bound)
 
-        self.target_actor = Actor(action_space=self.action_space,
-                                  action_scale=self.action_scale)
+        self.duqlqnet = DualQNetwork()
 
-        self.critic_1 = Critic()
+        self.target_dualqnet = DualQNetwork()
 
-        self.critic_2 = Critic()
-
-        self.target_critic_1 = Critic()
-
-        self.target_critic_2 = Critic()
-
-        self.target_critic = Critic()
-
-        self.alpha = 1.0
+        self.alpha = 0.1
 
         self.global_steps = 0
 
@@ -74,13 +62,11 @@ class SAC:
         dummy_action = np.random.normal(0, 0.1, size=self.action_space)
         dummy_action = (dummy_action[np.newaxis, ...]).astype(np.float32)
 
-        self.critic_1(dummy_state, dummy_action)
-        self.target_critic_1(dummy_state, dummy_action)
-        self.target_critic_1.set_weights(self.critic_1.get_weights())
+        self.policy(dummy_state)
 
-        self.critic_2(dummy_state, dummy_action)
-        self.target_critic_2(dummy_state, dummy_action)
-        self.target_critic_2.set_weights(self.critic_2.get_weights())
+        self.duqlqnet(dummy_state, dummy_action)
+        self.target_dualqnet(dummy_state, dummy_action)
+        self.target_dualqnet.set_weights(self.duqlqnet.get_weights())
 
     def play_episode(self):
 
@@ -94,7 +80,9 @@ class SAC:
 
         while not done:
 
-            action = self.actor.sample_action(state)
+            action, _ = self.policy.sample_action(np.atleast_2d(state))
+
+            action = action.numpy()[0]
 
             next_state, reward, done, _ = self.env.step(action)
 
@@ -110,39 +98,64 @@ class SAC:
 
             self.global_steps += 1
 
-            if self.global_steps % self.UPDATE_PERIOD == 0:
-                self.update_critic()
-                self.update_policy()
+            if (len(self.replay_buffer) >= self.MIN_EXPERIENCES
+               and self.global_steps % self.UPDATE_PERIOD == 0):
+
+                self.update_networks()
 
         return episode_reward, local_steps
 
-    def update_critic(self):
-        pass
+    def update_networks(self):
 
-    def update_policy(self):
-        pass
+        (states, actions, rewards,
+         next_states, dones) = self.replay_buffer.get_minibatch(self.BATCH_SIZE)
+
+        #: Update Q-function
+        next_actions, next_logprobs = self.policy.sample_action(next_states)
+
+        target_q1, target_q2 = self.target_dualqnet(next_states, next_actions)
+
+        target = rewards + (1 - dones) * self.GAMMA * (
+            tf.minimum(target_q1, target_q2) + -1 * self.alpha * next_logprobs
+            )
+
+        with tf.GradientTape() as tape:
+            q1, q2 = self.duqlqnet(states, actions)
+            loss_1 = tf.reduce_mean(tf.square(target - q1))
+            loss_2 = tf.reduce_mean(tf.square(target - q2))
+            loss = 0.5 * loss_1 + 0.5 * loss_2
+
+        variables = self.duqlqnet.trainable_variables
+        grads = tape.gradient(loss, variables)
+        self.duqlqnet.optimizer.apply_gradients(zip(grads, variables))
+
+        #: Update policy
+        with tf.GradientTape() as tape:
+            selected_actions, logprobs = self.policy.sample_action(states)
+            q1, q2 = self.duqlqnet(states, selected_actions)
+            q_min = tf.minimum(q1, q2)
+            loss = q_min + -1 * self.alpha * logprobs
+            loss *= -1
+
+        #: Soft target update
+        self.target_dualqnet.set_weights(
+           (1 - self.TAU) * np.array(self.target_dualqnet.get_weights())
+           + self.TAU * np.array(self.duqlqnet.get_weights())
+           )
 
     def save_model(self):
 
-        self.actor.save_weights("checkpoints/actor")
+        self.policy.save_weights("checkpoints/actor")
 
-        self.critic_1.save_weights("checkpoints/critic")
-
-        self.critic_2.save_weights("checkpoints/critic")
+        self.duqlqnet.save_weights("checkpoints/critic")
 
     def load_model(self):
 
-        self.actor.load_weights("checkpoints/actor")
+        self.policy.load_weights("checkpoints/actor")
 
-        self.target_actor.load_weights("checkpoints/actor")
+        self.duqlqnet.load_weights("checkpoints/critic")
 
-        self.critic_1.load_weights("checkpoints/critic")
-
-        self.critic_2.load_weights("checkpoints/critic")
-
-        self.target_critic_1.load_weights("checkpoints/critic")
-
-        self.target_critic_2.load_weights("checkpoints/critic")
+        self.target_dualqnet.load_weights("checkpoints/critic")
 
     def testplay(self, n=1, monitordir=None):
 
@@ -165,7 +178,9 @@ class SAC:
 
             while not done:
 
-                action = self.actor.sample_action(state)
+                action, _ = self.policy.sample_action(np.atleast_2d(state))
+
+                action = action.numpy()[0]
 
                 next_state, reward, done, _ = env.step(action)
 
@@ -184,7 +199,7 @@ class SAC:
         return total_rewards
 
 
-def main(n_episodes, n_testplay=1):
+def main(n_episodes, n_testplay=1, logging_steps=5):
 
     LOGDIR = Path(__file__).parent / "log"
     if LOGDIR.exists():
@@ -192,7 +207,7 @@ def main(n_episodes, n_testplay=1):
 
     summary_writer = tf.summary.create_file_writer(str(LOGDIR))
 
-    agent = SAC(env_id="Pendulum-v0", action_space=1, action_scale=2)
+    agent = SAC(env_id="Pendulum-v0", action_space=1, action_bound=2)
 
     episode_rewards = []
 
@@ -205,18 +220,21 @@ def main(n_episodes, n_testplay=1):
         with summary_writer.as_default():
             tf.summary.scalar("episode_reward", episode_reward, step=n)
             tf.summary.scalar("episode_steps", episode_steps, step=n)
-    else:
-        agent.save_model()
+
+        if n % logging_steps == 0:
+            print(f"Episode {n}: {episode_reward}, {episode_steps} steps")
+
+    agent.save_model()
 
     if n_testplay:
         MONITOR_DIR = Path(__file__).parent / "mp4"
         if MONITOR_DIR.exists():
             shutil.rmtree(MONITOR_DIR)
 
-        agent = SAC(env_id="Pendulum-v0", action_space=1, action_scale=2)
+        agent = SAC(env_id="Pendulum-v0", action_space=1, action_bound=2)
         agent.load_model()
         agent.testplay(n=n_testplay, monitordir=MONITOR_DIR)
 
 
 if __name__ == '__main__':
-    main(n_episodes=1, n_testplay=None)
+    main(n_episodes=100, n_testplay=3)

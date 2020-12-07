@@ -5,26 +5,27 @@ import tensorflow.keras.layers as kl
 import tensorflow_probability as tfp
 
 
-class Actor(tf.keras.Model):
+class GaussianPolicy(tf.keras.Model):
 
-    def __init__(self, action_space, action_scale, lr=3e-4):
+    def __init__(self, action_space, action_bound, lr=3e-4):
 
-        super(Actor, self).__init__()
+        super(GaussianPolicy, self).__init__()
 
-        self.action_space = 1
+        self.action_space = action_space
 
-        self.action_scale = 2
+        self.action_bound = action_bound
 
         self.dense1 = kl.Dense(256, activation="relu")
 
         self.dense2 = kl.Dense(256, activation="relu")
 
-        self.mu = kl.Dense(action_space)
+        self.mu = kl.Dense(self.action_space, activation="tanh")
 
-        self.logstd = kl.Dense(action_space)
+        self.logstd = kl.Dense(self.action_space)
 
         self.optimizer = tf.keras.optimizers.Adam(lr=lr)
 
+    @tf.function
     def call(self, x):
 
         x = self.dense1(x)
@@ -37,61 +38,72 @@ class Actor(tf.keras.Model):
 
         return mu, logstd
 
-    def sample_action(self, state):
-
-        state = np.atleast_2d(state).astype(np.float32)
-
-        mu, logstd = self(state)
-
-        std = np.exp(logstd)
-
-        dist = tfp.distributions.Normal(loc=mu, scale=std)
-
-        sampled_action = tf.tanh(dist.sample()) * self.action_scale
-
-        return sampled_action.numpy()[0]
-
-    def logprob(self, states, actions, noize):
+    @tf.function
+    def sample_action(self, states):
 
         mu, logstd = self(states)
 
-        return None
+        std = tf.math.exp(logstd)
+
+        #: Reparameterization trick
+        normal_noize = tf.random.normal(shape=mu.shape, mean=0., stddev=1.)
+
+        actions = mu + std * normal_noize
+
+        logprob = self._compute_logprob(mu, std, actions)
+
+        actions_squashed = tf.tanh(actions)
+
+        logprob_squashed = logprob - tf.reduce_sum(
+            tf.math.log(1 - tf.tanh(actions)**2), axis=1, keepdims=True)
+
+        actions_squashed *= self.action_bound
+
+        return actions_squashed, logprob_squashed
+
+    @tf.function
+    def _compute_logprob(self, means, stdevs, actions):
+        logprob = - 0.5 * np.log(2*np.pi)
+        logprob += - tf.math.log(stdevs)
+        logprob += - 0.5 * tf.square((actions - means) / stdevs)
+        logprob = tf.reduce_sum(logprob, axis=1, keepdims=True)
+        return logprob
 
 
-class Critic(tf.keras.Model):
+class DualQNetwork(tf.keras.Model):
 
     def __init__(self, lr=3e-4):
 
-        super(Critic, self).__init__()
+        super(DualQNetwork, self).__init__()
 
-        self.dense_1 = kl.Dense(256, activation="relu")
+        self.dense_11 = kl.Dense(256, activation="relu")
 
-        self.dense_2 = kl.Dense(256, activation="relu")
+        self.dense_12 = kl.Dense(256, activation="relu")
 
-        self.out = kl.Dense(1)
+        self.q1 = kl.Dense(1)
+
+        self.dense_21 = kl.Dense(256, activation="relu")
+
+        self.dense_22 = kl.Dense(256, activation="relu")
+
+        self.q2 = kl.Dense(1)
 
         self.optimizer = tf.keras.optimizers.Adam(lr=lr)
 
-    def call(self, observations, actions):
+    def call(self, states, actions):
 
-        x = tf.concat([observations, actions], 1)
+        inputs = tf.concat([states, actions], 1)
 
-        x = self.dense_1(x)
+        x1 = self.dense_11(inputs)
 
-        x = self.dense_2(x)
+        x1 = self.dense_12(x1)
 
-        q = self.out(x)
+        q1 = self.q1(x1)
 
-        return q
+        x2 = self.dense_21(inputs)
 
+        x2 = self.dense_22(x2)
 
-if __name__ == "__main__":
+        q2 = self.q2(x2)
 
-    actor = Actor(action_space=1, action_scale=2)
-    critic = Critic()
-
-    import gym
-    env = gym.make("Pendulum-v0")
-    state = env.reset()
-    action = actor.sample_action(state)
-    print(action)
+        return q1, q2
