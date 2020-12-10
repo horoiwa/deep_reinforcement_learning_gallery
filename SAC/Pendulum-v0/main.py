@@ -14,7 +14,6 @@ class SAC:
 
     MAX_EXPERIENCES = 100000
 
-    #MIN_EXPERIENCES = 2500
     MIN_EXPERIENCES = 512
 
     UPDATE_PERIOD = 4
@@ -44,7 +43,11 @@ class SAC:
 
         self.target_dualqnet = DualQNetwork()
 
-        self.alpha = 0.1
+        self.log_alpha = tf.Variable(0.)  #: alpha=1
+
+        self.alpha_optimizer = tf.keras.optimizers.Adam(3e-4)
+
+        self.target_entropy = -0.5 * self.action_space
 
         self.global_steps = 0
 
@@ -103,12 +106,14 @@ class SAC:
 
                 self.update_networks()
 
-        return episode_reward, local_steps
+        return episode_reward, local_steps, tf.exp(self.log_alpha)
 
     def update_networks(self):
 
         (states, actions, rewards,
          next_states, dones) = self.replay_buffer.get_minibatch(self.BATCH_SIZE)
+
+        alpha = tf.math.exp(self.log_alpha)
 
         #: Update Q-function
         next_actions, next_logprobs = self.policy.sample_action(next_states)
@@ -116,7 +121,7 @@ class SAC:
         target_q1, target_q2 = self.target_dualqnet(next_states, next_actions)
 
         target = rewards + (1 - dones) * self.GAMMA * (
-            tf.minimum(target_q1, target_q2) + -1 * self.alpha * next_logprobs
+            tf.minimum(target_q1, target_q2) + -1 * alpha * next_logprobs
             )
 
         with tf.GradientTape() as tape:
@@ -134,8 +139,21 @@ class SAC:
             selected_actions, logprobs = self.policy.sample_action(states)
             q1, q2 = self.duqlqnet(states, selected_actions)
             q_min = tf.minimum(q1, q2)
-            loss = q_min + -1 * self.alpha * logprobs
-            loss *= -1
+            loss = -1 * tf.reduce_mean(q_min + -1 * alpha * logprobs)
+
+        variables = self.policy.trainable_variables
+        grads = tape.gradient(loss, variables)
+        self.policy.optimizer.apply_gradients(zip(grads, variables))
+
+        #: Adjust alpha
+        entropy_diff = -1 * logprobs - self.target_entropy
+        with tf.GradientTape() as tape:
+            tape.watch(self.log_alpha)
+            selected_actions, logprobs = self.policy.sample_action(states)
+            alpha_loss = tf.reduce_mean(tf.exp(self.log_alpha) * entropy_diff)
+
+        grad = tape.gradient(alpha_loss, self.log_alpha)
+        self.alpha_optimizer.apply_gradients([(grad, self.log_alpha)])
 
         #: Soft target update
         self.target_dualqnet.set_weights(
@@ -213,13 +231,14 @@ def main(n_episodes, n_testplay=1, logging_steps=5):
 
     for n in range(n_episodes):
 
-        episode_reward, episode_steps = agent.play_episode()
+        episode_reward, episode_steps, alpha = agent.play_episode()
 
         episode_rewards.append(episode_reward)
 
         with summary_writer.as_default():
             tf.summary.scalar("episode_reward", episode_reward, step=n)
             tf.summary.scalar("episode_steps", episode_steps, step=n)
+            tf.summary.scalar("alpha", alpha, step=n)
 
         if n % logging_steps == 0:
             print(f"Episode {n}: {episode_reward}, {episode_steps} steps")
@@ -237,4 +256,4 @@ def main(n_episodes, n_testplay=1, logging_steps=5):
 
 
 if __name__ == '__main__':
-    main(n_episodes=100, n_testplay=3)
+    main(n_episodes=150, n_testplay=4)
