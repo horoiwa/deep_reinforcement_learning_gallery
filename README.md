@@ -84,15 +84,16 @@ Deep reinforcement learning examples with tensorflow2
 
 [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)
 
+
+## SAC
+
+Soft Actor-Critic：Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor、Haarnoja et al、2018
+
+Soft Actor-Critic Algorithms and Applications、Haarnoja et al、2018
+
+
 ### その他
 
 [Reinforcement Learning for Improving Agent Design](https://arxiv.org/abs/1810.03779)
 
 
-バッチ強化学習
-[Off-Policy Deep Reinforcement Learning without Exploration](https://arxiv.org/abs/1812.02900)
-
-
-### Atari emulator
-
-https://www.retrogames.cz/play_222-Atari2600.php
