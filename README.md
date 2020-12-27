@@ -13,7 +13,6 @@ Deep reinforcement learning examples with tensorflow2
 
 <br>
 
-## 参考文献
 
 ### DQN (Deep Q Network)
 
