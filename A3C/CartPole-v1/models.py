@@ -48,23 +48,6 @@ class ActorCriticNet(tf.keras.Model):
 
         return action.numpy()[0]
 
-    def compute_grads(self, states, discounted_rewards):
-        """
-           loss =  MSE(discouted_rewards - V(state)) = MSE(Advantages)
-        """
-
-        with tf.GradientTape() as tape:
-
-            estimated_values = self(states)
-
-            loss = tf.reduce_mean(
-                tf.square(discounted_rewards - estimated_values))
-
-        variables = self.trainable_variables
-        gradients = tape.gradient(loss, variables)
-
-        return gradients
-
 
 if __name__ == "__main__":
     states = np.array([[-0.10430691, -1.55866031, 0.19466207, 2.51363456],
