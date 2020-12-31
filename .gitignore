@@ -6,6 +6,7 @@ tmp/
 
 ref/
 mp4/
+
 # C extensions
 *.so
 checkpoints/
