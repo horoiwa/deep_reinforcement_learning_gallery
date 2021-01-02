@@ -54,14 +54,14 @@ class CategoricalDQNAgent:
 
         self.optimizer = tf.keras.optimizers.Adam(lr=lr, epsilon=0.01/batch_size)
 
-    def learn(self, n_episodes, max_exp=400000, logdir="log"):
+    def learn(self, n_episodes, buffer_size=800000, logdir="log"):
 
         logdir = Path(__file__).parent / logdir
         if logdir.exists():
             shutil.rmtree(logdir)
         self.summary_writer = tf.summary.create_file_writer(str(logdir))
 
-        self.replay_buffer = ReplayBuffer(max_exp=400000)
+        self.replay_buffer = ReplayBuffer(max_len=buffer_size)
 
         steps = 0
         for episode in range(n_episodes):
@@ -88,8 +88,7 @@ class CategoricalDQNAgent:
                 steps += 1
                 episode_steps += 1
 
-                epsilon = min(
-                    0.95, max(self.init_epsilon * (800000 - steps) / 800000, 0.1))
+                epsilon = max(self.init_epsilon * (500000 - steps) / 500000, 0.1)
 
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
                 action = self.qnet.sample_action(state, epsilon=epsilon)
@@ -276,7 +275,7 @@ class CategoricalDQNAgent:
 
                 episode_rewards += reward
                 episode_steps += 1
-                if episode_steps > 300 and episode_rewards < 3:
+                if episode_steps > 500 and episode_rewards < 3:
                     #: ゲーム開始(action: 0)しないまま停滞するケースへの対処
                     break
 
@@ -289,7 +288,6 @@ class CategoricalDQNAgent:
 def main():
     agent = CategoricalDQNAgent()
     agent.learn(n_episodes=7001)
-    agent.qnet.save_weights("checkpoints/qnet")
     agent.test_play(n_testplay=3, monitor_dir="mp4")
 
 
