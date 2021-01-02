@@ -13,7 +13,7 @@ class CategoricalQNet(tf.keras.Model):
 
         self.n_atoms = n_atoms
 
-        self.Z = Z #:ビンのしきい値(support)
+        self.Z = Z  #: 各ビンのしきい値(support)
 
         self.conv1 = kl.Conv2D(32, 8, strides=4, activation="relu",
                                kernel_initializer="he_normal")

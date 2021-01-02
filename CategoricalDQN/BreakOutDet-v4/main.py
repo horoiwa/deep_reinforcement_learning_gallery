@@ -72,17 +72,28 @@ class CategoricalDQNAgent:
             for _ in range(self.n_frames):
                 frames.append(frame)
 
+            #: ネットワーク重みの初期化
+            state = np.stack(frames, axis=2)[np.newaxis, ...]
+            self.qnet(state)
+            self.target_qnet(state)
+
+            episode_rewards = 0
+            episode_steps = 0
+
             done = False
             lives = 5
             while not done:
+
                 steps += 1
+                episode_steps += 1
+
                 epsilon = min(
                     0.95, max(self.init_epsilon * (1000000 - steps) / 1000000, 0.1))
 
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
                 action = self.qnet.sample_action(state, epsilon=epsilon)
                 next_frame, reward, done, info = env.step(action)
-
+                episode_rewards += reward
                 frames.append(frame_preprocess(next_frame))
                 next_state = np.stack(frames, axis=2)[np.newaxis, ...]
 
@@ -99,16 +110,19 @@ class CategoricalDQNAgent:
 
                     self.replay_buffer.push(exp)
 
-                if (len(self.replay_buffer) > 25000) and (steps % self.update_period == 0):
+                if (len(self.replay_buffer) > 20000) and (steps % self.update_period == 0):
                     loss = self.update_network()
 
                     with self.summary_writer.as_default():
                         tf.summary.scalar("loss", loss, step=steps)
                         tf.summary.scalar("epsilon", epsilon, step=steps)
+                        tf.summary.scalar("buffer_size", len(self.replay_buffer), step=steps)
 
                 #: Hard target update
                 if steps % self.target_update_period == 0:
                     self.target_qnet.set_weights(self.qnet.get_weights())
+
+            print(f"Episode: {episode}, score: {episode_rewards}, steps: {episode_steps}")
 
             if episode % 10 == 0:
                 test_scores, test_steps = self.test_play(n_testplay=1)
@@ -116,7 +130,8 @@ class CategoricalDQNAgent:
                     tf.summary.scalar("test_score", test_scores[0], step=steps)
                     tf.summary.scalar("test_step", test_steps[0], step=steps)
 
-        self.qnet.save("checkpoints/categorical_qnet")
+            if episode % 10000 == 0:
+                self.qnet.save_weights("checkpoints/qnet")
 
     def update_network(self):
 
@@ -251,7 +266,7 @@ class CategoricalDQNAgent:
             episode_steps = 0
             episode_rewards = 0
 
-            while done:
+            while not done:
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
                 action = self.qnet.sample_action(state, epsilon=None)
                 next_frame, reward, done, info = env.step(action)
@@ -259,6 +274,9 @@ class CategoricalDQNAgent:
 
                 episode_rewards += reward
                 episode_steps += 1
+                if episode_steps > 300 and episode_rewards < 3:
+                    #: ゲーム開始(action: 0)しないまま停滞するケースへの対処
+                    break
 
             scores.append(episode_rewards)
             steps.append(episode_steps)
@@ -268,7 +286,7 @@ class CategoricalDQNAgent:
 
 def main():
     agent = CategoricalDQNAgent()
-    agent.learn(n_episodes=5000)
+    agent.learn(n_episodes=8000)
     #agent.qnet.save_weights("checkpoint/qnet")
     #agent.test_play(n_testplay=3, monitor_dir="mp4")
 
