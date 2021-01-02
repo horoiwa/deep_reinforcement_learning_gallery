@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 tmp/
+.vscode/
 
 ref/
 mp4/
@@ -13,6 +14,7 @@ checkpoints/
 *memo.md
 
 memo.md
+*.out
 
 # Distribution / packaging
 .Python

@@ -18,8 +18,10 @@ class Experience:
 
 
 class ReplayBuffer:
+    """わかりやすさのためにRAMを無駄遣いする実装
+    """
 
-    def __init__(self, max_len=1000000):
+    def __init__(self, max_len):
 
         self.max_len = max_len
 
@@ -68,3 +70,7 @@ class ReplayBuffer:
             [exp.done for exp in selected_experiences]).reshape(-1, 1)
 
         return (states, actions, rewards, next_states, dones)
+
+
+
+if __name__ == "__main__":

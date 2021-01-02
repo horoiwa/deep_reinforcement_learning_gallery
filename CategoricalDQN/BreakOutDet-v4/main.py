@@ -52,7 +52,7 @@ class CategoricalDQNAgent:
         self.target_qnet = CategoricalQNet(
             self.action_space, self.n_atoms, self.Z)
 
-        self.replay_buffer = ReplayBuffer(max_len=1000000)
+        self.replay_buffer = ReplayBuffer(max_len=400000)
 
         self.optimizer = tf.keras.optimizers.Adam(lr=lr, epsilon=0.01/batch_size)
 
@@ -76,6 +76,7 @@ class CategoricalDQNAgent:
             state = np.stack(frames, axis=2)[np.newaxis, ...]
             self.qnet(state)
             self.target_qnet(state)
+            self.target_qnet.set_weights(self.qnet.get_weights())
 
             episode_rewards = 0
             episode_steps = 0
@@ -88,7 +89,7 @@ class CategoricalDQNAgent:
                 episode_steps += 1
 
                 epsilon = min(
-                    0.95, max(self.init_epsilon * (1000000 - steps) / 1000000, 0.1))
+                    0.95, max(self.init_epsilon * (800000 - steps) / 800000, 0.1))
 
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
                 action = self.qnet.sample_action(state, epsilon=epsilon)
@@ -130,7 +131,7 @@ class CategoricalDQNAgent:
                     tf.summary.scalar("test_score", test_scores[0], step=steps)
                     tf.summary.scalar("test_step", test_steps[0], step=steps)
 
-            if episode % 10000 == 0:
+            if episode % 1000 == 0:
                 self.qnet.save_weights("checkpoints/qnet")
 
     def update_network(self):
@@ -153,7 +154,8 @@ class CategoricalDQNAgent:
             probs = self.qnet(states)
             dists = tf.reduce_sum(probs * onehot_mask, axis=1)
 
-            loss = tf.reduce_sum(-1 * target_dists * tf.math.log(dists), axis=1, keepdims=True)
+            loss = tf.reduce_sum(
+                -1 * target_dists * tf.math.log(dists), axis=1, keepdims=True)
             loss = tf.reduce_mean(loss)
 
         grads = tape.gradient(loss, self.qnet.trainable_variables)
@@ -268,7 +270,7 @@ class CategoricalDQNAgent:
 
             while not done:
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
-                action = self.qnet.sample_action(state, epsilon=None)
+                action = self.qnet.sample_action(state, epsilon=0.1)
                 next_frame, reward, done, info = env.step(action)
                 frames.append(frame_preprocess(next_frame))
 
@@ -286,9 +288,9 @@ class CategoricalDQNAgent:
 
 def main():
     agent = CategoricalDQNAgent()
-    agent.learn(n_episodes=8000)
-    #agent.qnet.save_weights("checkpoint/qnet")
-    #agent.test_play(n_testplay=3, monitor_dir="mp4")
+    agent.learn(n_episodes=7001)
+    agent.qnet.save_weights("checkpoints/qnet")
+    agent.test_play(n_testplay=3, monitor_dir="mp4")
 
 
 if __name__ == '__main__':

@@ -2,14 +2,9 @@
 
 Deep reinforcement learning examples with tensorflow2
 
-深層強化学習の主要な手法をtensorflow2で実装します。
-
-どの実装も1フォルダで完結するようにしているのでコードの重複が多いことに留意ください
-
-
 ## Requirements
 
-`python==3.7`, `tensorflow==2.1.0` , `ray==0.8.7`
+`python==3.7`, `tensorflow>=2.1` , `ray>=1.*`
 
 <br>
 
@@ -90,10 +85,5 @@ Deep reinforcement learning examples with tensorflow2
 Soft Actor-Critic：Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic Actor、Haarnoja et al、2018
 
 Soft Actor-Critic Algorithms and Applications、Haarnoja et al、2018
-
-
-### その他
-
-[Reinforcement Learning for Improving Agent Design](https://arxiv.org/abs/1810.03779)
 
 

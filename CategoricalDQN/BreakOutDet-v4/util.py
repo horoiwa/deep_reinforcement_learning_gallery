@@ -3,7 +3,6 @@ import tensorflow as tf
 
 def frame_preprocess(frame):
 
-    @tf.function
     def frame_preprocess(frame):
         """Breakout向けの切り取りであることに注意
         """
