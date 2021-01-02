@@ -52,16 +52,16 @@ class CategoricalDQNAgent:
         self.target_qnet = CategoricalQNet(
             self.action_space, self.n_atoms, self.Z)
 
-        self.replay_buffer = ReplayBuffer(max_len=400000)
-
         self.optimizer = tf.keras.optimizers.Adam(lr=lr, epsilon=0.01/batch_size)
 
-    def learn(self, n_episodes, logdir="log"):
+    def learn(self, n_episodes, max_exp=400000, logdir="log"):
 
         logdir = Path(__file__).parent / logdir
         if logdir.exists():
             shutil.rmtree(logdir)
         self.summary_writer = tf.summary.create_file_writer(str(logdir))
+
+        self.replay_buffer = ReplayBuffer(max_exp=400000)
 
         steps = 0
         for episode in range(n_episodes):
