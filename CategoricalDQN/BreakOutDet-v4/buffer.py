@@ -72,5 +72,5 @@ class ReplayBuffer:
         return (states, actions, rewards, next_states, dones)
 
 
-
 if __name__ == "__main__":
+    pass
