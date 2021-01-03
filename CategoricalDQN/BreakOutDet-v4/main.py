@@ -64,7 +64,7 @@ class CategoricalDQNAgent:
         self.replay_buffer = ReplayBuffer(max_len=buffer_size)
 
         steps = 0
-        for episode in range(n_episodes):
+        for episode in range(1, n_episodes+1):
             env = gym.make(self.env_name)
 
             frames = collections.deque(maxlen=4)
@@ -239,7 +239,8 @@ class CategoricalDQNAgent:
 
         return mask
 
-    def test_play(self, n_testplay=1, monitor_dir=None, checkpoint_path=None):
+    def test_play(self, n_testplay=1, monitor_dir=None,
+                  checkpoint_path=None, debug=False):
 
         if checkpoint_path:
             self.qnet.load_weights(checkpoint_path)
@@ -280,6 +281,9 @@ class CategoricalDQNAgent:
                 if episode_steps > 500 and episode_rewards < 3:
                     #: ゲーム開始(action: 0)しないまま停滞するケースへの対処
                     break
+            if debug:
+                print(episode_rewards)
+                print(episode_steps)
 
             scores.append(episode_rewards)
             steps.append(episode_steps)
@@ -290,7 +294,9 @@ class CategoricalDQNAgent:
 def main():
     agent = CategoricalDQNAgent()
     agent.learn(n_episodes=7001)
-    agent.test_play(n_testplay=10, monitor_dir="mp4")
+    agent.test_play(n_testplay=10,
+                    checkpoint_path="checkpoints/qnet",
+                    monitor_dir="mp4", debug=True)
 
 
 if __name__ == '__main__':
