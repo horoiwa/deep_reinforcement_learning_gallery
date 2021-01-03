@@ -25,7 +25,8 @@ class CategoricalQNet(tf.keras.Model):
         self.flatten1 = kl.Flatten()
         self.dense1 = kl.Dense(512, activation="relu",
                                kernel_initializer="he_normal")
-        self.logits = kl.Dense(self.action_space * self.n_atoms)
+        self.logits = kl.Dense(self.action_space * self.n_atoms,
+                               kernel_initializer="he_normal")
 
     @tf.function
     def call(self, x):

@@ -54,7 +54,7 @@ class CategoricalDQNAgent:
 
         self.optimizer = tf.keras.optimizers.Adam(lr=lr, epsilon=0.01/batch_size)
 
-    def learn(self, n_episodes, buffer_size=800000, logdir="log"):
+    def learn(self, n_episodes, buffer_size=1000000, logdir="log"):
 
         logdir = Path(__file__).parent / logdir
         if logdir.exists():
@@ -117,6 +117,8 @@ class CategoricalDQNAgent:
                         tf.summary.scalar("loss", loss, step=steps)
                         tf.summary.scalar("epsilon", epsilon, step=steps)
                         tf.summary.scalar("buffer_size", len(self.replay_buffer), step=steps)
+                        tf.summary.scalar("train_score", episode_rewards, step=steps)
+                        tf.summary.scalar("train_steps", episode_steps, step=steps)
 
                 #: Hard target update
                 if steps % self.target_update_period == 0:
@@ -288,7 +290,7 @@ class CategoricalDQNAgent:
 def main():
     agent = CategoricalDQNAgent()
     agent.learn(n_episodes=7001)
-    agent.test_play(n_testplay=3, monitor_dir="mp4")
+    agent.test_play(n_testplay=10, monitor_dir="mp4")
 
 
 if __name__ == '__main__':
