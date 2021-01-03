@@ -26,9 +26,9 @@ class CategoricalDQNAgent:
 
         self.Vmin, self.Vmax = Vmin, Vmax
 
-        self.Z = np.linspace(self.Vmin, self.Vmax, self.n_atoms)
+        self.delta_z = (self.Vmax - self.Vmin) / (self.n_atoms - 1)
 
-        self.delta_z = (self.Vmax - self.Vmin) / self.n_atoms
+        self.Z = np.linspace(self.Vmin, self.Vmax, self.n_atoms)
 
         self.gamma = gamma
 
@@ -53,6 +53,8 @@ class CategoricalDQNAgent:
             self.action_space, self.n_atoms, self.Z)
 
         self.optimizer = tf.keras.optimizers.Adam(lr=lr, epsilon=0.01/batch_size)
+
+        self.debugdir = "tmp"
 
     def learn(self, n_episodes, buffer_size=1000000, logdir="log"):
 
@@ -110,7 +112,8 @@ class CategoricalDQNAgent:
 
                     self.replay_buffer.push(exp)
 
-                if (len(self.replay_buffer) > 20000) and (steps % self.update_period == 0):
+                #if (len(self.replay_buffer) > 20000) and (steps % self.update_period == 0):
+                if (len(self.replay_buffer) > 200) and (steps % self.update_period == 0):
                     loss = self.update_network()
 
                     with self.summary_writer.as_default():
@@ -133,9 +136,11 @@ class CategoricalDQNAgent:
                     tf.summary.scalar("test_step", test_steps[0], step=steps)
 
             if episode % 1000 == 0:
+                print("Model Saved")
                 self.qnet.save_weights("checkpoints/qnet")
+                self.update_network(debug=True)
 
-    def update_network(self):
+    def update_network(self, debug=False):
 
         #: ミニバッチの作成
         (states, actions, rewards,
@@ -163,46 +168,37 @@ class CategoricalDQNAgent:
         self.optimizer.apply_gradients(
             zip(grads, self.qnet.trainable_variables))
 
+        if debug:
+            pass
+
         return loss
 
     def shift_and_projection(self, rewards, dones, next_dists):
 
         target_dists = np.zeros((self.batch_size, self.n_atoms))
 
-        Z = np.array([self.Z for _ in range(self.batch_size)])
-        t_Z = self.gamma * Z + rewards
+        for j in range(self.n_atoms):
 
-        """ TZ(t) = R(t) + γZ(t+1)
-        """
-        for atom_idx in range(self.n_atoms):
+            tZ_j = np.minimum(self.Vmax, np.maximum(self.Vmin, rewards + self.gamma * self.Z[j]))
+            bj = (tZ_j - self.Vmin) / self.delta_z
 
-            indices = (t_Z[:, [atom_idx]] - self.Vmin) / self.delta_z
+            lower_bj = np.floor(bj).astype(np.int8)
+            upper_bj = np.ceil(bj).astype(np.int8)
 
-            lower_indices = np.floor(indices).astype(np.int8)
-            lower_indices = np.clip(lower_indices, 0, self.n_atoms-1)
+            eq_mask = lower_bj == upper_bj
+            neq_mask = lower_bj != upper_bj
 
-            upper_indices = np.ceil(indices).astype(np.int8)
-            upper_indices = np.clip(upper_indices, 0, self.n_atoms-1)
+            lower_probs = 1 - (bj - lower_bj)
+            upper_probs = 1 - (upper_bj - bj)
 
-            """ 1. はみだしへの対処
-                lower_indices == upper_indices となる場合は,
-                lower_prob + upper_prob = 2 になってしまうので
-                この場合には均等に0.5を割り当てる
-            """
-            neq_mask = lower_indices != upper_indices
-            eq_mask = lower_indices == upper_indices
+            next_dist = next_dists[:, [j]]
+            indices = np.arange(self.batch_size).reshape(-1, 1)
 
-            lower_probs = (1 - (indices - lower_indices)) * neq_mask
-            lower_probs += 0.5 * np.ones((self.batch_size, 1)) * eq_mask
+            target_dists[indices[neq_mask], lower_bj[neq_mask]] += (lower_probs * next_dist)[neq_mask]
+            target_dists[indices[neq_mask], upper_bj[neq_mask]] += (upper_probs * next_dist)[neq_mask]
 
-            upper_probs = 1 - (upper_indices - indices) * neq_mask
-            upper_probs += 0.5 * np.ones((self.batch_size, 1)) * eq_mask
-
-            next_dist = next_dists[:, [atom_idx]]
-
-            tmp = [i for i in range(self.batch_size)]
-            target_dists[tmp, lower_indices] += lower_probs * next_dist
-            target_dists[tmp, upper_indices] += upper_probs * next_dist
+            target_dists[indices[eq_mask], lower_bj[eq_mask]] += (0.5 * next_dist)[eq_mask]
+            target_dists[indices[eq_mask], upper_bj[eq_mask]] += (0.5 * next_dist)[eq_mask]
 
         """ 2. doneへの対処
             doneのときは TZ(t) = R(t)
@@ -213,18 +209,17 @@ class CategoricalDQNAgent:
                 continue
 
             target_dists[batch_idx, :] = 0
+            tZ = np.minimum(self.Vmax, np.maximum(self.Vmin, rewards[batch_idx]))
+            bj = (tZ - self.Vmin) / self.delta_z
 
-            idx = (rewards[batch_idx] - self.Vmin) / self.delta_z
+            lower_bj = np.floor(bj).astype(np.int32)
+            upper_bj = np.ceil(bj).astype(np.int32)
 
-            lower_idx = np.clip(np.floor(idx).astype(np.int32), 0, self.n_atoms-1)
-            upper_idx = np.clip(np.ceil(idx).astype(np.int32), 0, self.n_atoms-1)
-
-            if lower_idx == upper_idx:
-                target_dists[batch_idx, lower_idx] += 0.5
-                target_dists[batch_idx, upper_idx] += 0.5
+            if lower_bj == upper_bj:
+                target_dists[batch_idx, lower_bj] += 1.0
             else:
-                target_dists[batch_idx, lower_idx] += idx - lower_idx
-                target_dists[batch_idx, upper_idx] += upper_idx - idx
+                target_dists[batch_idx, lower_bj] += 1 - (bj - lower_bj)
+                target_dists[batch_idx, upper_bj] += 1 - (upper_bj - bj)
 
         return target_dists
 
@@ -293,7 +288,8 @@ class CategoricalDQNAgent:
 
 def main():
     agent = CategoricalDQNAgent()
-    agent.learn(n_episodes=7001)
+    agent.qnet.load_weights("checkpoints/qnet")
+    agent.learn(n_episodes=5001)
     agent.test_play(n_testplay=10,
                     checkpoint_path="checkpoints/qnet",
                     monitor_dir="mp4", debug=True)
