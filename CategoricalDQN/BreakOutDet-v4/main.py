@@ -17,7 +17,7 @@ class CategoricalDQNAgent:
                  n_atoms=51, Vmin=-10, Vmax=10, gamma=0.98,
                  n_frames=4, batch_size=32, lr=0.00025,
                  init_epsilon=0.95,
-                 update_period=4,
+                 update_period=8,
                  target_update_period=10000):
 
         self.env_name = env_name
@@ -56,7 +56,7 @@ class CategoricalDQNAgent:
 
         self.debugdir = "tmp"
 
-    def learn(self, n_episodes, buffer_size=1000000, logdir="log"):
+    def learn(self, n_episodes, buffer_size=600000, logdir="log"):
 
         logdir = Path(__file__).parent / logdir
         if logdir.exists():
@@ -112,8 +112,8 @@ class CategoricalDQNAgent:
 
                     self.replay_buffer.push(exp)
 
-                #if (len(self.replay_buffer) > 20000) and (steps % self.update_period == 0):
-                if (len(self.replay_buffer) > 200) and (steps % self.update_period == 0):
+                if (len(self.replay_buffer) > 20000) and (steps % self.update_period == 0):
+                #if (len(self.replay_buffer) > 200) and (steps % self.update_period == 0):
                     loss = self.update_network()
 
                     with self.summary_writer.as_default():
@@ -129,7 +129,7 @@ class CategoricalDQNAgent:
 
             print(f"Episode: {episode}, score: {episode_rewards}, steps: {episode_steps}")
 
-            if episode % 10 == 0:
+            if episode % 20 == 0:
                 test_scores, test_steps = self.test_play(n_testplay=1)
                 with self.summary_writer.as_default():
                     tf.summary.scalar("test_score", test_scores[0], step=steps)
@@ -207,19 +207,19 @@ class CategoricalDQNAgent:
 
             if not dones[batch_idx]:
                 continue
-
-            target_dists[batch_idx, :] = 0
-            tZ = np.minimum(self.Vmax, np.maximum(self.Vmin, rewards[batch_idx]))
-            bj = (tZ - self.Vmin) / self.delta_z
-
-            lower_bj = np.floor(bj).astype(np.int32)
-            upper_bj = np.ceil(bj).astype(np.int32)
-
-            if lower_bj == upper_bj:
-                target_dists[batch_idx, lower_bj] += 1.0
             else:
-                target_dists[batch_idx, lower_bj] += 1 - (bj - lower_bj)
-                target_dists[batch_idx, upper_bj] += 1 - (upper_bj - bj)
+                target_dists[batch_idx, :] = 0
+                tZ = np.minimum(self.Vmax, np.maximum(self.Vmin, rewards[batch_idx]))
+                bj = (tZ - self.Vmin) / self.delta_z
+
+                lower_bj = np.floor(bj).astype(np.int32)
+                upper_bj = np.ceil(bj).astype(np.int32)
+
+                if lower_bj == upper_bj:
+                    target_dists[batch_idx, lower_bj] += 1.0
+                else:
+                    target_dists[batch_idx, lower_bj] += 1 - (bj - lower_bj)
+                    target_dists[batch_idx, upper_bj] += 1 - (upper_bj - bj)
 
         return target_dists
 
@@ -288,10 +288,10 @@ class CategoricalDQNAgent:
 
 def main():
     agent = CategoricalDQNAgent()
-    agent.qnet.load_weights("checkpoints/qnet")
-    agent.learn(n_episodes=5001)
+    #agent.qnet.load_weights("checkpoints/qnet")
+    agent.learn(n_episodes=4001)
     agent.test_play(n_testplay=10,
-                    checkpoint_path="checkpoints/qnet",
+                    #checkpoint_path="checkpoints/qnet",
                     monitor_dir="mp4", debug=True)
 
 
