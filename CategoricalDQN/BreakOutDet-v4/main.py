@@ -38,7 +38,12 @@ class CategoricalDQNAgent:
 
         self.init_epsilon = init_epsilon
 
-        self.update_period = 4
+        self.epsilon_scheduler = (lambda steps:
+            max(0.98 * (500000 - steps) / 500000, 0.1) if steps < 500000
+            else max(0.05 + 0.05 * (1000000 - steps) / 500000, 0.05)
+            )
+
+        self.update_period = update_period
 
         self.target_update_period = target_update_period
 
@@ -56,7 +61,7 @@ class CategoricalDQNAgent:
 
         self.debugdir = "tmp"
 
-    def learn(self, n_episodes, buffer_size=600000, logdir="log"):
+    def learn(self, n_episodes, buffer_size=800000, logdir="log"):
 
         logdir = Path(__file__).parent / logdir
         if logdir.exists():
@@ -90,7 +95,7 @@ class CategoricalDQNAgent:
                 steps += 1
                 episode_steps += 1
 
-                epsilon = max(self.init_epsilon * (500000 - steps) / 500000, 0.1)
+                epsilon = self.epsilon_scheduler(staps)
 
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
                 action = self.qnet.sample_action(state, epsilon=epsilon)
@@ -288,10 +293,8 @@ class CategoricalDQNAgent:
 
 def main():
     agent = CategoricalDQNAgent()
-    #agent.qnet.load_weights("checkpoints/qnet")
-    agent.learn(n_episodes=4001)
+    agent.learn(n_episodes=10001)
     agent.test_play(n_testplay=10,
-                    #checkpoint_path="checkpoints/qnet",
                     monitor_dir="mp4", debug=True)
 
 
