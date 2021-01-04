@@ -95,7 +95,7 @@ class CategoricalDQNAgent:
                 steps += 1
                 episode_steps += 1
 
-                epsilon = self.epsilon_scheduler(staps)
+                epsilon = self.epsilon_scheduler(steps)
 
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
                 action = self.qnet.sample_action(state, epsilon=epsilon)
@@ -118,7 +118,6 @@ class CategoricalDQNAgent:
                     self.replay_buffer.push(exp)
 
                 if (len(self.replay_buffer) > 20000) and (steps % self.update_period == 0):
-                #if (len(self.replay_buffer) > 200) and (steps % self.update_period == 0):
                     loss = self.update_network()
 
                     with self.summary_writer.as_default():
@@ -143,9 +142,8 @@ class CategoricalDQNAgent:
             if episode % 1000 == 0:
                 print("Model Saved")
                 self.qnet.save_weights("checkpoints/qnet")
-                self.update_network(debug=True)
 
-    def update_network(self, debug=False):
+    def update_network(self):
 
         #: ミニバッチの作成
         (states, actions, rewards,
@@ -172,9 +170,6 @@ class CategoricalDQNAgent:
         grads = tape.gradient(loss, self.qnet.trainable_variables)
         self.optimizer.apply_gradients(
             zip(grads, self.qnet.trainable_variables))
-
-        if debug:
-            pass
 
         return loss
 
@@ -293,7 +288,7 @@ class CategoricalDQNAgent:
 
 def main():
     agent = CategoricalDQNAgent()
-    agent.learn(n_episodes=10001)
+    agent.learn(n_episodes=7001)
     agent.test_play(n_testplay=10,
                     monitor_dir="mp4", debug=True)
 
