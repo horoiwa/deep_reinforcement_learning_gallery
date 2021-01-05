@@ -3,7 +3,7 @@ import tensorflow as tf
 
 def frame_preprocess(frame):
 
-    def frame_preprocess(frame):
+    def _frame_preprocess(frame):
         """Breakout向けの切り取りであることに注意
         """
         image = tf.cast(tf.convert_to_tensor(frame), tf.float32)
@@ -13,6 +13,6 @@ def frame_preprocess(frame):
         image_scaled = tf.divide(image_resize, 255)
         return image_scaled
 
-    frame = frame_preprocess(frame).numpy()[:, :, 0]
+    frame = _frame_preprocess(frame).numpy()[:, :, 0]
 
     return frame
