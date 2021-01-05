@@ -161,7 +161,10 @@ class CategoricalDQNAgent:
         onehot_mask = self.create_mask(actions)
         with tf.GradientTape() as tape:
             probs = self.qnet(states)
+
             dists = tf.reduce_sum(probs * onehot_mask, axis=1)
+            #: クリップしないとlogとったときに勾配爆発することがある
+            dists = tf.clip_by_value(dists, 1e-6, 1.0)
 
             loss = tf.reduce_sum(
                 -1 * target_dists * tf.math.log(dists), axis=1, keepdims=True)
@@ -238,6 +241,13 @@ class CategoricalDQNAgent:
                   checkpoint_path=None, debug=False):
 
         if checkpoint_path:
+            env = gym.make(self.env_name)
+            frames = collections.deque(maxlen=4)
+            frame = frame_preprocess(env.reset())
+            for _ in range(self.n_frames):
+                frames.append(frame)
+            state = np.stack(frames, axis=2)[np.newaxis, ...]
+            self.qnet(state)
             self.qnet.load_weights(checkpoint_path)
 
         if monitor_dir:
@@ -288,9 +298,10 @@ class CategoricalDQNAgent:
 
 def main():
     agent = CategoricalDQNAgent()
-    agent.learn(n_episodes=7001)
-    agent.test_play(n_testplay=10,
-                    monitor_dir="mp4", debug=True)
+    agent.learn(n_episodes=6001)
+    agent.test_play(n_testplay=1,
+                    #checkpoint_path="checkpoints/qnet",
+                    monitor_dir="mp4", debug=False)
 
 
 if __name__ == '__main__':
