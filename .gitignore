@@ -3,15 +3,18 @@ __pycache__/
 *.py[cod]
 *$py.class
 tmp/
+.vscode/
 
 ref/
 mp4/
+
 # C extensions
 *.so
 checkpoints/
 *memo.md
 
 memo.md
+*.out
 
 # Distribution / packaging
 .Python
@@ -61,6 +64,8 @@ coverage.xml
 # Translations
 *.mo
 *.pot
+
+log/
 
 # Django stuff:
 *.log
