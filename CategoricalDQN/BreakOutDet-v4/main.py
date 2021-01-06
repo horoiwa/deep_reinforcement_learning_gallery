@@ -238,7 +238,7 @@ class CategoricalDQNAgent:
         return mask
 
     def test_play(self, n_testplay=1, monitor_dir=None,
-                  checkpoint_path=None, debug=False):
+                  checkpoint_path=None):
 
         if checkpoint_path:
             env = gym.make(self.env_name)
@@ -286,9 +286,6 @@ class CategoricalDQNAgent:
                 if episode_steps > 500 and episode_rewards < 3:
                     #: ゲーム開始(action: 0)しないまま停滞するケースへの対処
                     break
-            if debug:
-                print(episode_rewards)
-                print(episode_steps)
 
             scores.append(episode_rewards)
             steps.append(episode_steps)
@@ -298,10 +295,10 @@ class CategoricalDQNAgent:
 
 def main():
     agent = CategoricalDQNAgent()
-    agent.learn(n_episodes=6001)
-    agent.test_play(n_testplay=1,
-                    #checkpoint_path="checkpoints/qnet",
-                    monitor_dir="mp4", debug=False)
+    #agent.learn(n_episodes=6001)
+    agent.test_play(n_testplay=10,
+                    checkpoint_path="checkpoints/qnet",
+                    monitor_dir="mp4")
 
 
 if __name__ == '__main__':
