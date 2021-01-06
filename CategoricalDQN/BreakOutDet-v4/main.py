@@ -59,8 +59,6 @@ class CategoricalDQNAgent:
 
         self.optimizer = tf.keras.optimizers.Adam(lr=lr, epsilon=0.01/batch_size)
 
-        self.debugdir = "tmp"
-
     def learn(self, n_episodes, buffer_size=800000, logdir="log"):
 
         logdir = Path(__file__).parent / logdir
@@ -295,7 +293,7 @@ class CategoricalDQNAgent:
 
 def main():
     agent = CategoricalDQNAgent()
-    #agent.learn(n_episodes=6001)
+    agent.learn(n_episodes=6001)
     agent.test_play(n_testplay=10,
                     checkpoint_path="checkpoints/qnet",
                     monitor_dir="mp4")
