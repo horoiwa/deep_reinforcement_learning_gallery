@@ -40,22 +40,21 @@ class CMAES:
         #: 次元数
         self.dim = len(centroid)
 
-        #: 世代ごと個体数
+        #: 世代ごと総個体数λとエリート数μ
         self.lam = lam if lam else int(4 + 3*np.log(self.dim))
-
-        #: 世代内エリート数(親の数)
         self.mu = int(self.lam / 2)
 
-        #: 正規分布中心
-        self.centroid = centroid
+        #: 正規分布中心とその学習率
+        self.centroid = np.array(centroid, dtype=np.float64)
+        self.c_m = 1.0
 
-        #: 順位にもとづく重み
+        #: 順位にもとづく重み係数
         weights = np.log(0.5*(self.lam + 1)) - np.log(np.arange(1, 1+self.mu).reshape(1,-1))
         self.weights = weights / weights.sum()
         self.mu_eff = 1. / (self.weights ** 2).sum()
 
         #: ステップサイズ： 進化パスと学習率
-        self.sigma = sigma
+        self.sigma = float(sigma)
         self.p_sigma = np.zeros(self.dim)
         self.c_sigma = (self.mu_eff + 2) / (self.dim + self.mu_eff + 5)
         self.d_sigma = 1 + 2 * max(
@@ -64,10 +63,15 @@ class CMAES:
 
         #: 共分散行列： 進化パスと学習率
         self.C = np.identity(self.dim)
-        self.p_c = np.zeros_like(self.C)
-        self.c_c = 0
+        self.p_c = np.zeros(self.dim)
+        self.c_c = (4 + self.mu_eff / self.dim) / (self.dim + 4 + 2 * self.mu_eff / self.dim)
 
-
+        self.a_cov = 2
+        self.c_1 = self.a_cov / ((self.dim+1.3)**2 + self.mu_eff)
+        self.c_mu = min(
+            1 - self.c_1,
+            self.a_cov * (self.mu_eff - 2 + 1/self.mu_eff) / ((self.dim + 2) ** 2 + self.a_cov * self.mu_eff / 2)
+            )
 
     def sample_population(self):
         """個体群の発生
@@ -91,13 +95,12 @@ class CMAES:
 
         return Z, Y, X
 
-    def update(self, Z, Y, X, fitnesses, cma=True):
+    def update(self, Z, Y, X, fitnesses, gen, cma=True):
 
         """
             1. Selection and recombinatio
             上位μ個体の選抜と正規分布中心(centroid)の移動
         """
-        #: あとで使うので現在の正規分布中心を保存
         old_centroid = self.centroid
         old_sigma = self.sigma
 
@@ -105,17 +108,18 @@ class CMAES:
         elite_indices = np.argsort(fitnesses)[:self.mu]
         X_elite = X[elite_indices, :]
         X_w = np.matmul(self.weights, X_elite)[0]
-        self.centroid = X_w
+
+        #: 正規分布中心の更新
+        self.centroid = (1 - self.c_m) * old_centroid + self.c_m * X_w
 
         #: Note. Y_w = np.matmul(self.weights, Y[elite_indices, :])[0] でも可
+        Y = (X - old_centroid) / old_sigma
         Y_w = (X_w - old_centroid) / old_sigma
 
         """
             2. Step-size control
             ステップサイズσの更新
-            Note:
         """
-
         #: 対角行列の逆関数は対角成分の逆数をとればよい
         diagD, B = np.linalg.eigh(self.C)
         diagD = np.sqrt(diagD)
@@ -134,12 +138,28 @@ class CMAES:
             * (np.sqrt((self.p_sigma ** 2).sum()) / E_normal - 1)
         )
 
-
         """
             3. Covariance matrix adaptatio (CMA)
             共分散行列Cの更新
         """
-        pass
+        #: h_σ: heaviside関数はステップサイズσが大きいときにはCの更新を中断させる
+        left = np.sqrt((self.p_sigma ** 2).sum()) / np.sqrt(1 - (1 - self.c_sigma) ** (2 * (gen+1)))
+        right = (1.4 + 2 / (self.dim + 1)) * E_normal
+        hsigma = 1 if left < right else 0
+        d_hsigma = (1 - hsigma) * self.c_c * (2 - self.c_c)
+
+        #: p_cの更新
+        new_p_c = (1 - self.c_c) * self.p_c
+        new_p_c += hsigma * np.sqrt(self.c_c * (2 - self.c_c) * self.mu_eff) * Y_w
+        self.p_c = new_p_c
+
+        tmp = self.dim / np.sqrt(np.square(C_ * Y.T).sum())
+        w_o = [1 if w >= 0 else tmp for w in self.weights]
+
+        new_C = (1 + self.c_1 * d_hsigma - self.c_1 - self.c_mu) * self.C
+        new_C += self.c_1 * np.outer(self.p_c, self.p_c)
+        new_C += self.c_mu * (raise NotImplementedError())
+        self.C = new_C
 
 
 def main(n_generation=30):
@@ -148,15 +168,15 @@ def main(n_generation=30):
 
     history = {}
     fig, ax = contor_plot()
-    for n in range(n_generation):
+    for gen in range(n_generation):
         Z, Y, X = cmaes.sample_population()
         fitnesses = levi_func(X[:, 0], X[:, 1])
-        cmaes.update(Z, Y, X, fitnesses)
+        cmaes.update(Z, Y, X, fitnesses, gen)
 
-        history[n] = X
-        if n % 5 == 0:
+        history[gen] = X
+        if gen % 5 == 0:
             ax.scatter(X[:, 0], X[:, 1],
-                       label=f"Gen: {n}", edgecolors="white")
+                       label=f"Gen: {gen}", edgecolors="white")
 
     plt.legend()
     plt.show()
