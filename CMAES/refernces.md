@@ -13,4 +13,5 @@ https://www.jstage.jst.go.jp/article/isciesci/60/7/60_292/_pdf
 https://blog.recyclebin.jp/archives/4077
 
 
-C = LL.T
+C = LL.T コレスキー分解
+C = BD**2IB.T
