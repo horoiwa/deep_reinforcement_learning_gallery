@@ -9,26 +9,28 @@ def levi_func(x1, x2):
        https://en.wikipedia.org/wiki/Test_functions_for_optimization
     Args:
         -10, <= x1, x2  <= 10
-        global minimum = f(1, 1) = 0
     """
-    return 0.1 * (np.sin(3*np.pi*x1)**2
-                  + (x1 - 1)**2 * (1 + np.sin(3 * np.pi * x2)**2)
-                  + 0.4 * (x2 - 1)**2 * (1 + np.sin(2*np.pi * x2)**2))
+    theta = np.pi * 4 / 5
+    _x1 = x1 * np.cos(theta) - x2 * np.sin(theta)
+    _x2 = x1 * np.sin(theta) + x2 * np.cos(theta)
+
+    return 0.1 * (np.sin(3*np.pi*_x1)**2
+                  + (_x1 - 1)**2 * (1 + np.sin(3 * np.pi * _x2)**2)
+                  + 0.4 * (_x2 - 1)**2 * (1 + np.sin(2*np.pi * _x2)**2))
 
 
 def contor_plot(x1=None, x2=None):
 
-    X1_list = np.linspace(-12, 12, 100)
-    X2_list = np.linspace(-12, 12, 100)
+    X1_list = np.linspace(-15, 8, 100)
+    X2_list = np.linspace(-15, 8, 100)
     X1, X2 = np.meshgrid(X1_list, X2_list)
     Z = levi_func(X1, X2)
 
     fig, ax = plt.subplots(1, 1, figsize=(9, 7))
-    levels = [0, 0.05, 0.1, 0.5, 1, 3, 5, 10, 15, 20, 25, 30, 40]
+    levels = [0, 0.05, 0.1, 0.5, 1, 3, 5, 10, 15, 20, 25, 30, 40, 50, 60]
     cp = ax.contourf(X1, X2, Z, levels=levels)
-    ax.scatter([1], [1], marker="*", s=100, c="yellow")
-    ax.set_xlim(-12, 12)
-    ax.set_ylim(-12, 12)
+    ax.set_xlim(-15, 8)
+    ax.set_ylim(-15, 8)
     fig.colorbar(cp)
     return fig, ax
 
@@ -61,11 +63,10 @@ class CMAES:
             0, np.sqrt((self.mu_eff - 1)/(self.dim + 1)) - 1
             ) + self.c_sigma
 
-        #: 共分散行列： 進化パスと学習率
+        #: 共分散行列： 進化パスとrank-μ, rank-one更新の学習率
         self.C = np.identity(self.dim)
         self.p_c = np.zeros(self.dim)
         self.c_c = (4 + self.mu_eff / self.dim) / (self.dim + 4 + 2 * self.mu_eff / self.dim)
-
         self.a_cov = 2
         self.c_1 = self.a_cov / ((self.dim+1.3)**2 + self.mu_eff)
         self.c_mu = min(
@@ -140,7 +141,7 @@ class CMAES:
 
         """
             3. Covariance matrix adaptatio (CMA)
-            共分散行列Cの更新
+            共分散行列Cのrank-one, rank-μ更新
         """
         #: h_σ: heaviside関数はステップサイズσが大きいときにはCの更新を中断させる
         left = np.sqrt((self.p_sigma ** 2).sum()) / np.sqrt(1 - (1 - self.c_sigma) ** (2 * (gen+1)))
@@ -153,18 +154,18 @@ class CMAES:
         new_p_c += hsigma * np.sqrt(self.c_c * (2 - self.c_c) * self.mu_eff) * Y_w
         self.p_c = new_p_c
 
-        tmp = self.dim / np.sqrt(np.square(C_ * Y.T).sum())
-        w_o = [1 if w >= 0 else tmp for w in self.weights]
+        #tmp = self.dim / np.sqrt(np.square(C_ * Y.T).sum())
+        #w_o = [1 if w >= 0 else tmp for w in self.weights]
 
         new_C = (1 + self.c_1 * d_hsigma - self.c_1 - self.c_mu) * self.C
         new_C += self.c_1 * np.outer(self.p_c, self.p_c)
-        new_C += self.c_mu * (raise NotImplementedError())
+        #new_C += self.c_mu * (raise NotImplementedError())
         self.C = new_C
 
 
 def main(n_generation=30):
 
-    cmaes = CMAES(centroid=[-10, -10], sigma=0.5, lam=12)
+    cmaes = CMAES(centroid=[-11, -11], sigma=1., lam=12)
 
     history = {}
     fig, ax = contor_plot()
@@ -174,7 +175,7 @@ def main(n_generation=30):
         cmaes.update(Z, Y, X, fitnesses, gen)
 
         history[gen] = X
-        if gen % 5 == 0:
+        if gen % 10 == 0:
             ax.scatter(X[:, 0], X[:, 1],
                        label=f"Gen: {gen}", edgecolors="white")
 
