@@ -2,6 +2,7 @@ import functools
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 
 
 def levi_func(x1, x2):
@@ -32,6 +33,7 @@ def contor_plot(x1=None, x2=None):
     ax.set_xlim(-15, 8)
     ax.set_ylim(-15, 8)
     fig.colorbar(cp)
+
     return fig, ax
 
 
@@ -93,9 +95,9 @@ class CMAES:
         #: X~N(μ, σC)
         X = self.centroid + self.sigma * Y
 
-        return Z, Y, X
+        return X
 
-    def update(self, Z, Y, X, fitnesses, gen, cma=True):
+    def update(self, X, fitnesses, gen, cma=True):
 
         """
             1. Selection and recombinatio
@@ -170,27 +172,19 @@ class CMAES:
 
 def main(n_generation=30):
 
+    np.random.seed(15)
+
     cmaes = CMAES(centroid=[-11, -11], sigma=0.5, lam=24)
 
-    history = {}
+    history = []
     fig, ax = contor_plot()
     for gen in range(n_generation):
-        Z, Y, X = cmaes.sample_population()
+        X = cmaes.sample_population()
+        history.append(
+            (X[:, 0], X[:, 1], cmaes.centroid, cmaes.sigma, cmaes.C))
         fitnesses = levi_func(X[:, 0], X[:, 1])
-        cmaes.update(Z, Y, X, fitnesses, gen)
+        cmaes.update(X, fitnesses, gen)
 
-        history[gen] = X
-        if gen % 3 == 0:
-        #import pdb;pdb.set_trace()
-            print(gen)
-            print(cmaes.C)
-            print(cmaes.sigma)
-            print()
-            ax.scatter(X[:, 0], X[:, 1],
-                       label=f"Gen: {gen}", edgecolors="white")
-
-    plt.legend()
-    plt.show()
 
 
 if __name__ == '__main__':
