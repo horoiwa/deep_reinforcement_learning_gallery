@@ -170,22 +170,24 @@ class CMAES:
         self.C = new_C
 
 
-def main(n_generation=30):
+def main(n_generations, savepath):
 
-    np.random.seed(15)
+    np.random.seed(12)
 
-    cmaes = CMAES(centroid=[-11, -11], sigma=0.5, lam=24)
+    cmaes = CMAES(centroid=[-11, -11], sigma=0.5, lam=36)
 
-    history = []
     fig, ax = contor_plot()
-    for gen in range(n_generation):
+    images = []
+    for gen in range(n_generations):
         X = cmaes.sample_population()
-        history.append(
-            (X[:, 0], X[:, 1], cmaes.centroid, cmaes.sigma, cmaes.C))
         fitnesses = levi_func(X[:, 0], X[:, 1])
+        im = ax.scatter(X[:, 0], X[:, 1], c="firebrick", ec="white")
+        images.append([im])
         cmaes.update(X, fitnesses, gen)
 
+    ani = animation.ArtistAnimation(fig, images, interval=400)
+    ani.save(savepath, writer='pillow')
 
 
 if __name__ == '__main__':
-    main()
+    main(n_generations=30, savepath="tmp/cmaes.gif")
