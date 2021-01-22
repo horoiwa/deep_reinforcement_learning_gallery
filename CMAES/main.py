@@ -3,6 +3,7 @@ import functools
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from matplotlib.patches import Ellipse
 
 
 def levi_func(x1, x2):
@@ -97,12 +98,16 @@ class CMAES:
 
         return X
 
-    def update(self, X, fitnesses, gen, cma=True):
+    def update(self, X, fitnesses, gen):
+        """update parameters
 
+        Args:
+            X (np.ndarray): 個体群, shape==(self.lam, self.dim)
+            fitnesses (list): 適合度
+            gen (int): 現在の世代数
         """
-            1. Selection and recombinatio
-            上位μ個体の選抜と正規分布中心(centroid)の移動
-        """
+
+        #: 1. Selection and recombination
         old_centroid = self.centroid
         old_sigma = self.sigma
 
@@ -117,11 +122,7 @@ class CMAES:
         #: 正規分布中心の更新
         self.centroid = (1 - self.c_m) * old_centroid + self.c_m * X_w
 
-        """
-            2. Step-size control
-            ステップサイズσの更新
-        """
-        #: 対角行列の逆関数は対角成分の逆数をとればよい
+        #: 2. Step-size control
         diagD, B = np.linalg.eigh(self.C)
         diagD = np.sqrt(diagD)
         inv_diagD = 1.0 / diagD
@@ -139,11 +140,8 @@ class CMAES:
             * (np.sqrt((self.p_sigma ** 2).sum()) / E_normal - 1)
         )
 
-        """
-            3. Covariance matrix adaptatio (CMA)
-            共分散行列Cのrank-one, rank-μ更新
-        """
-        #: h_σ: heaviside関数はステップサイズσが大きいときにはCの更新を中断させる
+        #: 3. Covariance matrix adaptatio (CMA)
+        #: Note, h_σ: heaviside関数はステップサイズσが大きいときにはCの更新を中断させる
         left = np.sqrt((self.p_sigma ** 2).sum()) / np.sqrt(1 - (1 - self.c_sigma) ** (2 * (gen+1)))
         right = (1.4 + 2 / (self.dim + 1)) * E_normal
         hsigma = 1 if left < right else 0
@@ -157,6 +155,9 @@ class CMAES:
         #: 同一の１次元ベクトルのテンソル積はnp.outerでOK
         new_C = (1 + self.c_1 * d_hsigma - self.c_1 - self.c_mu) * self.C
         new_C += self.c_1 * np.outer(self.p_c, self.p_c)
+
+        #: スマートな実装 from deap/cma.py
+        #new_C += self.c_mu * np.dot((self.weights * Y_elite.T), Y_elite)
         #: あたまのわるいじっそう
         wyy = np.zeros((self.dim, self.dim))
         for i in range(self.mu):
@@ -164,25 +165,43 @@ class CMAES:
             wyy += self.weights[0, i] * np.outer(y_i, y_i)
         new_C += self.c_mu * wyy
 
-        #: スマートな実装
-        #new_C += self.c_mu * np.dot((self.weights * Y_elite.T), Y_elite)
-
         self.C = new_C
 
 
 def main(n_generations, savepath):
 
-    np.random.seed(12)
+    np.random.seed(19)
 
-    cmaes = CMAES(centroid=[-11, -11], sigma=0.5, lam=36)
+    cmaes = CMAES(centroid=[-11, -11], sigma=0.4, lam=12)
 
     fig, ax = contor_plot()
     images = []
     for gen in range(n_generations):
+
         X = cmaes.sample_population()
+
         fitnesses = levi_func(X[:, 0], X[:, 1])
+
+        """Drawing
+            https://stackoverflow.com/questions/20126061/creating-a-confidence-ellipses-in-a-sccatterplot-using-matplotlib
+        """
+        im_list = []
         im = ax.scatter(X[:, 0], X[:, 1], c="firebrick", ec="white")
-        images.append([im])
+        im_list.append(im)
+
+        lambda_, v = np.linalg.eig(cmaes.C)
+        lambda_ = np.sqrt(lambda_)
+        for j in range(1, 4):
+            ell = Ellipse(xy=(cmaes.centroid[0], cmaes.centroid[1]),
+                          width=lambda_[0]*j*2*cmaes.sigma,
+                          height=lambda_[1]*j*2*cmaes.sigma,
+                          angle=np.rad2deg(np.arccos(v[0, 0])),
+                          fc="none", ec="firebrick", ls="--")
+            im = ax.add_patch(ell)
+            im_list.append(im)
+
+        images.append(im_list)
+
         cmaes.update(X, fitnesses, gen)
 
     ani = animation.ArtistAnimation(fig, images, interval=400)
