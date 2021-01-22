@@ -1,250 +1,303 @@
 from pathlib import Path
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-from dataclasses import dataclass
-import random
-import collections
-from datetime import datetime
+import shutil
 
-import numpy as np
-import pandas as pd
-import tensorflow as tf
-import tensorflow.keras.layers as kl
-import matplotlib.pyplot as plt
 import gym
-from gym import wrappers
+import numpy as np
+import tensorflow as tf
+import collections
 
-from models import QNetwork
-
-
-@dataclass
-class Experience:
-
-    state: np.ndarray
-
-    action: int
-
-    reward: float
-
-    next_state: np.ndarray
-
-    done: bool
+from model import CategoricalQNet
+from buffer import Experience, ReplayBuffer
+from util import frame_preprocess
 
 
-@tf.function
-def frame_preprocessor(frame):
-    """
-    Args:
-        frame (np.ndarray): shape=(84, 84, 3)
+class CategoricalDQNAgent:
 
-    Returns:
-        tf.Tensor: shape=(84, 84, 1)
-    """
-    image = tf.cast(tf.convert_to_tensor(frame), tf.float32)
-    image_gray = tf.image.rgb_to_grayscale(image)
-    image_crop = tf.image.crop_to_bounding_box(image_gray, 34, 0, 160, 160)
-    image_resize = tf.image.resize(image_crop, [84, 84])
-    image_scaled = tf.divide(image_resize, 255)
+    def __init__(self, env_name="BreakoutDeterministic-v4",
+                 n_atoms=51, Vmin=-10, Vmax=10, gamma=0.98,
+                 n_frames=4, batch_size=32, lr=0.00025,
+                 init_epsilon=0.95,
+                 update_period=8,
+                 target_update_period=10000):
 
-    return image_scaled
+        self.env_name = env_name
 
+        self.n_atoms = n_atoms
 
-class DQNAgent:
+        self.Vmin, self.Vmax = Vmin, Vmax
 
-    MAX_EXPERIENCES = 350000
+        self.delta_z = (self.Vmax - self.Vmin) / (self.n_atoms - 1)
 
-    MIN_EXPERIENCES = 30000
-
-    BATCH_SIZE = 32
-
-    UPDATE_PERIOD = 4
-
-    COPY_PERIOD = 10000
-
-    def __init__(self, env, gamma=0.98):
-        """
-            gammma: 割引率
-            epsilon: 探索と活用の割合
-        """
-
-        self.env = env
+        self.Z = np.linspace(self.Vmin, self.Vmax, self.n_atoms)
 
         self.gamma = gamma
 
-        self.epsion = 1.0
+        self.n_frames = n_frames
 
-        self.global_steps = 0
+        self.batch_size = batch_size
 
-        self.q_network = QNetwork(self.env.action_space.n)
+        self.init_epsilon = init_epsilon
 
-        self.target_network = QNetwork(self.env.action_space.n)
+        self.epsilon_scheduler = (lambda steps:
+            max(0.98 * (500000 - steps) / 500000, 0.1) if steps < 500000
+            else max(0.05 + 0.05 * (1000000 - steps) / 500000, 0.05)
+            )
 
-        self.experiences = collections.deque(maxlen=self.MAX_EXPERIENCES)
+        self.update_period = update_period
 
-    def play(self, episodes):
+        self.target_update_period = target_update_period
 
-        total_rewards = []
+        env = gym.make(self.env_name)
 
-        recent_localsteps = collections.deque(maxlen=5)
+        self.action_space = env.action_space.n
 
-        for n in range(episodes):
+        self.qnet = CategoricalQNet(
+            self.action_space, self.n_atoms, self.Z)
 
-            self.epsilon = 1.0 - min(0.95, self.global_steps * 0.95 / 500000)
+        self.target_qnet = CategoricalQNet(
+            self.action_space, self.n_atoms, self.Z)
 
-            total_reward, localsteps = self.play_episode()
+        self.optimizer = tf.keras.optimizers.Adam(lr=lr, epsilon=0.01/batch_size)
 
-            total_rewards.append(total_reward)
+    def learn(self, n_episodes, buffer_size=800000, logdir="log"):
 
-            recent_localsteps.append(localsteps)
+        logdir = Path(__file__).parent / logdir
+        if logdir.exists():
+            shutil.rmtree(logdir)
+        self.summary_writer = tf.summary.create_file_writer(str(logdir))
 
-            print(f"Episode {n}: {total_reward}")
-            print(f"Local steps {localsteps}")
-            print(f"Experiences {len(self.experiences)}")
-            print(f"Current epsilon {self.epsilon}")
-            print(f"Global step {self.global_steps}")
-            print()
-
-        return total_rewards
-
-    def play_episode(self):
-
-        total_reward = 0
-
-        lives = 5
+        self.replay_buffer = ReplayBuffer(max_len=buffer_size)
 
         steps = 0
+        for episode in range(1, n_episodes+1):
+            env = gym.make(self.env_name)
 
-        done = False
+            frames = collections.deque(maxlen=4)
+            frame = frame_preprocess(env.reset())
+            for _ in range(self.n_frames):
+                frames.append(frame)
 
-        frame = self.env.reset()
+            #: ネットワーク重みの初期化
+            state = np.stack(frames, axis=2)[np.newaxis, ...]
+            self.qnet(state)
+            self.target_qnet(state)
+            self.target_qnet.set_weights(self.qnet.get_weights())
 
-        for _ in range(random.randint(0, 10)):
-            frame, _, _, _= self.env.step(1)
+            episode_rewards = 0
+            episode_steps = 0
 
-        state = np.stack(
-            [np.squeeze(frame_preprocessor(frame))]*4,
-            axis=2).astype(np.float32)
+            done = False
+            lives = 5
+            while not done:
 
-        while not done:
+                steps += 1
+                episode_steps += 1
 
-            action = self.sample_action(state)
+                epsilon = self.epsilon_scheduler(steps)
 
-            frame, reward, done, info = self.env.step(action)
+                state = np.stack(frames, axis=2)[np.newaxis, ...]
+                action = self.qnet.sample_action(state, epsilon=epsilon)
+                next_frame, reward, done, info = env.step(action)
+                episode_rewards += reward
+                frames.append(frame_preprocess(next_frame))
+                next_state = np.stack(frames, axis=2)[np.newaxis, ...]
 
-            next_state = np.append(frame_preprocessor(frame),
-                                   state[..., :3], axis=2)
+                if done:
+                    exp = Experience(state, action, reward, next_state, done)
+                    self.replay_buffer.push(exp)
+                    break
+                else:
+                    if info["ale.lives"] != lives:
+                        lives = info["ale.lives"]
+                        exp = Experience(state, action, reward, next_state, True)
+                    else:
+                        exp = Experience(state, action, reward, next_state, done)
 
-            if info["ale.lives"] != lives:
-                lives = info["ale.lives"]
-                exp = Experience(state, action, reward, next_state, True)
-            else:
-                exp = Experience(state, action, reward, next_state, done)
+                    self.replay_buffer.push(exp)
 
-            self.experiences.append(exp)
+                if (len(self.replay_buffer) > 20000) and (steps % self.update_period == 0):
+                    loss = self.update_network()
 
-            state = next_state
+                    with self.summary_writer.as_default():
+                        tf.summary.scalar("loss", loss, step=steps)
+                        tf.summary.scalar("epsilon", epsilon, step=steps)
+                        tf.summary.scalar("buffer_size", len(self.replay_buffer), step=steps)
+                        tf.summary.scalar("train_score", episode_rewards, step=steps)
+                        tf.summary.scalar("train_steps", episode_steps, step=steps)
 
-            total_reward += reward
+                #: Hard target update
+                if steps % self.target_update_period == 0:
+                    self.target_qnet.set_weights(self.qnet.get_weights())
 
-            steps += 1
+            print(f"Episode: {episode}, score: {episode_rewards}, steps: {episode_steps}")
 
-            self.global_steps += 1
+            if episode % 20 == 0:
+                test_scores, test_steps = self.test_play(n_testplay=1)
+                with self.summary_writer.as_default():
+                    tf.summary.scalar("test_score", test_scores[0], step=steps)
+                    tf.summary.scalar("test_step", test_steps[0], step=steps)
 
-            if self.global_steps % self.UPDATE_PERIOD == 0:
-                self.update_qnetwork()
+            if episode % 1000 == 0:
+                print("Model Saved")
+                self.qnet.save_weights("checkpoints/qnet")
 
-            if self.global_steps % self.COPY_PERIOD == 0:
-                print("==Update target newwork==")
-                self.update_target_network()
+    def update_network(self):
 
-        return total_reward, steps
-
-    def sample_action(self, state):
-        """探索と活用"""
-
-        if np.random.random() < self.epsilon:
-            random_action = np.random.choice(self.env.action_space.n)
-            return random_action
-        else:
-            selected_action = np.argmax(self.q_network.predict(state))
-            return selected_action
-
-    def update_qnetwork(self):
-        """ Q-Networkの訓練
-            ただしExperiencesが規定数に達していないうちは何もしない
-        """
-        if len(self.experiences) < self.MIN_EXPERIENCES:
-            return
-
+        #: ミニバッチの作成
         (states, actions, rewards,
-         next_states, dones) = self.get_minibatch(self.BATCH_SIZE)
+         next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size)
 
-        next_Qs = np.max(
-            self.target_network.predict(np.array(next_states)), axis=1)
+        next_actions, next_probs = self.target_qnet.sample_actions(next_states)
 
-        target_values = [reward + self.gamma * next_q if not done else reward
-                         for reward, next_q, done
-                         in zip(rewards, next_Qs, dones)]
+        #: 選択されたactionの確率分布だけ抽出する
+        onehot_mask = self.create_mask(next_actions)
+        next_dists = tf.reduce_sum(next_probs * onehot_mask, axis=1).numpy()
 
-        self.q_network.update(np.array(states), np.array(actions),
-                              np.array(target_values))
+        #: 分布版ベルマンオペレータの適用
+        target_dists = self.shift_and_projection(rewards, dones, next_dists)
 
-    def update_target_network(self):
-        """Update target Q-network
+        onehot_mask = self.create_mask(actions)
+        with tf.GradientTape() as tape:
+            probs = self.qnet(states)
+
+            dists = tf.reduce_sum(probs * onehot_mask, axis=1)
+            #: クリップしないとlogとったときに勾配爆発することがある
+            dists = tf.clip_by_value(dists, 1e-6, 1.0)
+
+            loss = tf.reduce_sum(
+                -1 * target_dists * tf.math.log(dists), axis=1, keepdims=True)
+            loss = tf.reduce_mean(loss)
+
+        grads = tape.gradient(loss, self.qnet.trainable_variables)
+        self.optimizer.apply_gradients(
+            zip(grads, self.qnet.trainable_variables))
+
+        return loss
+
+    def shift_and_projection(self, rewards, dones, next_dists):
+
+        target_dists = np.zeros((self.batch_size, self.n_atoms))
+
+        for j in range(self.n_atoms):
+
+            tZ_j = np.minimum(self.Vmax, np.maximum(self.Vmin, rewards + self.gamma * self.Z[j]))
+            bj = (tZ_j - self.Vmin) / self.delta_z
+
+            lower_bj = np.floor(bj).astype(np.int8)
+            upper_bj = np.ceil(bj).astype(np.int8)
+
+            eq_mask = lower_bj == upper_bj
+            neq_mask = lower_bj != upper_bj
+
+            lower_probs = 1 - (bj - lower_bj)
+            upper_probs = 1 - (upper_bj - bj)
+
+            next_dist = next_dists[:, [j]]
+            indices = np.arange(self.batch_size).reshape(-1, 1)
+
+            target_dists[indices[neq_mask], lower_bj[neq_mask]] += (lower_probs * next_dist)[neq_mask]
+            target_dists[indices[neq_mask], upper_bj[neq_mask]] += (upper_probs * next_dist)[neq_mask]
+
+            target_dists[indices[eq_mask], lower_bj[eq_mask]] += (0.5 * next_dist)[eq_mask]
+            target_dists[indices[eq_mask], upper_bj[eq_mask]] += (0.5 * next_dist)[eq_mask]
+
+        """ 2. doneへの対処
+            doneのときは TZ(t) = R(t)
         """
+        for batch_idx in range(self.batch_size):
 
-        targetnet_variables = self.target_network.trainable_variables
-        qnet_variables = self.q_network.trainable_variables
+            if not dones[batch_idx]:
+                continue
+            else:
+                target_dists[batch_idx, :] = 0
+                tZ = np.minimum(self.Vmax, np.maximum(self.Vmin, rewards[batch_idx]))
+                bj = (tZ - self.Vmin) / self.delta_z
 
-        for var1, var2 in zip(targetnet_variables, qnet_variables):
-            var1.assign(var2.numpy())
+                lower_bj = np.floor(bj).astype(np.int32)
+                upper_bj = np.ceil(bj).astype(np.int32)
 
-    def get_minibatch(self, batch_size):
-        """Experience Replay mechanism
-        """
-        indices = np.random.choice(len(self.experiences),
-                                   size=batch_size, replace=False)
+                if lower_bj == upper_bj:
+                    target_dists[batch_idx, lower_bj] += 1.0
+                else:
+                    target_dists[batch_idx, lower_bj] += 1 - (bj - lower_bj)
+                    target_dists[batch_idx, upper_bj] += 1 - (upper_bj - bj)
 
-        selected_experiences = [self.experiences[i] for i in indices]
+        return target_dists
 
-        states = [exp.state for exp in selected_experiences]
-        actions = [exp.action for exp in selected_experiences]
-        rewards = [exp.reward for exp in selected_experiences]
-        next_states = [exp.next_state for exp in selected_experiences]
-        dones = [exp.done for exp in selected_experiences]
+    def create_mask(self, actions):
 
-        return (states, actions, rewards, next_states, dones)
+        mask = np.ones((self.batch_size, self.action_space, self.n_atoms))
+        actions_onehot = tf.one_hot(
+            tf.cast(actions, tf.int32), self.action_space, axis=1)
+
+        for idx in range(self.batch_size):
+            mask[idx, ...] = mask[idx, ...] * actions_onehot[idx, ...]
+
+        return mask
+
+    def test_play(self, n_testplay=1, monitor_dir=None,
+                  checkpoint_path=None):
+
+        if checkpoint_path:
+            env = gym.make(self.env_name)
+            frames = collections.deque(maxlen=4)
+            frame = frame_preprocess(env.reset())
+            for _ in range(self.n_frames):
+                frames.append(frame)
+            state = np.stack(frames, axis=2)[np.newaxis, ...]
+            self.qnet(state)
+            self.qnet.load_weights(checkpoint_path)
+
+        if monitor_dir:
+            monitor_dir = Path(monitor_dir)
+            if monitor_dir.exists():
+                shutil.rmtree(monitor_dir)
+            monitor_dir.mkdir()
+            env = gym.wrappers.Monitor(
+                gym.make(self.env_name), monitor_dir, force=True,
+                video_callable=(lambda ep: True))
+        else:
+            env = gym.make(self.env_name)
+
+        scores = []
+        steps = []
+        for _ in range(n_testplay):
+
+            frames = collections.deque(maxlen=4)
+
+            frame = frame_preprocess(env.reset())
+            for _ in range(self.n_frames):
+                frames.append(frame)
+
+            done = False
+            episode_steps = 0
+            episode_rewards = 0
+
+            while not done:
+                state = np.stack(frames, axis=2)[np.newaxis, ...]
+                action = self.qnet.sample_action(state, epsilon=0.1)
+                next_frame, reward, done, info = env.step(action)
+                frames.append(frame_preprocess(next_frame))
+
+                episode_rewards += reward
+                episode_steps += 1
+                if episode_steps > 500 and episode_rewards < 3:
+                    #: ゲーム開始(action: 0)しないまま停滞するケースへの対処
+                    break
+
+            scores.append(episode_rewards)
+            steps.append(episode_steps)
+
+        return scores, steps
 
 
 def main():
-
-    start = datetime.now()
-
-    monitor_dir = Path(__file__).parent / "history"
-    ENV_NAME = "BreakoutDeterministic-v4"
-    env = gym.make(ENV_NAME)
-    env = wrappers.Monitor(env, monitor_dir, force=True,
-                           video_callable=(lambda ep: ep % 100 == 0))
-
-    agent = DQNAgent(env=env)
-    history = agent.play(episodes=4501)
-
-    plt.plot(range(len(history)), history)
-    plt.xlabel("episodes")
-    plt.ylabel("Total Reward")
-    plt.savefig(monitor_dir / "dqn_breakout-det-v4.png")
-
-    df = pd.DataFrame()
-    df["Total Reward"] = history
-    df.to_csv(monitor_dir / "dqn_breakout-det-v4.csv", index=None)
-
-    end = datetime.now() - start
-    print(end)
+    agent = CategoricalDQNAgent()
+    agent.learn(n_episodes=6001)
+    agent.test_play(n_testplay=10,
+                    checkpoint_path="checkpoints/qnet",
+                    monitor_dir="mp4")
 
 
-if __name__ == "__main__":
-    from tensorflow.python.client import device_lib
-    print(device_lib.list_local_devices())
-    print()
-
+if __name__ == '__main__':
     main()
