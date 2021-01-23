@@ -49,6 +49,8 @@ class DQNAgent:
 
         self.use_reward_clipping = True
 
+        self.huber_loss = tf.keras.losses.Huber()
+
     def learn(self, n_episodes, buffer_size=1000000, logdir="log"):
 
         logdir = Path(__file__).parent / logdir
@@ -89,9 +91,6 @@ class DQNAgent:
 
                 next_state = np.stack(frames, axis=2)[np.newaxis, ...]
 
-                if self.use_reward_clipping:
-                    reward = np.clip(reward, -1, 1)
-
                 if info["ale.lives"] != lives:
                     lives = info["ale.lives"]
                     exp = Experience(state, action, reward, next_state, True)
@@ -102,7 +101,6 @@ class DQNAgent:
 
                 if len(self.replay_buffer) > 50000:
                     if steps % self.update_period == 0:
-
                         loss = self.update_network()
                         with self.summary_writer.as_default():
                             tf.summary.scalar("loss", loss, step=steps)
@@ -118,7 +116,6 @@ class DQNAgent:
                     break
 
             print(f"Episode: {episode}, score: {episode_rewards}, steps: {episode_steps}")
-
             if episode % 20 == 0:
                 test_scores, test_steps = self.test_play(n_testplay=1)
                 with self.summary_writer.as_default():
@@ -126,7 +123,6 @@ class DQNAgent:
                     tf.summary.scalar("test_step", test_steps[0], step=steps)
 
             if episode % 1000 == 0:
-                print("Model Saved")
                 self.qnet.save_weights("checkpoints/qnet")
 
     def update_network(self):
@@ -135,26 +131,24 @@ class DQNAgent:
         (states, actions, rewards,
          next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size)
 
-        next_actions, next_probs = self.target_qnet.sample_actions(next_states)
+        if self.use_reward_clipping:
+            rewards = np.clip(rewards, -1, 1)
 
-        #: 選択されたactionの確率分布だけ抽出する
-        onehot_mask = self.create_mask(next_actions)
-        next_dists = tf.reduce_sum(next_probs * onehot_mask, axis=1).numpy()
+        next_actions, next_qvalues = self.target_qnet.sample_actions(next_states)
+        next_actions_onehot = tf.one_hot(next_actions, self.action_space)
+        max_next_qvalues = tf.reduce_sum(
+            next_qvalues * next_actions_onehot, axis=1, keepdims=True)
 
-        #: 分布版ベルマンオペレータの適用
-        target_dists = self.shift_and_projection(rewards, dones, next_dists)
+        target_q = rewards + self.gamma * (1 - dones) * max_next_qvalues
 
-        onehot_mask = self.create_mask(actions)
         with tf.GradientTape() as tape:
-            probs = self.qnet(states)
 
-            dists = tf.reduce_sum(probs * onehot_mask, axis=1)
-            #: クリップしないとlogとったときに勾配爆発することがある
-            dists = tf.clip_by_value(dists, 1e-6, 1.0)
-
-            loss = tf.reduce_sum(
-                -1 * target_dists * tf.math.log(dists), axis=1, keepdims=True)
-            loss = tf.reduce_mean(loss)
+            qvalues = self.qnet(states)
+            actions_onehot = tf.one_hot(
+                actions.flatten().astype(np.int32), self.action_space)
+            q = tf.reduce_sum(
+                qvalues * actions_onehot, axis=1, keepdims=True)
+            loss = self.huber_loss(target_q, q)
 
         grads = tape.gradient(loss, self.qnet.trainable_variables)
         self.optimizer.apply_gradients(
@@ -162,76 +156,15 @@ class DQNAgent:
 
         return loss
 
-    def shift_and_projection(self, rewards, dones, next_dists):
-
-        target_dists = np.zeros((self.batch_size, self.n_atoms))
-
-        for j in range(self.n_atoms):
-
-            tZ_j = np.minimum(self.Vmax, np.maximum(self.Vmin, rewards + self.gamma * self.Z[j]))
-            bj = (tZ_j - self.Vmin) / self.delta_z
-
-            lower_bj = np.floor(bj).astype(np.int8)
-            upper_bj = np.ceil(bj).astype(np.int8)
-
-            eq_mask = lower_bj == upper_bj
-            neq_mask = lower_bj != upper_bj
-
-            lower_probs = 1 - (bj - lower_bj)
-            upper_probs = 1 - (upper_bj - bj)
-
-            next_dist = next_dists[:, [j]]
-            indices = np.arange(self.batch_size).reshape(-1, 1)
-
-            target_dists[indices[neq_mask], lower_bj[neq_mask]] += (lower_probs * next_dist)[neq_mask]
-            target_dists[indices[neq_mask], upper_bj[neq_mask]] += (upper_probs * next_dist)[neq_mask]
-
-            target_dists[indices[eq_mask], lower_bj[eq_mask]] += (0.5 * next_dist)[eq_mask]
-            target_dists[indices[eq_mask], upper_bj[eq_mask]] += (0.5 * next_dist)[eq_mask]
-
-        """ 2. doneへの対処
-            doneのときは TZ(t) = R(t)
-        """
-        for batch_idx in range(self.batch_size):
-
-            if not dones[batch_idx]:
-                continue
-            else:
-                target_dists[batch_idx, :] = 0
-                tZ = np.minimum(self.Vmax, np.maximum(self.Vmin, rewards[batch_idx]))
-                bj = (tZ - self.Vmin) / self.delta_z
-
-                lower_bj = np.floor(bj).astype(np.int32)
-                upper_bj = np.ceil(bj).astype(np.int32)
-
-                if lower_bj == upper_bj:
-                    target_dists[batch_idx, lower_bj] += 1.0
-                else:
-                    target_dists[batch_idx, lower_bj] += 1 - (bj - lower_bj)
-                    target_dists[batch_idx, upper_bj] += 1 - (upper_bj - bj)
-
-        return target_dists
-
-    def create_mask(self, actions):
-
-        mask = np.ones((self.batch_size, self.action_space, self.n_atoms))
-        actions_onehot = tf.one_hot(
-            tf.cast(actions, tf.int32), self.action_space, axis=1)
-
-        for idx in range(self.batch_size):
-            mask[idx, ...] = mask[idx, ...] * actions_onehot[idx, ...]
-
-        return mask
-
     def test_play(self, n_testplay=1, monitor_dir=None,
                   checkpoint_path=None):
 
         if checkpoint_path:
             env = gym.make(self.env_name)
-            frames = collections.deque(maxlen=4)
-            frame = frame_preprocess(env.reset())
-            for _ in range(self.n_frames):
-                frames.append(frame)
+            frame = preprocess_frame(env.reset())
+            frames = collections.deque(
+                [frame] * self.n_frames, maxlen=self.n_frames)
+
             state = np.stack(frames, axis=2)[np.newaxis, ...]
             self.qnet(state)
             self.qnet.load_weights(checkpoint_path)
@@ -251,11 +184,9 @@ class DQNAgent:
         steps = []
         for _ in range(n_testplay):
 
-            frames = collections.deque(maxlen=4)
-
-            frame = frame_preprocess(env.reset())
-            for _ in range(self.n_frames):
-                frames.append(frame)
+            frame = preprocess_frame(env.reset())
+            frames = collections.deque(
+                [frame] * self.n_frames, maxlen=self.n_frames)
 
             done = False
             episode_steps = 0
@@ -264,8 +195,8 @@ class DQNAgent:
             while not done:
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
                 action = self.qnet.sample_action(state, epsilon=0.05)
-                next_frame, reward, done, info = env.step(action)
-                frames.append(frame_preprocess(next_frame))
+                next_frame, reward, done, _ = env.step(action)
+                frames.append(preprocess_frame(next_frame))
 
                 episode_rewards += reward
                 episode_steps += 1
@@ -280,9 +211,10 @@ class DQNAgent:
 
 
 def main():
-    agent = CategoricalDQNAgent()
-    agent.learn(n_episodes=6001)
-    agent.test_play(n_testplay=10,
+    agent = DQNAgent()
+    agent.learn(n_episodes=5)
+    agent.qnet.save_weights("checkpoints/qnet_fin")
+    agent.test_play(n_testplay=5,
                     checkpoint_path="checkpoints/qnet",
                     monitor_dir="mp4")
 

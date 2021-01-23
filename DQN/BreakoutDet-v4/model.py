@@ -39,14 +39,13 @@ class QNetwork(tf.keras.Model):
 
         if (epsilon is None) or (np.random.random() > epsilon):
             selected_actions, _ = self.sample_actions(x)
-            selected_action = selected_actions[0][0].numpy()
+            selected_action = selected_actions.numpy()[0]
         else:
             selected_action = np.random.choice(self.action_space)
 
         return selected_action
 
     def sample_actions(self, x):
-        probs = self(x)
-        q_means = tf.reduce_sum(probs * self.Z, axis=2, keepdims=True)
-        selected_actions = tf.argmax(q_means, axis=1)
-        return selected_actions, probs
+        qvalues = self(x)
+        selected_actions = tf.cast(tf.argmax(qvalues, axis=1), tf.int32)
+        return selected_actions, qvalues
