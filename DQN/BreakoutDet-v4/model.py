@@ -3,17 +3,13 @@ import tensorflow as tf
 import tensorflow.keras.layers as kl
 
 
-class CategoricalQNet(tf.keras.Model):
+class QNetwork(tf.keras.Model):
 
-    def __init__(self, actions_space, n_atoms, Z):
+    def __init__(self, actions_space):
 
-        super(CategoricalQNet, self).__init__()
+        super(QNetwork, self).__init__()
 
         self.action_space = actions_space
-
-        self.n_atoms = n_atoms
-
-        self.Z = Z  #: 各ビンのしきい値(support)
 
         self.conv1 = kl.Conv2D(32, 8, strides=4, activation="relu",
                                kernel_initializer="he_normal")
@@ -21,30 +17,23 @@ class CategoricalQNet(tf.keras.Model):
                                kernel_initializer="he_normal")
         self.conv3 = kl.Conv2D(64, 3, strides=1, activation="relu",
                                kernel_initializer="he_normal")
-
         self.flatten1 = kl.Flatten()
         self.dense1 = kl.Dense(512, activation="relu",
                                kernel_initializer="he_normal")
-        self.logits = kl.Dense(self.action_space * self.n_atoms,
-                               kernel_initializer="he_normal")
+        self.qvalues = kl.Dense(self.action_space,
+                                kernel_initializer="he_normal")
 
     @tf.function
     def call(self, x):
 
-        batch_size = x.shape[0]
-
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.conv3(x)
-
         x = self.flatten1(x)
         x = self.dense1(x)
+        qvalues = self.qvalues(x)
 
-        logits = self.logits(x)
-        logits = tf.reshape(logits, (batch_size, self.action_space, self.n_atoms))
-        probs = tf.nn.softmax(logits, axis=2)
-
-        return probs
+        return qvalues
 
     def sample_action(self, x, epsilon=None):
 

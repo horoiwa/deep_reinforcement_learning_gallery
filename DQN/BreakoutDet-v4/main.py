@@ -4,44 +4,32 @@ import shutil
 import gym
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras.optimizers import Adam
 import collections
 
-from model import CategoricalQNet
+from model import QNetwork
 from buffer import Experience, ReplayBuffer
-from util import frame_preprocess
+from util import preprocess_frame
 
 
-class CategoricalDQNAgent:
+class DQNAgent:
 
     def __init__(self, env_name="BreakoutDeterministic-v4",
-                 n_atoms=51, Vmin=-10, Vmax=10, gamma=0.98,
-                 n_frames=4, batch_size=32, lr=0.00025,
-                 init_epsilon=0.95,
-                 update_period=8,
-                 target_update_period=10000):
+                 gamma=0.99,
+                 batch_size=32,
+                 lr=0.00025,
+                 update_period=4,
+                 target_update_period=10000,
+                 n_frames=4):
 
         self.env_name = env_name
 
-        self.n_atoms = n_atoms
-
-        self.Vmin, self.Vmax = Vmin, Vmax
-
-        self.delta_z = (self.Vmax - self.Vmin) / (self.n_atoms - 1)
-
-        self.Z = np.linspace(self.Vmin, self.Vmax, self.n_atoms)
-
         self.gamma = gamma
-
-        self.n_frames = n_frames
 
         self.batch_size = batch_size
 
-        self.init_epsilon = init_epsilon
-
-        self.epsilon_scheduler = (lambda steps:
-            max(0.98 * (500000 - steps) / 500000, 0.1) if steps < 500000
-            else max(0.05 + 0.05 * (1000000 - steps) / 500000, 0.05)
-            )
+        self.epsilon_scheduler = (
+            lambda steps: max(1.0 - 0.9 * (1000000 - steps) / 1000000, 0.1))
 
         self.update_period = update_period
 
@@ -51,15 +39,17 @@ class CategoricalDQNAgent:
 
         self.action_space = env.action_space.n
 
-        self.qnet = CategoricalQNet(
-            self.action_space, self.n_atoms, self.Z)
+        self.qnet = QNetwork(self.action_space)
 
-        self.target_qnet = CategoricalQNet(
-            self.action_space, self.n_atoms, self.Z)
+        self.target_qnet = QNetwork(self.action_space)
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=lr, epsilon=0.01/batch_size)
+        self.optimizer = Adam(lr=lr, epsilon=0.01/self.batch_size)
 
-    def learn(self, n_episodes, buffer_size=800000, logdir="log"):
+        self.n_frames = n_frames
+
+        self.use_reward_clipping = True
+
+    def learn(self, n_episodes, buffer_size=1000000, logdir="log"):
 
         logdir = Path(__file__).parent / logdir
         if logdir.exists():
@@ -72,62 +62,60 @@ class CategoricalDQNAgent:
         for episode in range(1, n_episodes+1):
             env = gym.make(self.env_name)
 
-            frames = collections.deque(maxlen=4)
-            frame = frame_preprocess(env.reset())
-            for _ in range(self.n_frames):
-                frames.append(frame)
-
-            #: ネットワーク重みの初期化
-            state = np.stack(frames, axis=2)[np.newaxis, ...]
-            self.qnet(state)
-            self.target_qnet(state)
-            self.target_qnet.set_weights(self.qnet.get_weights())
+            frame = preprocess_frame(env.reset())
+            frames = collections.deque(
+                [frame] * self.n_frames, maxlen=self.n_frames)
 
             episode_rewards = 0
             episode_steps = 0
-
             done = False
             lives = 5
+
             while not done:
 
-                steps += 1
-                episode_steps += 1
+                steps, episode_steps = steps + 1, episode_steps + 1
 
                 epsilon = self.epsilon_scheduler(steps)
 
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
+
                 action = self.qnet.sample_action(state, epsilon=epsilon)
+
                 next_frame, reward, done, info = env.step(action)
+
                 episode_rewards += reward
-                frames.append(frame_preprocess(next_frame))
+
+                frames.append(preprocess_frame(next_frame))
+
                 next_state = np.stack(frames, axis=2)[np.newaxis, ...]
 
-                if done:
-                    exp = Experience(state, action, reward, next_state, done)
-                    self.replay_buffer.push(exp)
-                    break
+                if self.use_reward_clipping:
+                    reward = np.clip(reward, -1, 1)
+
+                if info["ale.lives"] != lives:
+                    lives = info["ale.lives"]
+                    exp = Experience(state, action, reward, next_state, True)
                 else:
-                    if info["ale.lives"] != lives:
-                        lives = info["ale.lives"]
-                        exp = Experience(state, action, reward, next_state, True)
-                    else:
-                        exp = Experience(state, action, reward, next_state, done)
+                    exp = Experience(state, action, reward, next_state, done)
 
-                    self.replay_buffer.push(exp)
+                self.replay_buffer.push(exp)
 
-                if (len(self.replay_buffer) > 20000) and (steps % self.update_period == 0):
-                    loss = self.update_network()
+                if len(self.replay_buffer) > 50000:
+                    if steps % self.update_period == 0:
 
-                    with self.summary_writer.as_default():
-                        tf.summary.scalar("loss", loss, step=steps)
-                        tf.summary.scalar("epsilon", epsilon, step=steps)
-                        tf.summary.scalar("buffer_size", len(self.replay_buffer), step=steps)
-                        tf.summary.scalar("train_score", episode_rewards, step=steps)
-                        tf.summary.scalar("train_steps", episode_steps, step=steps)
+                        loss = self.update_network()
+                        with self.summary_writer.as_default():
+                            tf.summary.scalar("loss", loss, step=steps)
+                            tf.summary.scalar("epsilon", epsilon, step=steps)
+                            tf.summary.scalar("buffer_size", len(self.replay_buffer), step=steps)
+                            tf.summary.scalar("train_score", episode_rewards, step=steps)
+                            tf.summary.scalar("train_steps", episode_steps, step=steps)
 
-                #: Hard target update
-                if steps % self.target_update_period == 0:
-                    self.target_qnet.set_weights(self.qnet.get_weights())
+                    if steps % self.target_update_period == 0:
+                        self.target_qnet.set_weights(self.qnet.get_weights())
+
+                if done:
+                    break
 
             print(f"Episode: {episode}, score: {episode_rewards}, steps: {episode_steps}")
 
@@ -275,7 +263,7 @@ class CategoricalDQNAgent:
 
             while not done:
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
-                action = self.qnet.sample_action(state, epsilon=0.1)
+                action = self.qnet.sample_action(state, epsilon=0.05)
                 next_frame, reward, done, info = env.step(action)
                 frames.append(frame_preprocess(next_frame))
 
