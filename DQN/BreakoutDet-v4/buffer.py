@@ -37,7 +37,9 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-    def push(self, exp):
+    def push(self, transition):
+
+        exp = Experience(*transition)
 
         if self.compress:
             exp = zlib.compress(pickle.dumps(exp))

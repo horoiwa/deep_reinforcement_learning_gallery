@@ -29,7 +29,7 @@ class DQNAgent:
         self.batch_size = batch_size
 
         self.epsilon_scheduler = (
-            lambda steps: max(1.0 - 0.9 * (1000000 - steps) / 1000000, 0.1))
+            lambda steps: max(1.0 - 0.9 * steps / 1000000, 0.1))
 
         self.update_period = update_period
 
@@ -93,11 +93,11 @@ class DQNAgent:
 
                 if info["ale.lives"] != lives:
                     lives = info["ale.lives"]
-                    exp = Experience(state, action, reward, next_state, True)
+                    transition = (state, action, reward, next_state, True)
                 else:
-                    exp = Experience(state, action, reward, next_state, done)
+                    transition = (state, action, reward, next_state, done)
 
-                self.replay_buffer.push(exp)
+                self.replay_buffer.push(transition)
 
                 if len(self.replay_buffer) > 50000:
                     if steps % self.update_period == 0:
@@ -212,7 +212,7 @@ class DQNAgent:
 
 def main():
     agent = DQNAgent()
-    agent.learn(n_episodes=5)
+    agent.learn(n_episodes=5001)
     agent.qnet.save_weights("checkpoints/qnet_fin")
     agent.test_play(n_testplay=5,
                     checkpoint_path="checkpoints/qnet",
