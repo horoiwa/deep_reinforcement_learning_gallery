@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-import ray
 
 import numpy as np
 import pickle
@@ -21,8 +20,6 @@ class Experience:
 
 
 class ReplayBuffer:
-    """見通しのよさのためにRAMを無駄遣いする実装なのでせめて圧縮する
-    """
 
     def __init__(self, max_len, compress=True):
 
@@ -38,6 +35,9 @@ class ReplayBuffer:
         return len(self.buffer)
 
     def push(self, transition):
+        """
+            transition : tuple(state, action, reward, next_state, done)
+        """
 
         exp = Experience(*transition)
 
