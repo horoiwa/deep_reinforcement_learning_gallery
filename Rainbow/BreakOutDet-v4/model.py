@@ -1,26 +1,53 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras.layers as kl
+import tensorflow_probability as tfp
 
 
 class NoisyDense(tf.keras.layers.Layer):
-    def __init__(self, num_outputs, initializer="random_normal", trainable=True):
+    """ Factorized Gaussian Noisy Dense Layer
+    """
+    def __init__(self, units, initializer="random_normal", trainable=True):
         super(NoisyDense, self).__init__()
-        self.num_outputs = num_outputs
+        self.units = units
         self.initializer = initializer
         self.trainable = trainable
+        self.normal = tfp.distributions.Normal(loc=0, scale=1)
 
     def build(self, input_shape):
-        self.w = self.add_weight(
-            shape=(int(input_shape[-1]), self.num_outputs),
+        self.w_mu = self.add_weight(
+            shape=(int(input_shape[-1]), self.units),
             initializer=self.initializer, trainable=self.trainable)
 
-        self.b = self.add_weight(
-            shape=(self.num_outputs,),
+        self.w_sigma = self.add_weight(
+            shape=(int(input_shape[-1]), self.units),
             initializer=self.initializer, trainable=self.trainable)
 
-    def call(self, x):
-        return tf.matmul(x, self.w) + self.b
+        self.b_mu = self.add_weight(
+            shape=(self.units,),
+            initializer=self.initializer, trainable=self.trainable)
+
+        self.b_sigma = self.add_weight(
+            shape=(self.units,),
+            initializer=self.initializer, trainable=self.trainable)
+
+    def call(self, inputs, noise=True):
+
+        epsilon_in = self.f(self.normal.sample((self.w_mu.shape[0], 1)))
+        epsilon_out = self.f(self.normal.sample((1, self.w_mu.shape[1])))
+
+        w_epsilon = tf.matmul(epsilon_in, epsilon_out)
+        b_epsilon = epsilon_out
+
+        w = self.w_mu + self.w_sigma * w_epsilon
+        b = self.b_mu + self.b_sigma * b_epsilon
+
+        return tf.matmul(inputs, w) + b
+
+    @staticmethod
+    def f(x):
+        x = tf.sign(x) * tf.abs(x) ** 0.5
+        return x
 
 
 class DuelingQNetwork(tf.keras.Model):
@@ -100,6 +127,10 @@ class TestModel(tf.keras.Model):
 
 if __name__ == "__main__":
     import numpy as np
-    x = np.arange(12).reshape(3,4).astype(np.float32)
+    x1 = np.atleast_2d(np.arange(5)).astype(np.float32)
+    x2 = np.array([x1]*3)
     model = TestModel()
-    x = model(x)
+    out1 = model(x1)
+    print(x1, out1)
+    out2 = model(x2)
+    print(x2, out2)
