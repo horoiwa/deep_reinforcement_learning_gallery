@@ -3,6 +3,26 @@ import tensorflow as tf
 import tensorflow.keras.layers as kl
 
 
+class NoisyDense(tf.keras.layers.Layer):
+    def __init__(self, num_outputs, initializer="random_normal", trainable=True):
+        super(NoisyDense, self).__init__()
+        self.num_outputs = num_outputs
+        self.initializer = initializer
+        self.trainable = trainable
+
+    def build(self, input_shape):
+        self.w = self.add_weight(
+            shape=(int(input_shape[-1]), self.num_outputs),
+            initializer=self.initializer, trainable=self.trainable)
+
+        self.b = self.add_weight(
+            shape=(self.num_outputs,),
+            initializer=self.initializer, trainable=self.trainable)
+
+    def call(self, x):
+        return tf.matmul(x, self.w) + self.b
+
+
 class DuelingQNetwork(tf.keras.Model):
 
     def __init__(self, actions_space):
@@ -66,3 +86,20 @@ class DuelingQNetwork(tf.keras.Model):
         qvalues = self(x)
         selected_actions = tf.cast(tf.argmax(qvalues, axis=1), tf.int32)
         return selected_actions, qvalues
+
+
+class TestModel(tf.keras.Model):
+    def __init__(self):
+        super(TestModel, self).__init__()
+        self.noisydense1 = NoisyDense(10)
+
+    def call(self, x):
+        x = self.noisydense1(x)
+        return x
+
+
+if __name__ == "__main__":
+    import numpy as np
+    x = np.arange(12).reshape(3,4).astype(np.float32)
+    model = TestModel()
+    x = model(x)

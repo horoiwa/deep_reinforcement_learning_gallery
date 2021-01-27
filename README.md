@@ -33,31 +33,42 @@ Deep reinforcement learning examples with tensorflow2
 
 <br>
 
+## C51
+
+[A Distributional Perspective on Reinforcement Learning](https://arxiv.org/abs/1707.06887)
+
+<br>
+
 ## Prioritized Experience Replay
 
-[original](https://arxiv.org/abs/1511.05952)
+[Prioritized Experience Replay](https://arxiv.org/abs/1511.05952)
 
 [baselines](https://github.com/openai/baselines/blob/master/baselines/deepq/replay_buffer.py)
+
+<br>
 
 ## Ape-X
 
 [Distributed Prioritized Experience Replay](https://arxiv.org/pdf/1803.00933.pdf)
 
+<br>
+
 ### A3C/A2C (Advantage Actor Critic)
 
 [Asynchronous Methods for Deep Reinforcement Learning](https://arxiv.org/abs/1602.01783)
 
-[Deep Reinforcement Learning: Playing CartPole through Asynchronous Advantage Actor Critic (A3C) with tf.keras and eager execution](https://blog.tensorflow.org/2018/07/deep-reinforcement-learning-keras-eager-execution.html)
-
 
 [OpenAI baselines](https://openai.com/blog/baselines-acktr-a2c/)
 
+<br>
 
 ## DDPG
 
 [Deterministic Policy Gradient Algorithms](http://proceedings.mlr.press/v32/silver14.pdf)
 
 [Continuous control with deep reinforcement learning](https://arxiv.org/abs/1509.02971)
+
+<br>
 
 ## TD3
 
@@ -67,9 +78,13 @@ Deep reinforcement learning examples with tensorflow2
 
 [Trust Region Policy Optimization](https://arxiv.org/abs/1502.05477)
 
+<br>
+
 ## PPO
 
 [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)
+
+<br>
 
 
 ## SAC
