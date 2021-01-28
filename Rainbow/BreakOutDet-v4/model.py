@@ -7,10 +7,11 @@ import tensorflow_probability as tfp
 class NoisyDense(tf.keras.layers.Layer):
     """ Factorized Gaussian Noisy Dense Layer
     """
-    def __init__(self, units, activation=None, initializer="random_normal", trainable=True):
+    def __init__(self, units, activation=None,
+                 kernel_initializer="random_normal", trainable=True):
         super(NoisyDense, self).__init__()
         self.units = units
-        self.initializer = initializer
+        self.initializer = kernel_initializer
         self.trainable = trainable
         self.normal = tfp.distributions.Normal(loc=0, scale=1)
         self.activation = tf.keras.activations.get(activation)
@@ -32,6 +33,7 @@ class NoisyDense(tf.keras.layers.Layer):
             shape=(self.units,),
             initializer=self.initializer, trainable=self.trainable)
 
+    @tf.function
     def call(self, inputs, noise=True):
 
         epsilon_in = self.f(self.normal.sample((self.w_mu.shape[0], 1)))
@@ -74,17 +76,17 @@ class NoisyDuelingQNetwork(tf.keras.Model):
 
         self.dense1 = NoisyDense(512, activation="relu",
                                  kernel_initializer="he_normal")
-        self.value = kl.Dense(1, activation="relu",
-                              kernel_initializer="he_normal")
+        self.value = NoisyDense(1, activation="relu",
+                                kernel_initializer="he_normal")
 
         self.dense2 = NoisyDense(512, activation="relu",
                                  kernel_initializer="he_normal")
 
-        self.advanteges = kl.Dense(self.action_space, activation="relu",
-                                   kernel_initializer="he_normal")
+        self.advanteges = NoisyDense(self.action_space, activation="relu",
+                                     kernel_initializer="he_normal")
 
-        self.qvalues = kl.Dense(self.action_space,
-                                kernel_initializer="he_normal")
+        self.qvalues = NoisyDense(self.action_space,
+                                  kernel_initializer="he_normal")
 
     @tf.function
     def call(self, x):
@@ -105,14 +107,9 @@ class NoisyDuelingQNetwork(tf.keras.Model):
 
         return q_values
 
-    def sample_action(self, x, epsilon=None):
-
-        if (epsilon is None) or (np.random.random() > epsilon):
-            selected_actions, _ = self.sample_actions(x)
-            selected_action = selected_actions.numpy()[0]
-        else:
-            selected_action = np.random.choice(self.action_space)
-
+    def sample_action(self, x):
+        selected_actions, _ = self.sample_actions(x)
+        selected_action = selected_actions.numpy()[0]
         return selected_action
 
     def sample_actions(self, x):
