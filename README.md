@@ -19,25 +19,21 @@ Deep reinforcement learning examples with tensorflow2
 
 [OpenAI baselines DQN](https://openai.com/blog/openai-baselines-dqn/)
 
-<br>
 
 ## Double DQN
 
 [Deep Reinforcement Learning with Double Q-learning](https://arxiv.org/abs/1509.06461)
 
-<br>
 
 ## Dueling Network
 
 [Dueling Network Architectures for Deep Reinforcement Learning](https://arxiv.org/abs/1511.06581)
 
-<br>
 
 ## C51
 
 [A Distributional Perspective on Reinforcement Learning](https://arxiv.org/abs/1707.06887)
 
-<br>
 
 ## Prioritized Experience Replay
 
@@ -45,13 +41,11 @@ Deep reinforcement learning examples with tensorflow2
 
 [baselines](https://github.com/openai/baselines/blob/master/baselines/deepq/replay_buffer.py)
 
-<br>
 
 ## Ape-X
 
 [Distributed Prioritized Experience Replay](https://arxiv.org/pdf/1803.00933.pdf)
 
-<br>
 
 ### A3C/A2C (Advantage Actor Critic)
 
@@ -60,7 +54,6 @@ Deep reinforcement learning examples with tensorflow2
 
 [OpenAI baselines](https://openai.com/blog/baselines-acktr-a2c/)
 
-<br>
 
 ## DDPG
 
@@ -68,7 +61,6 @@ Deep reinforcement learning examples with tensorflow2
 
 [Continuous control with deep reinforcement learning](https://arxiv.org/abs/1509.02971)
 
-<br>
 
 ## TD3
 
@@ -78,13 +70,11 @@ Deep reinforcement learning examples with tensorflow2
 
 [Trust Region Policy Optimization](https://arxiv.org/abs/1502.05477)
 
-<br>
 
 ## PPO
 
 [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347)
 
-<br>
 
 
 ## SAC
