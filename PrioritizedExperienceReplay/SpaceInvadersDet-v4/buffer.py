@@ -77,8 +77,7 @@ if __name__ == "__main__":
     buffer = PrioritizedReplayBuffer(max_experiences=16)
 
     Exp = collections.namedtuple("Experience",
-                                 ["state", "action",
-                                  "reward", "next_state", "done", "priority"])
+                                 ["state", "action", "reward", "next_state", "done", "priority"])
     for i in range(32):
 
         s1 = [np.random.randint(100) for _ in range(4)]
