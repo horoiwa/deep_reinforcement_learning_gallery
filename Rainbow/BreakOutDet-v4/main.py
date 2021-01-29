@@ -8,7 +8,7 @@ from tensorflow.keras.optimizers import Adam
 import collections
 
 from model import NoisyDuelingQNetwork
-from buffer import Experience, PrioritizedReplayBuffer
+from buffer import Experience, NstepPrioritizedReplayBuffer
 import util
 
 
@@ -21,7 +21,7 @@ class RainbowAgent:
                  update_period=4,
                  target_update_period=10000,
                  n_frames=4, alpha=0.6, beta=0.4, total_steps=2500000,
-                 buffer_size=1000000):
+                 nstep_return=3, buffer_size=1000000):
 
         self.env_name = env_name
 
@@ -47,10 +47,13 @@ class RainbowAgent:
 
         self.use_reward_clipping = True
 
-        self.steps = 0
+        self.nstep_return = nstep_return
 
-        self.replay_buffer = PrioritizedReplayBuffer(
-            max_len=buffer_size, alpha=alpha, beta=beta)
+        self.replay_buffer = NstepPrioritizedReplayBuffer(
+            max_len=buffer_size, gamma=self.gamma,
+            alpha=alpha, beta=beta, nstep_return=nstep_return)
+
+        self.steps = 0
 
     def learn(self, n_episodes, logdir="log"):
 
@@ -95,7 +98,6 @@ class RainbowAgent:
                 self.replay_buffer.push(transition)
 
                 if len(self.replay_buffer) > 50000:
-                #if len(self.replay_buffer) > 50:
                     if self.steps % self.update_period == 0:
                         loss = self.update_network()
                         with self.summary_writer.as_default():
@@ -136,7 +138,7 @@ class RainbowAgent:
         max_next_qvalues = tf.reduce_sum(
             next_qvalues * next_actions_onehot, axis=1, keepdims=True)
 
-        target_q = rewards + self.gamma * (1 - dones) * max_next_qvalues
+        target_q = rewards + self.gamma ** (self.nstep_return) * (1 - dones) * max_next_qvalues
 
         with tf.GradientTape() as tape:
 
@@ -153,6 +155,7 @@ class RainbowAgent:
         self.optimizer.apply_gradients(
             zip(grads, self.qnet.trainable_variables))
 
+        #: update priority of experiences
         td_errors = td_errors.numpy().flatten()
         self.replay_buffer.update_priority(indices, td_errors)
 
