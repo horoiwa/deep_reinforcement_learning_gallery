@@ -21,7 +21,8 @@ class Experience:
 
 class PrioritizedReplayBuffer:
 
-    def __init__(self, max_len, alpha=0.6, epsilon=0.01, compress=True):
+    def __init__(self, max_len, alpha=0.6, beta=0.4,
+                 total_steps=2500000, compress=True):
 
         self.max_len = max_len
 
@@ -31,7 +32,10 @@ class PrioritizedReplayBuffer:
 
         self.alpha = alpha
 
-        self.epsilon = epsilon
+        self.beta_scheduler = (
+            lambda steps: beta + (1 - beta) * steps / total_steps)
+
+        self.epsilon = 0.01
 
         self.max_priority = 1.0
 
@@ -67,7 +71,9 @@ class PrioritizedReplayBuffer:
 
         self.counter += 1
 
-    def get_minibatch(self, batch_size, beta):
+    def get_minibatch(self, batch_size, steps):
+
+        beta = self.beta_scheduler(steps)
 
         probs = np.array(self.priorities) / sum(self.priorities)
 
@@ -75,8 +81,8 @@ class PrioritizedReplayBuffer:
                                    replace=False, size=batch_size)
 
         weights = (probs[indices] * len(self.buffer)) ** (-1 * beta)
-
         weights /= weights.max()
+        weights = weights.reshape(-1, 1).astype(np.float32)
 
         if self.compress:
             selected_experiences = [

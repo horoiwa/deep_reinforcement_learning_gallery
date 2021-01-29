@@ -82,7 +82,7 @@ class NoisyDuelingQNetwork(tf.keras.Model):
         self.dense2 = NoisyDense(512, activation="relu",
                                  kernel_initializer="he_normal")
 
-        self.advanteges = NoisyDense(self.action_space, activation="relu",
+        self.advantages = NoisyDense(self.action_space, activation="relu",
                                      kernel_initializer="he_normal")
 
         self.qvalues = NoisyDense(self.action_space,

@@ -7,12 +7,12 @@ import tensorflow as tf
 from tensorflow.keras.optimizers import Adam
 import collections
 
-from model import QNetwork
-from buffer import Experience, ReplayBuffer
-from util import preprocess_frame
+from model import NoisyDuelingQNetwork
+from buffer import Experience, PrioritizedReplayBuffer
+import util
 
 
-class DQNAgent:
+class RainbowAgent:
 
     def __init__(self, env_name="BreakoutDeterministic-v4",
                  gamma=0.99,
@@ -20,7 +20,8 @@ class DQNAgent:
                  lr=0.00025,
                  update_period=4,
                  target_update_period=10000,
-                 n_frames=4):
+                 n_frames=4, alpha=0.6, beta=0.4, total_steps=2500000,
+                 buffer_size=1000000):
 
         self.env_name = env_name
 
@@ -28,8 +29,7 @@ class DQNAgent:
 
         self.batch_size = batch_size
 
-        self.epsilon_scheduler = (
-            lambda steps: max(1.0 - 0.9 * steps / 1000000, 0.1))
+        self.n_frames = n_frames
 
         self.update_period = update_period
 
@@ -39,32 +39,30 @@ class DQNAgent:
 
         self.action_space = env.action_space.n
 
-        self.qnet = QNetwork(self.action_space)
+        self.qnet = NoisyDuelingQNetwork(self.action_space)
 
-        self.target_qnet = QNetwork(self.action_space)
+        self.target_qnet = NoisyDuelingQNetwork(self.action_space)
 
         self.optimizer = Adam(lr=lr, epsilon=0.01/self.batch_size)
 
-        self.n_frames = n_frames
-
         self.use_reward_clipping = True
 
-        self.huber_loss = tf.keras.losses.Huber()
+        self.steps = 0
 
-    def learn(self, n_episodes, buffer_size=1000000, logdir="log"):
+        self.replay_buffer = PrioritizedReplayBuffer(
+            max_len=buffer_size, alpha=alpha, beta=beta)
+
+    def learn(self, n_episodes, logdir="log"):
 
         logdir = Path(__file__).parent / logdir
         if logdir.exists():
             shutil.rmtree(logdir)
         self.summary_writer = tf.summary.create_file_writer(str(logdir))
 
-        self.replay_buffer = ReplayBuffer(max_len=buffer_size)
-
-        steps = 0
         for episode in range(1, n_episodes+1):
             env = gym.make(self.env_name)
 
-            frame = preprocess_frame(env.reset())
+            frame = util.preprocess_frame(env.reset())
             frames = collections.deque(
                 [frame] * self.n_frames, maxlen=self.n_frames)
 
@@ -72,22 +70,19 @@ class DQNAgent:
             episode_steps = 0
             done = False
             lives = 5
-
             while not done:
 
-                steps, episode_steps = steps + 1, episode_steps + 1
-
-                epsilon = self.epsilon_scheduler(steps)
+                self.steps, episode_steps = self.steps + 1, episode_steps + 1
 
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
 
-                action = self.qnet.sample_action(state, epsilon=epsilon)
+                action = self.qnet.sample_action(state)
 
                 next_frame, reward, done, info = env.step(action)
 
                 episode_rewards += reward
 
-                frames.append(preprocess_frame(next_frame))
+                frames.append(util.preprocess_frame(next_frame))
 
                 next_state = np.stack(frames, axis=2)[np.newaxis, ...]
 
@@ -100,16 +95,16 @@ class DQNAgent:
                 self.replay_buffer.push(transition)
 
                 if len(self.replay_buffer) > 50000:
-                    if steps % self.update_period == 0:
+                #if len(self.replay_buffer) > 50:
+                    if self.steps % self.update_period == 0:
                         loss = self.update_network()
                         with self.summary_writer.as_default():
-                            tf.summary.scalar("loss", loss, step=steps)
-                            tf.summary.scalar("epsilon", epsilon, step=steps)
-                            tf.summary.scalar("buffer_size", len(self.replay_buffer), step=steps)
-                            tf.summary.scalar("train_score", episode_rewards, step=steps)
-                            tf.summary.scalar("train_steps", episode_steps, step=steps)
+                            tf.summary.scalar("loss", loss, step=self.steps)
+                            tf.summary.scalar("buffer_size", len(self.replay_buffer), step=self.steps)
+                            tf.summary.scalar("train_score", episode_rewards, step=self.steps)
+                            tf.summary.scalar("train_steps", episode_steps, step=self.steps)
 
-                    if steps % self.target_update_period == 0:
+                    if self.steps % self.target_update_period == 0:
                         self.target_qnet.set_weights(self.qnet.get_weights())
 
                 if done:
@@ -119,8 +114,8 @@ class DQNAgent:
             if episode % 20 == 0:
                 test_scores, test_steps = self.test_play(n_testplay=1)
                 with self.summary_writer.as_default():
-                    tf.summary.scalar("test_score", test_scores[0], step=steps)
-                    tf.summary.scalar("test_step", test_steps[0], step=steps)
+                    tf.summary.scalar("test_score", test_scores[0], step=self.steps)
+                    tf.summary.scalar("test_step", test_steps[0], step=self.steps)
 
             if episode % 1000 == 0:
                 self.qnet.save_weights("checkpoints/qnet")
@@ -128,8 +123,7 @@ class DQNAgent:
     def update_network(self):
 
         #: ミニバッチの作成
-        (states, actions, rewards,
-         next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size)
+        indices, weights, (states, actions, rewards, next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size, self.steps)
 
         if self.use_reward_clipping:
             rewards = np.clip(rewards, -1, 1)
@@ -151,11 +145,16 @@ class DQNAgent:
                 actions.flatten().astype(np.int32), self.action_space)
             q = tf.reduce_sum(
                 qvalues * actions_onehot, axis=1, keepdims=True)
-            loss = self.huber_loss(target_q, q)
+            td_errors = target_q - q
+            weighted_td_errors = weights * td_errors
+            loss = util.huber_loss(weighted_td_errors)
 
         grads = tape.gradient(loss, self.qnet.trainable_variables)
         self.optimizer.apply_gradients(
             zip(grads, self.qnet.trainable_variables))
+
+        td_errors = td_errors.numpy().flatten()
+        self.replay_buffer.update_priority(indices, td_errors)
 
         return loss
 
@@ -164,7 +163,7 @@ class DQNAgent:
 
         if checkpoint_path:
             env = gym.make(self.env_name)
-            frame = preprocess_frame(env.reset())
+            frame = util.preprocess_frame(env.reset())
             frames = collections.deque(
                 [frame] * self.n_frames, maxlen=self.n_frames)
 
@@ -187,7 +186,7 @@ class DQNAgent:
         steps = []
         for _ in range(n_testplay):
 
-            frame = preprocess_frame(env.reset())
+            frame = util.preprocess_frame(env.reset())
             frames = collections.deque(
                 [frame] * self.n_frames, maxlen=self.n_frames)
 
@@ -197,9 +196,9 @@ class DQNAgent:
 
             while not done:
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
-                action = self.qnet.sample_action(state, epsilon=0.05)
+                action = self.qnet.sample_action(state)
                 next_frame, reward, done, _ = env.step(action)
-                frames.append(preprocess_frame(next_frame))
+                frames.append(util.preprocess_frame(next_frame))
 
                 episode_rewards += reward
                 episode_steps += 1
@@ -214,7 +213,7 @@ class DQNAgent:
 
 
 def main():
-    agent = DQNAgent()
+    agent = RainbowAgent()
     agent.learn(n_episodes=5001)
     agent.qnet.save_weights("checkpoints/qnet_fin")
     agent.test_play(n_testplay=5,
