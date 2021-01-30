@@ -17,25 +17,34 @@ class NoisyDense(tf.keras.layers.Layer):
         self.activation = tf.keras.activations.get(activation)
 
     def build(self, input_shape):
+
+        p = input_shape[-1]
+
         self.w_mu = self.add_weight(
             name="w_mu",
             shape=(int(input_shape[-1]), self.units),
-            initializer=self.initializer, trainable=self.trainable)
+            initializer=tf.keras.initializers.RandomUniform(
+                -1. / np.sqrt(p), 1. / np.sqrt(p)),
+            trainable=self.trainable)
 
         self.w_sigma = self.add_weight(
             name="w_sigma",
             shape=(int(input_shape[-1]), self.units),
-            initializer=self.initializer, trainable=self.trainable)
+            initializer=tf.keras.kernel_initializer.Constant(0.5 / np.sqrt(p)),
+            trainable=self.trainable)
 
         self.b_mu = self.add_weight(
             name="b_mu",
             shape=(self.units,),
-            initializer=self.initializer, trainable=self.trainable)
+            initializer=tf.keras.initializers.RandomUniform(
+                -1. / np.sqrt(p), 1. / np.sqrt(p)),
+            trainable=self.trainable)
 
         self.b_sigma = self.add_weight(
             name="b_sigma",
             shape=(self.units,),
-            initializer=self.initializer, trainable=self.trainable)
+            initializer=tf.keras.kernel_initializer.Constant(0.5 / np.sqrt(p)),
+            trainable=self.trainable)
 
     @tf.function
     def call(self, inputs, noise=True):
