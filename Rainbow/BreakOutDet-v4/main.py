@@ -7,7 +7,7 @@ import tensorflow as tf
 from tensorflow.keras.optimizers import Adam
 import collections
 
-from model import NoisyDuelingQNetwork
+from model import NoisyDuelingQNetwork, DuelingQNetwork
 from buffer import NstepPrioritizedReplayBuffer
 import util
 
@@ -18,6 +18,7 @@ class RainbowAgent:
                  gamma=0.99,
                  batch_size=32,
                  lr=0.00025,
+                 reward_clip=True,
                  update_period=4,
                  target_update_period=10000,
                  n_frames=4, alpha=0.6, beta=0.4, total_steps=2500000,
@@ -45,13 +46,12 @@ class RainbowAgent:
 
         self.optimizer = Adam(lr=lr, epsilon=0.01/self.batch_size)
 
-        self.use_reward_clipping = True
-
         self.nstep_return = nstep_return
 
         self.replay_buffer = NstepPrioritizedReplayBuffer(
             max_len=buffer_size, gamma=self.gamma,
-            alpha=alpha, beta=beta, nstep_return=nstep_return)
+            alpha=alpha, beta=beta, nstep_return=nstep_return,
+            reward_clip=reward_clip)
 
         self.steps = 0
 
@@ -126,9 +126,6 @@ class RainbowAgent:
 
         #: ミニバッチの作成
         indices, weights, (states, actions, rewards, next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size, self.steps)
-
-        if self.use_reward_clipping:
-            rewards = np.clip(rewards, -1, 1)
 
         #: Double DQN
         next_actions, _ = self.qnet.sample_actions(next_states)

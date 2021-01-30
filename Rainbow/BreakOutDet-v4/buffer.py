@@ -25,7 +25,7 @@ class NstepPrioritizedReplayBuffer:
 
     def __init__(self, max_len, gamma,
                  nstep_return=3, alpha=0.6, beta=0.4,
-                 total_steps=2500000, compress=True):
+                 total_steps=2500000, reward_clip=True, compress=True):
 
         self.max_len = max_len
 
@@ -47,6 +47,8 @@ class NstepPrioritizedReplayBuffer:
         self.epsilon = 0.01
 
         self.max_priority = 1.0
+
+        self.reward_clip = reward_clip
 
         self.compress = compress
 
@@ -71,6 +73,7 @@ class NstepPrioritizedReplayBuffer:
             has_done = False
             for i, onestep_exp in enumerate(self.temp_buffer):
                 reward, done = onestep_exp.reward, onestep_exp.done
+                reward = np.clip(reward, -1, 1) if self.reward_clip else reward
                 nstep_return += self.gamma ** i * (1 - done) * reward
                 if done:
                     has_done = True
@@ -154,7 +157,7 @@ class NstepPrioritizedReplayBuffer:
 class PrioritizedReplayBuffer:
 
     def __init__(self, max_len, alpha=0.6, beta=0.4,
-                 total_steps=2500000, compress=True):
+                 total_steps=2500000, reward_clip=True, compress=True):
 
         self.max_len = max_len
 
@@ -170,6 +173,8 @@ class PrioritizedReplayBuffer:
         self.epsilon = 0.01
 
         self.max_priority = 1.0
+
+        self.reward_clip = reward_clip
 
         self.compress = compress
 
@@ -187,6 +192,8 @@ class PrioritizedReplayBuffer:
         assert len(self.buffer) == len(self.priorities)
 
         exp = Experience(*transition)
+
+        exp.reward = np.clip(exp.reward, -1, 1) if self.reward_clip else exp.reward
 
         if self.compress:
             exp = zlib.compress(pickle.dumps(exp))
@@ -259,13 +266,15 @@ class PrioritizedReplayBuffer:
 
 class ReplayBuffer:
 
-    def __init__(self, max_len, compress=True):
+    def __init__(self, max_len, reward_clip=True, compress=True):
 
         self.max_len = max_len
 
         self.buffer = []
 
         self.compress = compress
+
+        self.reward_clip = reward_clip
 
         self.count = 0
 
@@ -278,6 +287,8 @@ class ReplayBuffer:
         """
 
         exp = Experience(*transition)
+
+        exp.reward = np.clip(exp.reward, -1, 1) if self.reward_clip else exp.reward
 
         if self.compress:
             exp = zlib.compress(pickle.dumps(exp))
