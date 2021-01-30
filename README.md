@@ -4,7 +4,7 @@ Deep reinforcement learning examples with tensorflow2
 
 ## Requirements
 
-`python==3.7`, `tensorflow>=2.1` , `ray>=1.*`
+`python==3.7`, `tensorflow==2.3`, `tensorflow-probablity==0.11.1`, `ray>=1.1.0`
 
 <br>
 

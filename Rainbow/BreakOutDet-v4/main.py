@@ -8,7 +8,7 @@ from tensorflow.keras.optimizers import Adam
 import collections
 
 from model import NoisyDuelingQNetwork
-from buffer import Experience, NstepPrioritizedReplayBuffer
+from buffer import NstepPrioritizedReplayBuffer
 import util
 
 
@@ -119,7 +119,7 @@ class RainbowAgent:
                     tf.summary.scalar("test_score", test_scores[0], step=self.steps)
                     tf.summary.scalar("test_step", test_steps[0], step=self.steps)
 
-            if episode % 1000 == 0:
+            if episode % 500 == 0:
                 self.qnet.save_weights("checkpoints/qnet")
 
     def update_network(self):

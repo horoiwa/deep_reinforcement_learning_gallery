@@ -18,18 +18,22 @@ class NoisyDense(tf.keras.layers.Layer):
 
     def build(self, input_shape):
         self.w_mu = self.add_weight(
+            name="w_mu",
             shape=(int(input_shape[-1]), self.units),
             initializer=self.initializer, trainable=self.trainable)
 
         self.w_sigma = self.add_weight(
+            name="w_sigma",
             shape=(int(input_shape[-1]), self.units),
             initializer=self.initializer, trainable=self.trainable)
 
         self.b_mu = self.add_weight(
+            name="b_mu",
             shape=(self.units,),
             initializer=self.initializer, trainable=self.trainable)
 
         self.b_sigma = self.add_weight(
+            name="b_sigma",
             shape=(self.units,),
             initializer=self.initializer, trainable=self.trainable)
 
@@ -82,7 +86,7 @@ class NoisyDuelingQNetwork(tf.keras.Model):
         self.dense2 = NoisyDense(512, activation="relu",
                                  kernel_initializer="he_normal")
 
-        self.advantages = NoisyDense(self.action_space, activation="relu",
+        self.advantages = NoisyDense(self.action_space,
                                      kernel_initializer="he_normal")
 
         self.qvalues = NoisyDense(self.action_space,
