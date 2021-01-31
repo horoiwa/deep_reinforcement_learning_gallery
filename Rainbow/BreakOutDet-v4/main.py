@@ -1,15 +1,15 @@
-from pathlib import Path
+import collections
 import shutil
+from pathlib import Path
 
 import gym
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.optimizers import Adam
-import collections
 
-from model import NoisyDuelingQNetwork, DuelingQNetwork
-from buffer import NstepPrioritizedReplayBuffer
 import util
+from buffer import NstepPrioritizedReplayBuffer
+from model import create_network
 
 
 class RainbowAgent:
@@ -22,7 +22,19 @@ class RainbowAgent:
                  update_period=4,
                  target_update_period=10000,
                  n_frames=4, alpha=0.6, beta=0.4, total_steps=2500000,
-                 nstep_return=3, buffer_size=1000000):
+                 nstep_return=3, buffer_size=1000000,
+                 use_noisy=False, use_priority=False, use_dueling=False,
+                 use_multistep=False, use_categorical=False):
+
+        self.use_noisy = use_noisy
+
+        self.use_priority = use_priority
+
+        self.use_dueling = use_dueling
+
+        self.use_multistep = use_multistep
+
+        self.use_categorical = use_categorical
 
         self.env_name = env_name
 
@@ -40,9 +52,11 @@ class RainbowAgent:
 
         self.action_space = env.action_space.n
 
-        self.qnet = NoisyDuelingQNetwork(self.action_space)
+        self.qnet = create_network(
+            self.action_space, use_dueling, use_categorical, use_noisy)
 
-        self.target_qnet = NoisyDuelingQNetwork(self.action_space)
+        self.target_qnet = create_network(
+            self.action_space, use_dueling, use_categorical, use_noisy)
 
         self.optimizer = Adam(lr=lr, epsilon=0.01/self.batch_size)
 
@@ -54,6 +68,22 @@ class RainbowAgent:
             reward_clip=reward_clip)
 
         self.steps = 0
+
+    def __post_init__(self):
+        env = gym.make(self.env_name)
+        frame = env.step(np.random.choice(np.arange(env.action_space.n)))
+        frame = util.preprocess_frame(frame)
+        state = np.array([frame] * self.n_frames)
+        self.qnet(state)
+        self.target_qnet(state)
+        self.target_qnet.set_weights(self.qnet.get_weights)
+
+    @property
+    def epsilon(self):
+        if self.use_noisy:
+            return 0
+        else:
+            return max(1.0 - 0.9 * self.steps / 1000000, 0.1)
 
     def learn(self, n_episodes, logdir="log"):
 
@@ -79,7 +109,7 @@ class RainbowAgent:
 
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
 
-                action = self.qnet.sample_action(state)
+                action = self.qnet.sample_action(state, self.epsilon)
 
                 next_frame, reward, done, info = env.step(action)
 
@@ -97,14 +127,21 @@ class RainbowAgent:
 
                 self.replay_buffer.push(transition)
 
-                if len(self.replay_buffer) > 50000:
+                #if len(self.replay_buffer) >= 50000:
+                if len(self.replay_buffer) >= 500:
                     if self.steps % self.update_period == 0:
                         loss = self.update_network()
                         with self.summary_writer.as_default():
-                            tf.summary.scalar("loss", loss, step=self.steps)
-                            tf.summary.scalar("buffer_size", len(self.replay_buffer), step=self.steps)
-                            tf.summary.scalar("train_score", episode_rewards, step=self.steps)
-                            tf.summary.scalar("train_steps", episode_steps, step=self.steps)
+                            tf.summary.scalar(
+                                "loss", loss, step=self.steps)
+                            tf.summary.scalar(
+                                "buffer_size", len(self.replay_buffer), step=self.steps)
+                            tf.summary.scalar(
+                                "epsilon", self.epsilon, step=self.steps)
+                            tf.summary.scalar(
+                                "train_score", episode_rewards, step=self.steps)
+                            tf.summary.scalar(
+                                "train_steps", episode_steps, step=self.steps)
 
                     if self.steps % self.target_update_period == 0:
                         self.target_qnet.set_weights(self.qnet.get_weights())
@@ -196,7 +233,8 @@ class RainbowAgent:
 
             while not done:
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
-                action = self.qnet.sample_action(state)
+                epsilon = 0 if self.use_noisy else 0.05
+                action = self.qnet.sample_action(state, epsilon)
                 next_frame, reward, done, _ = env.step(action)
                 frames.append(util.preprocess_frame(next_frame))
 
@@ -213,7 +251,9 @@ class RainbowAgent:
 
 
 def main():
-    agent = RainbowAgent()
+    agent = RainbowAgent(use_noisy=False, use_dueling=False,
+                         use_priority=False, use_multistep=False,
+                         use_categorical=True)
     agent.learn(n_episodes=5001)
     agent.qnet.save_weights("checkpoints/qnet_fin")
     agent.test_play(n_testplay=5,

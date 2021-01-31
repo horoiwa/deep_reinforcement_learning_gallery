@@ -7,6 +7,10 @@ import pickle
 import zlib
 
 
+def create_replaybuffer():
+    return ReplayBuffer()
+
+
 @dataclass
 class Experience:
 
