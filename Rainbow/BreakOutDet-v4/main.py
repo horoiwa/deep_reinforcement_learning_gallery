@@ -97,7 +97,7 @@ class RainbowAgent:
 
                 self.replay_buffer.push(transition)
 
-                if len(self.replay_buffer) > 50000:
+                if len(self.replay_buffer) >= 50000:
                     if self.steps % self.update_period == 0:
                         loss = self.update_network()
                         with self.summary_writer.as_default():
