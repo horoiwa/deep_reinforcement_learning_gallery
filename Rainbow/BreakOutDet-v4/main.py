@@ -1,15 +1,15 @@
-from pathlib import Path
+import collections
 import shutil
+from pathlib import Path
 
 import gym
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.optimizers import Adam
-import collections
 
-from model import NoisyDuelingQNetwork, DuelingQNetwork
-from buffer import NstepPrioritizedReplayBuffer
 import util
+from buffer import NstepPrioritizedReplayBuffer
+from model import DuelingQNetwork, NoisyDuelingQNetwork, QNetwork
 
 
 class RainbowAgent:
@@ -22,7 +22,15 @@ class RainbowAgent:
                  update_period=4,
                  target_update_period=10000,
                  n_frames=4, alpha=0.6, beta=0.4, total_steps=2500000,
-                 nstep_return=3, use_noizy=False, buffer_size=1000000):
+                 nstep_return=3, buffer_size=1000000,
+                 use_noizy=False, use_priority=False, use_dueling=False,
+                 use_multistep=False, use_categorical=False):
+
+        self.use_noizy = use_noizy
+        self.use_priority = use_priority
+        self.use_dueling = use_dueling
+        self.use_multistep = use_multistep
+        self.use_categorical = use_categorical
 
         self.env_name = env_name
 
@@ -40,14 +48,27 @@ class RainbowAgent:
 
         self.action_space = env.action_space.n
 
-        self.use_noizy = use_noizy
-
-        if use_noizy:
+        if use_dueling and use_noizy and use_categorical:
             self.qnet = NoisyDuelingQNetwork(self.action_space)
             self.target_qnet = NoisyDuelingQNetwork(self.action_space)
+        elif use_dueling and use_noizy:
+            pass
+        elif use_dueling and use_noizy:
+            pass
+        elif use_dueling and use_categorical:
+            pass
+        elif use_noizy and use_categorical:
+            pass
+        elif use_dueling:
+            self.qnet = QNetwork(self.action_space)
+            self.target_qnet = QNetwork(self.action_space)
+        elif use_noizy:
+            pass
+        elif use_categorical:
+            pass
         else:
-            self.qnet = DuelingQNetwork(self.action_space)
-            self.target_qnet = DuelingQNetwork(self.action_space)
+            self.qnet = QNetwork(self.action_space)
+            self.target_qnet = QNetwork(self.action_space)
 
         self.optimizer = Adam(lr=lr, epsilon=0.01/self.batch_size)
 
@@ -227,7 +248,9 @@ class RainbowAgent:
 
 
 def main():
-    agent = RainbowAgent()
+    agent = RainbowAgent(use_noizy=False, use_dueling=True,
+                         use_priority=False, use_multistep=False,
+                         use_categorical=False)
     agent.learn(n_episodes=5001)
     agent.qnet.save_weights("checkpoints/qnet_fin")
     agent.test_play(n_testplay=5,
