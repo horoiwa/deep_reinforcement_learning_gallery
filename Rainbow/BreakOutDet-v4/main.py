@@ -85,7 +85,7 @@ class RainbowAgent:
         elif self.use_priority:
             self.replay_buffer = PrioritizedReplayBuffer(max_len=buffer_size)
         else:
-            self.replay_buffer = ReplayBuffer(max_len=self.buffer_size)
+            self.replay_buffer = ReplayBuffer(max_len=buffer_size)
 
         self.steps = 0
 
@@ -153,7 +153,7 @@ class RainbowAgent:
                         if not self.use_categorical:
                             loss = self.update_network()
                         else:
-                            loss = self.update_network_categorical()
+                            loss = self.update_categorical_network()
 
                         with self.summary_writer.as_default():
                             tf.summary.scalar(
@@ -186,7 +186,10 @@ class RainbowAgent:
     def update_network(self):
 
         #: ミニバッチの作成
-        indices, weights, (states, actions, rewards, next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size, self.steps)
+        if self.use_priority:
+            indices, weights, (states, actions, rewards, next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size, self.steps)
+        else:
+            states, actions, rewards, next_states, dones = self.replay_buffer.get_minibatch(self.batch_size)
 
         #: Double DQN
         next_actions, _ = self.qnet.sample_actions(next_states)
@@ -197,7 +200,7 @@ class RainbowAgent:
             next_qvalues * next_actions_onehot, axis=1, keepdims=True)
 
         target_q = rewards + self.gamma ** (self.nstep_return) * (1 - dones) * max_next_qvalues
-        import pdb; pdb.set_trace()
+
         with tf.GradientTape() as tape:
 
             qvalues = self.qnet(states)
@@ -206,25 +209,30 @@ class RainbowAgent:
             q = tf.reduce_sum(
                 qvalues * actions_onehot, axis=1, keepdims=True)
             td_errors = target_q - q
-            weighted_td_errors = weights * td_errors
-            loss = util.huber_loss(weighted_td_errors)
+
+            if self.use_priority:
+                weighted_td_errors = weights * td_errors
+                loss = util.huber_loss(weighted_td_errors)
+            else:
+                loss = util.huber_loss(td_errors)
 
         grads = tape.gradient(loss, self.qnet.trainable_variables)
         self.optimizer.apply_gradients(
             zip(grads, self.qnet.trainable_variables))
 
         #: update priority of experiences
-        td_errors = td_errors.numpy().flatten()
-        self.replay_buffer.update_priority(indices, td_errors)
+        if self.use_priority:
+            td_errors = td_errors.numpy().flatten()
+            self.replay_buffer.update_priority(indices, td_errors)
 
         return loss
 
-    def update_network_categorical(self):
+    def update_categorical_network(self):
         #: ミニバッチの作成
         if self.use_priority:
             indices, weights, (states, actions, rewards, next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size, self.steps)
         else:
-            states, actions, rewards, next_states, dones = self.replay_buffer.get_minibatch(self.batch_size, self.steps)
+            states, actions, rewards, next_states, dones = self.replay_buffer.get_minibatch(self.batch_size)
 
         next_actions, next_probs = self.target_qnet.sample_actions(next_states)
 
@@ -244,8 +252,12 @@ class RainbowAgent:
             dists = tf.clip_by_value(dists, 1e-6, 1.0)
 
             loss = tf.reduce_sum(-1 * target_dists * tf.math.log(dists), axis=1, keepdims=True)
-            weighted_loss = weights * loss
-            loss = tf.reduce_mean(weighted_loss)
+
+            if self.use_priority:
+                weighted_loss = weights * loss
+                loss = tf.reduce_mean(weighted_loss)
+            else:
+                loss = tf.reduce_mean(loss)
 
         grads = tape.gradient(loss, self.qnet.trainable_variables)
         self.optimizer.apply_gradients(
@@ -376,7 +388,7 @@ class RainbowAgent:
 def main():
     agent = RainbowAgent(use_noisy=False, use_dueling=False,
                          use_priority=False, use_multistep=False,
-                         use_categorical=True)
+                         use_categorical=False)
     agent.learn(n_episodes=5001)
     agent.qnet.save_weights("checkpoints/qnet_fin")
     agent.test_play(n_testplay=5,
