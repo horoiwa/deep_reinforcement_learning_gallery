@@ -8,7 +8,7 @@ import tensorflow as tf
 from tensorflow.keras.optimizers import Adam
 
 import util
-from buffer import NstepPrioritizedReplayBuffer
+from buffer import NstepPrioritizedReplayBuffer, PrioritizedReplayBuffer, ReplayBuffer
 from model import create_network
 
 
@@ -77,10 +77,15 @@ class RainbowAgent:
 
         self.nstep_return = nstep_return
 
-        self.replay_buffer = NstepPrioritizedReplayBuffer(
-            max_len=buffer_size, gamma=self.gamma,
-            alpha=alpha, beta=beta, nstep_return=nstep_return,
-            reward_clip=reward_clip)
+        if use_priority and use_multistep:
+            self.replay_buffer = NstepPrioritizedReplayBuffer(
+                max_len=buffer_size, gamma=self.gamma,
+                alpha=alpha, beta=beta, nstep_return=nstep_return,
+                reward_clip=reward_clip)
+        elif self.use_priority:
+            self.replay_buffer = PrioritizedReplayBuffer(max_len=buffer_size)
+        else:
+            self.replay_buffer = ReplayBuffer(max_len=self.buffer_size)
 
         self.steps = 0
 
@@ -237,17 +242,17 @@ class RainbowAgent:
 
             #: クリップしないとlogとったときに勾配爆発することがある
             dists = tf.clip_by_value(dists, 1e-6, 1.0)
-            errors = -1 * target_dists * tf.math.log(dists)
 
-            loss = tf.reduce_sum(errors, axis=1, keepdims=True)
-            loss = tf.reduce_mean(loss)
+            loss = tf.reduce_sum(-1 * target_dists * tf.math.log(dists), axis=1, keepdims=True)
+            weighted_loss = weights * loss
+            loss = tf.reduce_mean(weighted_loss)
 
         grads = tape.gradient(loss, self.qnet.trainable_variables)
         self.optimizer.apply_gradients(
             zip(grads, self.qnet.trainable_variables))
 
         if self.use_priority:
-            errors = errors.numpy().flatten()
+            errors = weighted_loss.numpy().flatten()
             self.replay_buffer.update_priority(indices, errors)
 
         return loss
