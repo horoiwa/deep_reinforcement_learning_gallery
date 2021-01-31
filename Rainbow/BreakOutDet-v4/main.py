@@ -146,7 +146,11 @@ class RainbowAgent:
                 #if len(self.replay_buffer) >= 50000:
                 if len(self.replay_buffer) >= 500:
                     if self.steps % self.update_period == 0:
-                        loss = self.update_network()
+                        if not self.use_categorical:
+                            loss = self.update_network()
+                        else:
+                            loss = self.update_network_categorical()
+
                         with self.summary_writer.as_default():
                             tf.summary.scalar(
                                 "loss", loss, step=self.steps)
@@ -210,6 +214,99 @@ class RainbowAgent:
         self.replay_buffer.update_priority(indices, td_errors)
 
         return loss
+
+    def update_network_categorical(self):
+        #: ミニバッチの作成
+        (states, actions, rewards,
+         next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size, self.steps)
+
+        next_actions, next_probs = self.target_qnet.sample_actions(next_states)
+
+        #: 選択されたactionの確率分布だけ抽出する
+        onehot_mask = self.create_mask(next_actions)
+        next_dists = tf.reduce_sum(next_probs * onehot_mask, axis=1).numpy()
+
+        #: 分布版ベルマンオペレータの適用
+        target_dists = self.shift_and_projection(rewards, dones, next_dists)
+
+        onehot_mask = self.create_mask(actions)
+        with tf.GradientTape() as tape:
+            probs = self.qnet(states)
+
+            dists = tf.reduce_sum(probs * onehot_mask, axis=1)
+            #: クリップしないとlogとったときに勾配爆発することがある
+            dists = tf.clip_by_value(dists, 1e-6, 1.0)
+
+            loss = tf.reduce_sum(
+                -1 * target_dists * tf.math.log(dists), axis=1, keepdims=True)
+            loss = tf.reduce_mean(loss)
+
+        grads = tape.gradient(loss, self.qnet.trainable_variables)
+        self.optimizer.apply_gradients(
+            zip(grads, self.qnet.trainable_variables))
+
+        return loss
+
+    def shift_and_projection(self, rewards, dones, next_dists):
+
+        target_dists = np.zeros((self.batch_size, self.n_atoms))
+
+        for j in range(self.n_atoms):
+
+            tZ_j = np.minimum(self.Vmax, np.maximum(self.Vmin, rewards + self.gamma * self.Z[j]))
+            bj = (tZ_j - self.Vmin) / self.delta_z
+
+            lower_bj = np.floor(bj).astype(np.int8)
+            upper_bj = np.ceil(bj).astype(np.int8)
+
+            eq_mask = lower_bj == upper_bj
+            neq_mask = lower_bj != upper_bj
+
+            lower_probs = 1 - (bj - lower_bj)
+            upper_probs = 1 - (upper_bj - bj)
+
+            next_dist = next_dists[:, [j]]
+            indices = np.arange(self.batch_size).reshape(-1, 1)
+
+            target_dists[indices[neq_mask], lower_bj[neq_mask]] += (lower_probs * next_dist)[neq_mask]
+            target_dists[indices[neq_mask], upper_bj[neq_mask]] += (upper_probs * next_dist)[neq_mask]
+
+            target_dists[indices[eq_mask], lower_bj[eq_mask]] += (0.5 * next_dist)[eq_mask]
+            target_dists[indices[eq_mask], upper_bj[eq_mask]] += (0.5 * next_dist)[eq_mask]
+
+        """ 2. doneへの対処
+            doneのときは TZ(t) = R(t)
+        """
+        for batch_idx in range(self.batch_size):
+
+            if not dones[batch_idx]:
+                continue
+            else:
+                target_dists[batch_idx, :] = 0
+                tZ = np.minimum(self.Vmax, np.maximum(self.Vmin, rewards[batch_idx]))
+                bj = (tZ - self.Vmin) / self.delta_z
+
+                lower_bj = np.floor(bj).astype(np.int32)
+                upper_bj = np.ceil(bj).astype(np.int32)
+
+                if lower_bj == upper_bj:
+                    target_dists[batch_idx, lower_bj] += 1.0
+                else:
+                    target_dists[batch_idx, lower_bj] += 1 - (bj - lower_bj)
+                    target_dists[batch_idx, upper_bj] += 1 - (upper_bj - bj)
+
+        return target_dists
+
+    def create_mask(self, actions):
+
+        mask = np.ones((self.batch_size, self.action_space, self.n_atoms))
+        actions_onehot = tf.one_hot(
+            tf.cast(actions, tf.int32), self.action_space, axis=1)
+
+        for idx in range(self.batch_size):
+            mask[idx, ...] = mask[idx, ...] * actions_onehot[idx, ...]
+
+        return mask
 
     def test_play(self, n_testplay=1, monitor_dir=None,
                   checkpoint_path=None):
