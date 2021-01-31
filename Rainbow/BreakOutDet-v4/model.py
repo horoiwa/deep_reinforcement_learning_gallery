@@ -120,7 +120,7 @@ class NoisyDuelingQNetwork(tf.keras.Model):
 
         return q_values
 
-    def sample_action(self, epsilon):
+    def sample_action(self, x, epsilon=None):
 
         if (epsilon is None) or (np.random.random() > epsilon):
             selected_actions, _ = self.sample_actions(x)
