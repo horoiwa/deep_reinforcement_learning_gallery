@@ -120,9 +120,14 @@ class NoisyDuelingQNetwork(tf.keras.Model):
 
         return q_values
 
-    def sample_action(self, x):
-        selected_actions, _ = self.sample_actions(x)
-        selected_action = selected_actions.numpy()[0]
+    def sample_action(self, epsilon):
+
+        if (epsilon is None) or (np.random.random() > epsilon):
+            selected_actions, _ = self.sample_actions(x)
+            selected_action = selected_actions.numpy()[0]
+        else:
+            selected_action = np.random.choice(self.action_space)
+
         return selected_action
 
     def sample_actions(self, x):
@@ -155,7 +160,7 @@ class DuelingQNetwork(tf.keras.Model):
         self.dense2 = kl.Dense(512, activation="relu",
                                kernel_initializer="he_normal")
 
-        self.advanteges = kl.Dense(self.action_space, activation="relu",
+        self.advantages = kl.Dense(self.action_space, activation="relu",
                                    kernel_initializer="he_normal")
 
         self.qvalues = kl.Dense(self.action_space,

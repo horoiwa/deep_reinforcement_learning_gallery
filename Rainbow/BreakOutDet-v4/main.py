@@ -22,7 +22,7 @@ class RainbowAgent:
                  update_period=4,
                  target_update_period=10000,
                  n_frames=4, alpha=0.6, beta=0.4, total_steps=2500000,
-                 nstep_return=3, buffer_size=1000000):
+                 nstep_return=3, use_noizy=False, buffer_size=1000000):
 
         self.env_name = env_name
 
@@ -40,9 +40,14 @@ class RainbowAgent:
 
         self.action_space = env.action_space.n
 
-        self.qnet = NoisyDuelingQNetwork(self.action_space)
+        self.use_noizy = use_noizy
 
-        self.target_qnet = NoisyDuelingQNetwork(self.action_space)
+        if use_noizy:
+            self.qnet = NoisyDuelingQNetwork(self.action_space)
+            self.target_qnet = NoisyDuelingQNetwork(self.action_space)
+        else:
+            self.qnet = DuelingQNetwork(self.action_space)
+            self.target_qnet = DuelingQNetwork(self.action_space)
 
         self.optimizer = Adam(lr=lr, epsilon=0.01/self.batch_size)
 
@@ -54,6 +59,13 @@ class RainbowAgent:
             reward_clip=reward_clip)
 
         self.steps = 0
+
+    @property
+    def epsilon(self):
+        if self.use_noizy:
+            return None
+        else:
+            return max(1.0 - 0.9 * self.steps / 1000000, 0.1)
 
     def learn(self, n_episodes, logdir="log"):
 
@@ -79,7 +91,7 @@ class RainbowAgent:
 
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
 
-                action = self.qnet.sample_action(state)
+                action = self.qnet.sample_action(state, self.epsilon)
 
                 next_frame, reward, done, info = env.step(action)
 
@@ -103,6 +115,7 @@ class RainbowAgent:
                         with self.summary_writer.as_default():
                             tf.summary.scalar("loss", loss, step=self.steps)
                             tf.summary.scalar("buffer_size", len(self.replay_buffer), step=self.steps)
+                            tf.summary.scalar("epsilon", self.epsilon, step=self.steps)
                             tf.summary.scalar("train_score", episode_rewards, step=self.steps)
                             tf.summary.scalar("train_steps", episode_steps, step=self.steps)
 
@@ -196,7 +209,8 @@ class RainbowAgent:
 
             while not done:
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
-                action = self.qnet.sample_action(state)
+                epsilon = None if self.use_noizy else 0.05
+                action = self.qnet.sample_action(state, epsilon)
                 next_frame, reward, done, _ = env.step(action)
                 frames.append(util.preprocess_frame(next_frame))
 
