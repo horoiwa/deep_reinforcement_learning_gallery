@@ -49,7 +49,6 @@ class RainbowAgent:
         self.target_update_period = target_update_period
 
         if use_categorical:
-
             self.n_atoms = 51
 
             self.Vmin, self.Vmax = -10, 10
@@ -217,8 +216,10 @@ class RainbowAgent:
 
     def update_network_categorical(self):
         #: ミニバッチの作成
-        (states, actions, rewards,
-         next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size, self.steps)
+        if self.use_priority:
+            indices, weights, (states, actions, rewards, next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size, self.steps)
+        else:
+            states, actions, rewards, next_states, dones = self.replay_buffer.get_minibatch(self.batch_size, self.steps)
 
         next_actions, next_probs = self.target_qnet.sample_actions(next_states)
 
@@ -232,18 +233,22 @@ class RainbowAgent:
         onehot_mask = self.create_mask(actions)
         with tf.GradientTape() as tape:
             probs = self.qnet(states)
-
             dists = tf.reduce_sum(probs * onehot_mask, axis=1)
+
             #: クリップしないとlogとったときに勾配爆発することがある
             dists = tf.clip_by_value(dists, 1e-6, 1.0)
+            errors = -1 * target_dists * tf.math.log(dists)
 
-            loss = tf.reduce_sum(
-                -1 * target_dists * tf.math.log(dists), axis=1, keepdims=True)
+            loss = tf.reduce_sum(errors, axis=1, keepdims=True)
             loss = tf.reduce_mean(loss)
 
         grads = tape.gradient(loss, self.qnet.trainable_variables)
         self.optimizer.apply_gradients(
             zip(grads, self.qnet.trainable_variables))
+
+        if self.use_priority:
+            errors = errors.numpy().flatten()
+            self.replay_buffer.update_priority(indices, errors)
 
         return loss
 
