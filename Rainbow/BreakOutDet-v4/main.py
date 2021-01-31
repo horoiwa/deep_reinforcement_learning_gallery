@@ -48,15 +48,31 @@ class RainbowAgent:
 
         self.target_update_period = target_update_period
 
+        if use_categorical:
+
+            self.n_atoms = 51
+
+            self.Vmin, self.Vmax = -10, 10
+
+            self.delta_z = (self.Vmax - self.Vmin) / (self.n_atoms - 1)
+
+            self.Z = np.linspace(self.Vmin, self.Vmax, self.n_atoms)
+        else:
+            self.n_atoms = None
+
+            self.Z = None
+
         env = gym.make(self.env_name)
 
         self.action_space = env.action_space.n
 
         self.qnet = create_network(
-            self.action_space, use_dueling, use_categorical, use_noisy)
+            self.action_space, use_dueling, use_categorical, use_noisy,
+            n_atoms=self.n_atoms, Z=self.Z)
 
         self.target_qnet = create_network(
-            self.action_space, use_dueling, use_categorical, use_noisy)
+            self.action_space, use_dueling, use_categorical, use_noisy,
+            n_atoms=self.n_atoms, Z=self.Z)
 
         self.optimizer = Adam(lr=lr, epsilon=0.01/self.batch_size)
 
@@ -173,7 +189,7 @@ class RainbowAgent:
             next_qvalues * next_actions_onehot, axis=1, keepdims=True)
 
         target_q = rewards + self.gamma ** (self.nstep_return) * (1 - dones) * max_next_qvalues
-
+        import pdb; pdb.set_trace()
         with tf.GradientTape() as tape:
 
             qvalues = self.qnet(states)

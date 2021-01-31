@@ -4,9 +4,12 @@ import tensorflow.keras.layers as kl
 import tensorflow_probability as tfp
 
 
-def create_network(action_space, use_dueling, use_noisy, use_categorical):
+def create_network(action_space, use_dueling, use_categorical, use_noisy,
+                   n_atoms=None, Z=None):
     if use_dueling and use_noisy and use_categorical:
         pass
+    elif use_categorical:
+        return CategoricalQNetwork(action_space, n_atoms=n_atoms, Z=Z)
     elif use_noisy:
         return NoisyQNetwork(action_space)
     elif use_dueling:
@@ -213,17 +216,16 @@ class NoisyQNetwork(tf.keras.Model, SamplingMixin):
         return qvalues
 
 
-class CategoricalQNet(tf.keras.Model):
+class CategoricalQNetwork(tf.keras.Model):
 
     def __init__(self, actions_space, n_atoms, Z):
 
-        super(CategoricalQNet, self).__init__()
+        super(CategoricalQNetwork, self).__init__()
 
         self.action_space = actions_space
 
         self.n_atoms = n_atoms
 
-        #: 各ビンのしきい値(support)
         self.Z = Z
 
         self.conv1 = kl.Conv2D(32, 8, strides=4, activation="relu",
