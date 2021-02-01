@@ -4,12 +4,14 @@ import tensorflow.keras.layers as kl
 import tensorflow_probability as tfp
 
 
-def create_network(action_space, use_dueling, use_categorical, use_noisy,
-                   n_atoms=None, Z=None):
+def create_network(action_space, use_dueling,
+                   use_categorical, use_noisy,
+                   Vmin, Vmax, n_atoms):
     if use_dueling and use_noisy and use_categorical:
         pass
     elif use_categorical:
-        return CategoricalQNetwork(action_space, n_atoms=n_atoms, Z=Z)
+        return CategoricalQNetwork(
+            action_space, Vmin=Vmin, Vmax=Vmax, n_atoms=n_atoms)
     elif use_noisy:
         return NoisyQNetwork(action_space)
     elif use_dueling:
@@ -162,7 +164,6 @@ class DuelingQNetwork(tf.keras.Model, SamplingMixin):
         self.advantages = kl.Dense(self.action_space,
                                    kernel_initializer="he_normal")
 
-    @tf.function
     def call(self, x):
 
         x = self.conv1(x)
@@ -215,7 +216,7 @@ class NoisyQNetwork(tf.keras.Model, SamplingMixin):
 
 class CategoricalQNetwork(tf.keras.Model):
 
-    def __init__(self, actions_space, n_atoms, Z):
+    def __init__(self, actions_space, Vmin, Vmax, n_atoms):
 
         super(CategoricalQNetwork, self).__init__()
 
@@ -223,7 +224,9 @@ class CategoricalQNetwork(tf.keras.Model):
 
         self.n_atoms = n_atoms
 
-        self.Z = Z
+        self.Vmin, self.Vmax = Vmin, Vmax
+
+        self.Z = np.linspace(self.Vmin, self.Vmax, self.n_atoms)
 
         self.conv1 = kl.Conv2D(32, 8, strides=4, activation="relu",
                                kernel_initializer="he_normal")
@@ -274,4 +277,16 @@ class CategoricalQNetwork(tf.keras.Model):
 
 
 if __name__ == "__main__":
-    pass
+    import util
+    import gym
+
+    env = gym.make("BreakoutDeterministic-v4")
+    frame = util.preprocess_frame(env.reset())
+    frames = [frame] * 4
+    state = np.stack(frames, axis=2)[np.newaxis, ...]
+
+    action_space = 4
+    #model = DuelingQNetwork(action_space)
+    model = CategoricalQNetwork(action_space, -10, 10, 51)
+    out = model(state)
+    print(out)

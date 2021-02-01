@@ -8,8 +8,8 @@ import tensorflow as tf
 from tensorflow.keras.optimizers import Adam
 
 import util
-from buffer import NstepPrioritizedReplayBuffer, PrioritizedReplayBuffer, ReplayBuffer
-from model import create_network
+from buffers import create_replaybuffer
+from models import create_network
 
 
 class RainbowAgent:
@@ -22,7 +22,8 @@ class RainbowAgent:
                  update_period=4,
                  target_update_period=10000,
                  n_frames=4, alpha=0.6, beta=0.4, total_steps=2500000,
-                 nstep_return=3, buffer_size=1000000,
+                 buffer_size=1000000, nstep_return=3,
+                 Vmin=-10, Vmax=10, n_atoms=51,
                  use_noisy=False, use_priority=False, use_dueling=False,
                  use_multistep=False, use_categorical=False):
 
@@ -48,18 +49,17 @@ class RainbowAgent:
 
         self.target_update_period = target_update_period
 
-        if use_categorical:
-            self.n_atoms = 51
+        #: Categorical DQN
+        self.n_atoms = n_atoms
 
-            self.Vmin, self.Vmax = -10, 10
+        self.Vmin, self.Vmax = Vmin, Vmax
 
-            self.delta_z = (self.Vmax - self.Vmin) / (self.n_atoms - 1)
+        self.delta_z = (self.Vmax - self.Vmin) / (self.n_atoms - 1)
 
-            self.Z = np.linspace(self.Vmin, self.Vmax, self.n_atoms)
-        else:
-            self.n_atoms = None
+        self.Z = np.linspace(self.Vmin, self.Vmax, self.n_atoms)
 
-            self.Z = None
+        #: Multistep-Q-learning
+        self.nstep_return = nstep_return
 
         env = gym.make(self.env_name)
 
@@ -67,25 +67,21 @@ class RainbowAgent:
 
         self.qnet = create_network(
             self.action_space, use_dueling, use_categorical, use_noisy,
-            n_atoms=self.n_atoms, Z=self.Z)
+            Vmin=self.Vmin, Vmax=self.Vmax, n_atoms=self.n_atoms)
 
         self.target_qnet = create_network(
             self.action_space, use_dueling, use_categorical, use_noisy,
-            n_atoms=self.n_atoms, Z=self.Z)
+            Vmin=self.Vmin, Vmax=self.Vmax, n_atoms=self.n_atoms)
 
         self.optimizer = Adam(lr=lr, epsilon=0.01/self.batch_size)
 
-        self.nstep_return = nstep_return
-
-        if use_priority and use_multistep:
-            self.replay_buffer = NstepPrioritizedReplayBuffer(
-                max_len=buffer_size, gamma=self.gamma,
-                alpha=alpha, beta=beta, nstep_return=nstep_return,
+        self.replay_buffer = create_replaybuffer(
+                use_priority=self.use_priority,
+                use_multistep=self.use_multistep,
+                max_len=buffer_size,
+                nstep_return=nstep_return, gamma=self.gamma,
+                alpha=alpha, beta=beta, total_steps=total_steps,
                 reward_clip=reward_clip)
-        elif self.use_priority:
-            self.replay_buffer = PrioritizedReplayBuffer(max_len=buffer_size)
-        else:
-            self.replay_buffer = ReplayBuffer(max_len=buffer_size)
 
         self.steps = 0
 
@@ -386,9 +382,9 @@ class RainbowAgent:
 
 
 def main():
-    agent = RainbowAgent(use_noisy=False, use_dueling=True,
+    agent = RainbowAgent(use_noisy=False, use_dueling=False,
                          use_priority=False, use_multistep=False,
-                         use_categorical=False)
+                         use_categorical=True)
     agent.learn(n_episodes=5001)
     agent.qnet.save_weights("checkpoints/qnet_fin")
     agent.test_play(n_testplay=5,

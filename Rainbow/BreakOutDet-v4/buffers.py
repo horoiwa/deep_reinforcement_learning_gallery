@@ -7,8 +7,18 @@ import pickle
 import zlib
 
 
-def create_replaybuffer():
-    return ReplayBuffer()
+def create_replaybuffer(use_priority, use_multistep, max_len,
+                        nstep_return, gamma,
+                        alpha, beta, total_steps, reward_clip):
+
+    if use_priority and use_multistep:
+        pass
+    elif use_priority:
+        pass
+    elif use_multistep:
+        pass
+    else:
+        return ReplayBuffer(max_len=max_len, reward_clip=reward_clip)
 
 
 @dataclass
@@ -27,9 +37,9 @@ class Experience:
 
 class NstepPrioritizedReplayBuffer:
 
-    def __init__(self, max_len, gamma,
+    def __init__(self, max_len, gamma, reward_clip,
                  nstep_return=3, alpha=0.6, beta=0.4,
-                 total_steps=2500000, reward_clip=True, compress=True):
+                 total_steps=2500000, compress=True):
 
         self.max_len = max_len
 
@@ -160,8 +170,8 @@ class NstepPrioritizedReplayBuffer:
 
 class PrioritizedReplayBuffer:
 
-    def __init__(self, max_len, alpha=0.6, beta=0.4,
-                 total_steps=2500000, reward_clip=True, compress=True):
+    def __init__(self, max_len, reward_clip, alpha=0.6, beta=0.4,
+                 total_steps=2500000, compress=True):
 
         self.max_len = max_len
 
@@ -270,7 +280,7 @@ class PrioritizedReplayBuffer:
 
 class ReplayBuffer:
 
-    def __init__(self, max_len, reward_clip=True, compress=True):
+    def __init__(self, max_len, reward_clip, compress=True):
 
         self.max_len = max_len
 
