@@ -386,7 +386,7 @@ class RainbowAgent:
 
 
 def main():
-    agent = RainbowAgent(use_noisy=False, use_dueling=False,
+    agent = RainbowAgent(use_noisy=False, use_dueling=True,
                          use_priority=False, use_multistep=False,
                          use_categorical=False)
     agent.learn(n_episodes=5001)

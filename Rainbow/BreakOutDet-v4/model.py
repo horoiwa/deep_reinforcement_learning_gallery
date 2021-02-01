@@ -153,17 +153,14 @@ class DuelingQNetwork(tf.keras.Model, SamplingMixin):
 
         self.dense1 = kl.Dense(512, activation="relu",
                                kernel_initializer="he_normal")
-        self.value = kl.Dense(1, activation="relu",
-                              kernel_initializer="he_normal")
+
+        self.value = kl.Dense(1, kernel_initializer="he_normal")
 
         self.dense2 = kl.Dense(512, activation="relu",
                                kernel_initializer="he_normal")
 
-        self.advantages = kl.Dense(self.action_space, activation="relu",
+        self.advantages = kl.Dense(self.action_space,
                                    kernel_initializer="he_normal")
-
-        self.qvalues = kl.Dense(self.action_space,
-                                kernel_initializer="he_normal")
 
     @tf.function
     def call(self, x):
@@ -179,8 +176,8 @@ class DuelingQNetwork(tf.keras.Model, SamplingMixin):
         x2 = self.dense2(x)
         advantages = self.advantages(x2)
 
-        scaled_advantages = advantages - tf.reduce_mean(advantages)
-        q_values = value + scaled_advantages
+        advantages_scaled = advantages - tf.reduce_mean(advantages)
+        q_values = value + advantages_scaled
 
         return q_values
 
@@ -274,3 +271,7 @@ class CategoricalQNetwork(tf.keras.Model):
         q_means = tf.reduce_sum(probs * self.Z, axis=2, keepdims=True)
         selected_actions = tf.argmax(q_means, axis=1)
         return selected_actions, probs
+
+
+if __name__ == "__main__":
+    pass
