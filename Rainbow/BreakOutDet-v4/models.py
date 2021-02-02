@@ -8,7 +8,14 @@ def create_network(action_space, use_dueling,
                    use_categorical, use_noisy,
                    Vmin, Vmax, n_atoms):
     if use_dueling and use_noisy and use_categorical:
-        pass
+        raise NotImplementedError()
+    elif use_dueling and use_categorical:
+        return DuelingCategoricalQNetwork(
+            action_space, Vmin=Vmin, Vmax=Vmax, n_atoms=n_atoms)
+    elif use_dueling and use_noisy:
+        raise NotImplementedError()
+    elif use_categorical and use_noisy:
+        raise NotImplementedError()
     elif use_categorical:
         return CategoricalQNetwork(
             action_space, Vmin=Vmin, Vmax=Vmax, n_atoms=n_atoms)
@@ -164,6 +171,7 @@ class DuelingQNetwork(tf.keras.Model, SamplingMixin):
         self.advantages = kl.Dense(self.action_space,
                                    kernel_initializer="he_normal")
 
+    @tf.function
     def call(self, x):
 
         x = self.conv1(x)
@@ -214,7 +222,26 @@ class NoisyQNetwork(tf.keras.Model, SamplingMixin):
         return qvalues
 
 
-class CategoricalQNetwork(tf.keras.Model):
+class CategoricalSamplingMixin:
+
+    def sample_action(self, x, epsilon=None):
+
+        if (epsilon is None) or (np.random.random() > epsilon):
+            selected_actions, _ = self.sample_actions(x)
+            selected_action = selected_actions[0][0].numpy()
+        else:
+            selected_action = np.random.choice(self.action_space)
+
+        return selected_action
+
+    def sample_actions(self, x):
+        probs = self(x)
+        q_means = tf.reduce_sum(probs * self.Z, axis=2, keepdims=True)
+        selected_actions = tf.argmax(q_means, axis=1)
+        return selected_actions, probs
+
+
+class CategoricalQNetwork(tf.keras.Model, CategoricalSamplingMixin):
 
     def __init__(self, actions_space, Vmin, Vmax, n_atoms):
 
@@ -254,26 +281,76 @@ class CategoricalQNetwork(tf.keras.Model):
         x = self.dense1(x)
 
         logits = self.logits(x)
-        logits = tf.reshape(logits, (batch_size, self.action_space, self.n_atoms))
+        logits = tf.reshape(
+            logits, (batch_size, self.action_space, self.n_atoms))
+
         probs = tf.nn.softmax(logits, axis=2)
 
         return probs
 
-    def sample_action(self, x, epsilon=None):
 
-        if (epsilon is None) or (np.random.random() > epsilon):
-            selected_actions, _ = self.sample_actions(x)
-            selected_action = selected_actions[0][0].numpy()
-        else:
-            selected_action = np.random.choice(self.action_space)
+class DuelingCategoricalQNetwork(tf.keras.Model, CategoricalSamplingMixin):
 
-        return selected_action
+    def __init__(self, actions_space, Vmin, Vmax, n_atoms):
 
-    def sample_actions(self, x):
-        probs = self(x)
-        q_means = tf.reduce_sum(probs * self.Z, axis=2, keepdims=True)
-        selected_actions = tf.argmax(q_means, axis=1)
-        return selected_actions, probs
+        super(DuelingCategoricalQNetwork, self).__init__()
+
+        self.action_space = actions_space
+
+        self.n_atoms = n_atoms
+
+        self.Vmin, self.Vmax = Vmin, Vmax
+
+        self.Z = np.linspace(self.Vmin, self.Vmax, self.n_atoms)
+
+        self.conv1 = kl.Conv2D(32, 8, strides=4, activation="relu",
+                               kernel_initializer="he_normal")
+        self.conv2 = kl.Conv2D(64, 4, strides=2, activation="relu",
+                               kernel_initializer="he_normal")
+        self.conv3 = kl.Conv2D(64, 3, strides=1, activation="relu",
+                               kernel_initializer="he_normal")
+
+        self.flatten1 = kl.Flatten()
+
+        self.dense1 = kl.Dense(512, activation="relu",
+                               kernel_initializer="he_normal")
+
+        self.dense2 = kl.Dense(512, activation="relu",
+                               kernel_initializer="he_normal")
+
+        self.value = kl.Dense(1 * self.n_atoms,
+                              kernel_initializer="he_normal")
+
+        self.advantages = kl.Dense(self.action_space * self.n_atoms,
+                                   kernel_initializer="he_normal")
+
+    @tf.function
+    def call(self, x):
+
+        batch_size = x.shape[0]
+
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.flatten1(x)
+
+        x1 = self.dense1(x)
+        value = self.value(x1)
+        value = tf.reshape(
+            value, (batch_size, 1, self.n_atoms))
+
+        x2 = self.dense2(x)
+        advantages = self.advantages(x2)
+        advantages = tf.reshape(
+            advantages, (batch_size, self.action_space, self.n_atoms))
+
+        advantages_mean = tf.reduce_mean(advantages, axis=1, keepdims=True)
+        advantages_scaled = advantages - advantages_mean
+
+        logits = value + advantages_scaled
+        probs = tf.nn.softmax(logits, axis=2)
+
+        return probs
 
 
 if __name__ == "__main__":
@@ -287,6 +364,6 @@ if __name__ == "__main__":
 
     action_space = 4
     #model = DuelingQNetwork(action_space)
-    model = CategoricalQNetwork(action_space, -10, 10, 51)
+    model = DuelingCategoricalQNetwork(action_space, -10, 10, 51)
     out = model(state)
     print(out)

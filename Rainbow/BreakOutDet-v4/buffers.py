@@ -12,7 +12,7 @@ def create_replaybuffer(use_priority, use_multistep, max_len,
                         alpha, beta, total_steps, reward_clip):
 
     if use_priority and use_multistep:
-        pass
+        raise NotImplementedError()
 
     elif use_priority:
         PrioritizedReplayBuffer(
