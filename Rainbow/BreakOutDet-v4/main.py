@@ -146,8 +146,8 @@ class RainbowAgent:
 
                 self.replay_buffer.push(transition)
 
-                #if len(self.replay_buffer) >= 50000:
-                if len(self.replay_buffer) >= 500:
+                if len(self.replay_buffer) >= 50000:
+                #if len(self.replay_buffer) >= 500:
                     if self.steps % self.update_period == 0:
 
                         if self.use_categorical:
@@ -388,7 +388,7 @@ class RainbowAgent:
 def main():
     agent = RainbowAgent(use_noisy=False, use_dueling=True,
                          use_priority=False, use_multistep=False,
-                         use_categorical=False)
+                         use_categorical=True)
     agent.learn(n_episodes=5001)
     agent.qnet.save_weights("checkpoints/qnet_fin")
     agent.test_play(n_testplay=5,
