@@ -387,7 +387,7 @@ class RainbowAgent:
 
 def main():
     agent = RainbowAgent(use_noisy=False, use_dueling=True,
-                         use_priority=False, use_multistep=False,
+                         use_priority=True, use_multistep=False,
                          use_categorical=True)
     agent.learn(n_episodes=5001)
     agent.qnet.save_weights("checkpoints/qnet_fin")

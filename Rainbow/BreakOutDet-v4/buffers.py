@@ -15,12 +15,12 @@ def create_replaybuffer(use_priority, use_multistep, max_len,
         raise NotImplementedError()
 
     elif use_priority:
-        PrioritizedReplayBuffer(
+        return PrioritizedReplayBuffer(
             max_len=max_len, reward_clip=reward_clip,
             alpha=alpha, beta=beta, total_steps=total_steps)
 
     elif use_multistep:
-        NstepReplayBuffer(
+        return NstepReplayBuffer(
             max_len=max_len, reward_clip=reward_clip,
             nstep_return=nstep_return, gamma=gamma)
     else:
@@ -161,7 +161,7 @@ class NstepReplayBuffer(ReplayBuffer):
             except IndexError:
                 self.buffer.append(nstep_exp)
 
-        self.count += 1
+            self.count += 1
 
 
 class PrioritizedReplayBuffer:
