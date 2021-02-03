@@ -170,15 +170,15 @@ class RainbowAgent:
                     if self.steps % self.target_update_period == 0:
                         self.target_qnet.set_weights(self.qnet.get_weights())
 
-                if done:
-                    break
-
             print(f"Episode: {episode}, score: {episode_rewards}, steps: {episode_steps}")
             if episode % 20 == 0:
                 test_scores, test_steps = self.test_play(n_testplay=1)
                 with self.summary_writer.as_default():
                     tf.summary.scalar("test_score", test_scores[0], step=self.steps)
                     tf.summary.scalar("test_step", test_steps[0], step=self.steps)
+                    for layer in self.qnet.layers[-3:]:
+                        for var in layer.variables:
+                            tf.summary.histogram(var.name, var, step=self.steps)
 
             if episode % 500 == 0:
                 self.qnet.save_weights("checkpoints/qnet")
@@ -386,9 +386,9 @@ class RainbowAgent:
 
 
 def main():
-    agent = RainbowAgent(use_noisy=False, use_dueling=True,
-                         use_priority=True, use_multistep=False,
-                         use_categorical=True)
+    agent = RainbowAgent(use_noisy=True, use_dueling=False,
+                         use_priority=False, use_multistep=False,
+                         use_categorical=False)
     agent.learn(n_episodes=5001)
     agent.qnet.save_weights("checkpoints/qnet_fin")
     agent.test_play(n_testplay=5,

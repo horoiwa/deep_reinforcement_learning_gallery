@@ -30,19 +30,17 @@ def create_network(action_space, use_dueling,
 class NoisyDense(tf.keras.layers.Layer):
     """ Factorized Gaussian Noisy Dense Layer
     """
-    def __init__(self, units, activation=None,
-                 kernel_initializer="random_normal", trainable=True):
+    def __init__(self, units, activation=None, trainable=True):
         super(NoisyDense, self).__init__()
         self.units = units
-        self.initializer = kernel_initializer
         self.trainable = trainable
-        self.normal = tfp.distributions.Normal(loc=0, scale=1)
         self.activation = tf.keras.activations.get(activation)
+
+        self.sigma_0 = 0.5
 
     def build(self, input_shape):
 
-        p = input_shape[0]
-
+        p = input_shape[-1]
         self.w_mu = self.add_weight(
             name="w_mu",
             shape=(int(input_shape[-1]), self.units),
@@ -53,7 +51,7 @@ class NoisyDense(tf.keras.layers.Layer):
         self.w_sigma = self.add_weight(
             name="w_sigma",
             shape=(int(input_shape[-1]), self.units),
-            initializer=tf.keras.initializers.Constant(0.5 / np.sqrt(p)),
+            initializer=tf.keras.initializers.Constant(self.sigma_0 / np.sqrt(p)),
             trainable=self.trainable)
 
         self.b_mu = self.add_weight(
@@ -66,14 +64,16 @@ class NoisyDense(tf.keras.layers.Layer):
         self.b_sigma = self.add_weight(
             name="b_sigma",
             shape=(self.units,),
-            initializer=tf.keras.initializers.Constant(0.5 / np.sqrt(p)),
+            initializer=tf.keras.initializers.Constant(self.sigma_0 / np.sqrt(p)),
             trainable=self.trainable)
 
-    @tf.function
     def call(self, inputs, noise=True):
 
-        epsilon_in = self.f(self.normal.sample((self.w_mu.shape[0], 1)))
-        epsilon_out = self.f(self.normal.sample((1, self.w_mu.shape[1])))
+        epsilon_in = self.f(
+            tf.random.normal(shape=(self.w_mu.shape[0], 1), dtype=tf.float32))
+
+        epsilon_out = self.f(
+            tf.random.normal(shape=(1, self.w_mu.shape[1]), dtype=tf.float32))
 
         w_epsilon = tf.matmul(epsilon_in, epsilon_out)
         b_epsilon = epsilon_out
@@ -209,7 +209,6 @@ class NoisyQNetwork(tf.keras.Model, SamplingMixin):
         self.dense1 = NoisyDense(512, activation="relu")
         self.qvalues = NoisyDense(self.action_space)
 
-    @tf.function
     def call(self, x):
 
         x = self.conv1(x)
@@ -363,7 +362,7 @@ if __name__ == "__main__":
     state = np.stack(frames, axis=2)[np.newaxis, ...]
 
     action_space = 4
-    #model = DuelingQNetwork(action_space)
-    model = DuelingCategoricalQNetwork(action_space, -10, 10, 51)
+    model = NoisyQNetwork(action_space)
     out = model(state)
+    import pdb; pdb.set_trace()
     print(out)
