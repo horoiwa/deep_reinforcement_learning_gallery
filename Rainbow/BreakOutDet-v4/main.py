@@ -386,11 +386,10 @@ class RainbowAgent:
 
 
 def main():
-    agent = RainbowAgent(use_noisy=True, use_dueling=False,
-                         use_priority=False, use_multistep=False,
-                         use_categorical=False)
+    agent = RainbowAgent(use_noisy=False, use_dueling=True,
+                         use_priority=True, use_multistep=True,
+                         use_categorical=True)
     agent.learn(n_episodes=5001)
-    agent.qnet.save_weights("checkpoints/qnet_fin")
     agent.test_play(n_testplay=5,
                     checkpoint_path="checkpoints/qnet",
                     monitor_dir="mp4")

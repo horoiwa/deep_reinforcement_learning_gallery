@@ -7,12 +7,14 @@ import pickle
 import zlib
 
 
-def create_replaybuffer(use_priority, use_multistep, max_len,
-                        nstep_return, gamma,
-                        alpha, beta, total_steps, reward_clip):
+def create_replaybuffer(use_priority, use_multistep, max_len, reward_clip,
+                        alpha, beta, total_steps, nstep_return, gamma):
 
     if use_priority and use_multistep:
-        raise NotImplementedError()
+        return NstepPrioritizedReplayBuffer(
+            max_len=max_len, reward_clip=reward_clip,
+            alpha=alpha, beta=beta, total_steps=total_steps,
+            nstep_return=nstep_return, gamma=gamma)
 
     elif use_priority:
         return PrioritizedReplayBuffer(
@@ -326,8 +328,8 @@ class NstepPrioritizedReplayBuffer:
 
             nstep_return = 0
             has_done = False
-            for i, onestep_exp in enumerate(self.temp_buffer):
-                reward, done = onestep_exp.reward, onestep_exp.done
+            for i, exp in enumerate(self.temp_buffer):
+                reward, done = exp.reward, exp.done
                 reward = np.clip(reward, -1, 1) if self.reward_clip else reward
                 nstep_return += self.gamma ** i * (1 - done) * reward
                 if done:
@@ -353,7 +355,7 @@ class NstepPrioritizedReplayBuffer:
                 self.buffer.append(nstep_exp)
                 self.priorities.append(self.max_priority)
 
-        self.counter += 1
+            self.counter += 1
 
     def get_minibatch(self, batch_size, steps):
 
@@ -407,48 +409,3 @@ class NstepPrioritizedReplayBuffer:
             self.priorities[idx] = priority
 
         self.max_priority = max(self.max_priority, priorities.max())
-
-
-
-
-if __name__ == "__main__":
-    import numpy as np
-    import random
-
-    buffer = PrioritizedReplayBuffer(max_len=16, compress=False)
-
-    for i in range(32):
-
-        s1 = [np.random.randint(100) for _ in range(4)]
-
-        a = [np.random.randint(2)]
-
-        r = i
-
-        s2 = [np.random.randint(100) for _ in range(4)]
-
-        done = random.choice([False, True])
-
-        transition = (s1, a, r, s2, done)
-
-        buffer.push(transition)
-
-    print("LEN", len(buffer))
-    print()
-
-    for exp in buffer.buffer:
-        print(exp.reward)
-
-    indices, weights, experiences = buffer.get_minibatch(4, 0.5)
-    print(indices)
-    print(weights)
-
-    td_errors = np.random.randint(-100, 100, size=len(indices))
-    print(td_errors)
-    buffer.update_priority(indices, td_errors)
-    print()
-    indices, weights, experiences = buffer.get_minibatch(4, 0.5)
-    print(indices)
-    print(weights)
-    print()
-    print(buffer.max_priority)
