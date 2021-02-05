@@ -1,7 +1,6 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras.layers as kl
-import tensorflow_probability as tfp
 
 
 def create_network(action_space, use_dueling,
