@@ -88,15 +88,6 @@ class RainbowAgent:
 
         self.steps = 0
 
-    def __post_init__(self):
-        env = gym.make(self.env_name)
-        frame = env.step(np.random.choice(np.arange(env.action_space.n)))
-        frame = util.preprocess_frame(frame)
-        state = np.array([frame] * self.n_frames)
-        self.qnet(state)
-        self.target_qnet(state)
-        self.target_qnet.set_weights(self.qnet.get_weights)
-
     @property
     def epsilon(self):
         if self.use_noisy:
@@ -386,7 +377,7 @@ class RainbowAgent:
 
 
 def main():
-    agent = RainbowAgent(use_noisy=False, use_dueling=True,
+    agent = RainbowAgent(use_noisy=True, use_dueling=True,
                          use_priority=True, use_multistep=True,
                          use_categorical=True)
     agent.learn(n_episodes=5001)

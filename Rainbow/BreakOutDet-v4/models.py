@@ -8,7 +8,8 @@ def create_network(action_space, use_dueling,
                    use_categorical, use_noisy,
                    Vmin, Vmax, n_atoms):
     if use_dueling and use_noisy and use_categorical:
-        raise NotImplementedError()
+        return RainbowQNetwork(
+            action_space, Vmin=Vmin, Vmax=Vmax, n_atoms=n_atoms)
     elif use_dueling and use_categorical:
         return DuelingCategoricalQNetwork(
             action_space, Vmin=Vmin, Vmax=Vmax, n_atoms=n_atoms)
@@ -322,6 +323,66 @@ class DuelingCategoricalQNetwork(tf.keras.Model, CategoricalSamplingMixin):
 
         self.advantages = kl.Dense(self.action_space * self.n_atoms,
                                    kernel_initializer="he_normal")
+
+    @tf.function
+    def call(self, x):
+
+        batch_size = x.shape[0]
+
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = self.conv3(x)
+        x = self.flatten1(x)
+
+        x1 = self.dense1(x)
+        value = self.value(x1)
+        value = tf.reshape(
+            value, (batch_size, 1, self.n_atoms))
+
+        x2 = self.dense2(x)
+        advantages = self.advantages(x2)
+        advantages = tf.reshape(
+            advantages, (batch_size, self.action_space, self.n_atoms))
+
+        advantages_mean = tf.reduce_mean(advantages, axis=1, keepdims=True)
+        advantages_scaled = advantages - advantages_mean
+
+        logits = value + advantages_scaled
+        probs = tf.nn.softmax(logits, axis=2)
+
+        return probs
+
+
+class RainbowQNetwork(tf.keras.Model, CategoricalSamplingMixin):
+
+    def __init__(self, actions_space, Vmin, Vmax, n_atoms):
+
+        super(RainbowQNetwork, self).__init__()
+
+        self.action_space = actions_space
+
+        self.n_atoms = n_atoms
+
+        self.Vmin, self.Vmax = Vmin, Vmax
+
+        self.Z = np.linspace(self.Vmin, self.Vmax, self.n_atoms)
+
+        self.conv1 = kl.Conv2D(32, 8, strides=4, activation="relu",
+                               kernel_initializer="he_normal")
+        self.conv2 = kl.Conv2D(64, 4, strides=2, activation="relu",
+                               kernel_initializer="he_normal")
+        self.conv3 = kl.Conv2D(64, 3, strides=1, activation="relu",
+                               kernel_initializer="he_normal")
+
+        self.flatten1 = kl.Flatten()
+
+        self.dense1 = NoisyDense(512, activation="relu")
+
+        self.dense2 = NoisyDense(512, activation="relu")
+
+        self.value = NoisyDense(1 * self.n_atoms)
+
+        self.advantages = NoisyDense(self.action_space * self.n_atoms)
 
     @tf.function
     def call(self, x):
