@@ -138,8 +138,7 @@ class RainbowAgent:
 
                 self.replay_buffer.push(transition)
 
-                if len(self.replay_buffer) >= 50000:
-                #if len(self.replay_buffer) >= 500:
+                if len(self.replay_buffer) >= 80000:
                     if self.steps % self.update_period == 0:
 
                         if self.use_categorical:
