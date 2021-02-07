@@ -17,12 +17,11 @@ class RainbowAgent:
     def __init__(self, env_name="BreakoutDeterministic-v4",
                  gamma=0.99,
                  batch_size=32,
-                 lr=0.0000625,
-                 adam_epsilon=1.5e-4,
+                 lr=0.00025,
                  reward_clip=True,
                  update_period=4,
                  target_update_period=32000,
-                 n_frames=4, alpha=0.5, beta=0.4, total_steps=2500000,
+                 n_frames=4, alpha=0.6, beta=0.4, total_steps=2500000,
                  buffer_size=1000000,
                  Vmin=-10, Vmax=10, n_atoms=51,
                  use_noisy=False, use_priority=False, use_dueling=False,
@@ -77,7 +76,7 @@ class RainbowAgent:
             self.action_space, use_dueling, use_categorical, use_noisy,
             Vmin=self.Vmin, Vmax=self.Vmax, n_atoms=self.n_atoms)
 
-        self.optimizer = Adam(lr=lr, epsilon=adam_epsilon)
+        self.optimizer = Adam(lr=lr, epsilon=0.01 / self.batch_size)
 
         self.replay_buffer = create_replaybuffer(
                 use_priority=self.use_priority,
@@ -138,7 +137,7 @@ class RainbowAgent:
 
                 self.replay_buffer.push(transition)
 
-                if len(self.replay_buffer) >= 80000:
+                if len(self.replay_buffer) >= 50000:
                     if self.steps % self.update_period == 0:
 
                         if self.use_categorical:
