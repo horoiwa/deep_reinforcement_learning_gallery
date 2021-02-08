@@ -20,7 +20,7 @@ class RainbowAgent:
                  lr=0.00025,
                  reward_clip=True,
                  update_period=4,
-                 target_update_period=32000,
+                 target_update_period=10000,
                  n_frames=4, alpha=0.6, beta=0.4, total_steps=2500000,
                  buffer_size=1000000,
                  Vmin=-10, Vmax=10, n_atoms=51,
@@ -178,6 +178,7 @@ class RainbowAgent:
         #: ミニバッチの作成
         if self.use_priority:
             indices, weights, (states, actions, rewards, next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size, self.steps)
+            weights = tf.convert_to_tensor(weights, dtype=tf.float32)
         else:
             states, actions, rewards, next_states, dones = self.replay_buffer.get_minibatch(self.batch_size)
 
@@ -220,6 +221,7 @@ class RainbowAgent:
         #: ミニバッチの作成
         if self.use_priority:
             indices, weights, (states, actions, rewards, next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size, self.steps)
+            weights = tf.convert_to_tensor(weights, dtype=tf.float32)
         else:
             states, actions, rewards, next_states, dones = self.replay_buffer.get_minibatch(self.batch_size)
 
@@ -253,8 +255,8 @@ class RainbowAgent:
             zip(grads, self.qnet.trainable_variables))
 
         if self.use_priority:
-            errors = weighted_loss.numpy().flatten()
-            self.replay_buffer.update_priority(indices, errors)
+            td_errors = weighted_loss.numpy().flatten()
+            self.replay_buffer.update_priority(indices, td_errors)
 
         return loss
 
