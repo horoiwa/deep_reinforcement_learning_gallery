@@ -12,3 +12,16 @@ def preprocess_frame(frame):
     frame = image_scaled.numpy()[:, :, 0]
 
     return frame
+
+
+@tf.function
+def huber_loss(target_q, q, d=1.0):
+    """
+    See https://github.com/tensorflow/tensorflow/blob/v2.4.1/tensorflow/python/keras/losses.py#L1098-L1162
+    """
+    td_error = target_q - q
+    is_smaller_than_d = tf.abs(td_error) < d
+    squared_loss = 0.5 * tf.square(td_error)
+    linear_loss = 0.5 * d ** 2 + d * (tf.abs(td_error) - d)
+    loss = tf.where(is_smaller_than_d, squared_loss, linear_loss)
+    return loss
