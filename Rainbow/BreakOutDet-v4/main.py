@@ -225,7 +225,8 @@ class RainbowAgent:
         else:
             states, actions, rewards, next_states, dones = self.replay_buffer.get_minibatch(self.batch_size)
 
-        next_actions, next_probs = self.target_qnet.sample_actions(next_states)
+        next_actions, _ = self.qnet.sample_actions(next_states)
+        _, next_probs = self.target_qnet.sample_actions(next_states)
 
         #: 選択されたactionの確率分布だけ抽出する
         onehot_mask = self.create_mask(next_actions)
