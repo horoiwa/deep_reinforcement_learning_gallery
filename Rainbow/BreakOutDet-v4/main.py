@@ -225,7 +225,8 @@ class RainbowAgent:
         else:
             states, actions, rewards, next_states, dones = self.replay_buffer.get_minibatch(self.batch_size)
 
-        next_actions, next_probs = self.target_qnet.sample_actions(next_states)
+        next_actions, _ = self.qnet.sample_actions(next_states)
+        _, next_probs = self.target_qnet.sample_actions(next_states)
 
         #: 選択されたactionの確率分布だけ抽出する
         onehot_mask = self.create_mask(next_actions)
@@ -241,11 +242,11 @@ class RainbowAgent:
 
             #: クリップしないとlogとったときに勾配爆発することがある
             dists = tf.clip_by_value(dists, 1e-6, 1.0)
-            loss = tf.reduce_sum(
+            td_loss = tf.reduce_sum(
                 -1 * target_dists * tf.math.log(dists), axis=1, keepdims=True)
 
             if self.use_priority:
-                weighted_loss = weights * loss
+                weighted_loss = weights * td_loss
                 loss = tf.reduce_mean(weighted_loss)
             else:
                 loss = tf.reduce_mean(loss)
@@ -255,8 +256,8 @@ class RainbowAgent:
             zip(grads, self.qnet.trainable_variables))
 
         if self.use_priority:
-            td_errors = weighted_loss.numpy().flatten()
-            self.replay_buffer.update_priority(indices, td_errors)
+            td_loss = td_loss.numpy().flatten()
+            self.replay_buffer.update_priority(indices, td_loss)
 
         return loss
 
