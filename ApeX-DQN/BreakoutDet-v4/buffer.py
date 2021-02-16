@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import random
 import zlib
 import pickle
+
 import time
 
 import numpy as np
@@ -93,8 +94,8 @@ class PrioritizedReplayBuffer:
     def __init__(self, max_len: int, reward_clip: bool, compress: bool,
                  alpha: float, nstep=3):
 
-        #:SumSegmentTreeの都合上、max_lenは2の倍数に設定する
-        assert max_len % 2 == 0
+        #:SumSegmentTreeの都合上、max_lenは2のべき乗に設定する
+        assert max_len & (max_len - 1) == 0
 
         self.buffer = []
 
@@ -106,9 +107,7 @@ class PrioritizedReplayBuffer:
 
         self.alpha = alpha
 
-        self.sumtree = segment_tree.SumSegmentTree(capacity=max_len)
-
-        self.mintree = segment_tree.MinSegmentTree(capacity=max_len)
+        self.sumtree = segment_tree.SumTree(capacity=max_len)
 
         self.nstep = nstep
 
@@ -132,7 +131,6 @@ class PrioritizedReplayBuffer:
 
         priority = (np.abs(td_error) + 0.001) ** self.alpha
         self.sumtree[self.next_idx] = priority
-        self.mintree[self.next_idx] = priority
 
         if len(self.buffer) >= self.max_len:
             self.next_idx = 0
@@ -142,24 +140,14 @@ class PrioritizedReplayBuffer:
     def sample_minibatch(self, batch_size: int, beta: float):
         assert beta >= 0.0
 
-        indices = []
-        for _ in range(batch_size):
-            mass = random.random() * self.sumtree.sum(0, len(self.buffer))
-            idx = self.sumtree.find_prefixsum_idx(mass)
-            indices.append(idx)
-
-        """
-            PER論文ではミニバッチの最大重みで重みのスケーリングをしていたが、
-            rllibにならってバッファ内最小重みでスケーリングする
-        """
-        p_min = self.mintree.min() / self.sumtree.sum()
-        max_weight = (p_min * len(self.buffer))**(-beta)
+        indices = [self.sumtree.sample() for _ in range(batch_size)]
 
         weights = []
         for idx in indices:
             prob = self.sumtree[idx] / self.sumtree.sum()
-            weight = (prob * len(self.buffer))**(-beta) / max_weight
+            weight = (prob * len(self.buffer))**(-beta)
             weights.append(weight)
+        weights = np.array(weights) / max(weights)
 
         if self.compress:
             selected_experiences = [

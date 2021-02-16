@@ -36,8 +36,9 @@ def performance_test_1(compress):
             indices = np.random.choice(np.arange(len(priorities)), replace=False)
 
     with util.Timer("numpy.random.choice PER"):
+        priorities = np.array(priorities)
         for _ in range(M):
-            probs = np.array(priorities) / sum(priorities)
+            probs = priorities / priorities.sum()
             indices = np.random.choice(np.arange(len(probs)), replace=False, p=probs)
 
 
@@ -67,8 +68,9 @@ def performance_test_2(compress):
 
     sumtree = segment_tree.SumSegmentTree(capacity=2**20)
     priorities = list(np.random.uniform(0, 5, size=1000000))
-    for i, prior in enumerate(priorities):
-        sumtree[i] = prior
+    with util.Timer("sumtree Add"):
+        for i, prior in enumerate(priorities):
+            sumtree[i] = prior
 
     with util.Timer("sumtree PER"):
         for _ in range(M):
@@ -82,4 +84,4 @@ def performance_test_2(compress):
 if __name__ == '__main__':
     compress = False
     performance_test_1(compress=compress)
-    performance_test_2(compress=compress)
+    #performance_test_2(compress=compress)
