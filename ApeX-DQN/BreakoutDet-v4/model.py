@@ -22,11 +22,11 @@ class SamplingMixin:
 
 class DuelingQNetwork(tf.keras.Model, SamplingMixin):
 
-    def __init__(self, actions_space):
+    def __init__(self, action_space):
 
         super(DuelingQNetwork, self).__init__()
 
-        self.action_space = actions_space
+        self.action_space = action_space
 
         self.conv1 = kl.Conv2D(32, 8, strides=4, activation="relu",
                                kernel_initializer="he_normal")

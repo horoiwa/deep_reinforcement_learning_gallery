@@ -228,6 +228,7 @@ class PrioritizedReplayBuffer:
 
         beta = self.beta_scheduler(steps)
 
+        #: Note: converting list to ndarray TOO SLOW
         probs = np.array(self.priorities) / sum(self.priorities)
 
         indices = np.random.choice(np.arange(N), p=probs,
@@ -361,6 +362,7 @@ class NstepPrioritizedReplayBuffer:
 
         beta = self.beta_scheduler(steps)
 
+        #: Note: converting list to ndarray TOO SLOW
         probs = np.array(self.priorities) / sum(self.priorities)
 
         indices = np.random.choice(np.arange(len(self.buffer)), p=probs,
