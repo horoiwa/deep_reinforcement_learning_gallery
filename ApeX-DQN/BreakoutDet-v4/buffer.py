@@ -91,10 +91,10 @@ class LocalReplayBuffer:
         return (states, actions, rewards, next_states, dones), experiences
 
 
-@ray.remote
-class GlobalPrioritizedReplayBuffer:
+@ray.remote(num_cpus=1)
+class GlobalReplayBuffer:
 
-    def __init__(self, max_len, capacity, alpha, compress):
+    def __init__(self, max_len, capacity, alpha, beta, compress):
 
         assert capacity >= max_len, f"{capacity}  >= {max_len}"
         assert capacity & (capacity - 1) == 0
@@ -108,6 +108,8 @@ class GlobalPrioritizedReplayBuffer:
         self.sumtree = segment_tree.SumTree(capacity=capacity)
 
         self.alpha = alpha
+
+        self.beta = beta
 
         self.compress = compress
 
@@ -125,18 +127,14 @@ class GlobalPrioritizedReplayBuffer:
             self.buffer[self.next_idx] = exp
             self.next_idx += 1
 
-        if self.next_idx >= self.max_len:
-            self.next_idx = 0
-
-    def sample_minibatch(self, batch_size: int, beta: float):
-        assert beta >= 0.0
+    def sample_minibatch(self, batch_size):
 
         indices = [self.sumtree.sample() for _ in range(batch_size)]
 
         weights = []
         for idx in indices:
             prob = self.sumtree[idx] / self.sumtree.sum()
-            weight = (prob * len(self.buffer))**(-beta)
+            weight = (prob * len(self.buffer))**(-self.beta)
             weights.append(weight)
         weights = np.array(weights) / max(weights)
 
@@ -169,6 +167,9 @@ class GlobalPrioritizedReplayBuffer:
             priority = (np.abs(td_error) + 0.001) ** self.alpha
             self.sumtree[idx] = priority**self.alpha
             self.max_priority = max(self.max_priority, priority)
+
+    def remove(self):
+        pass
 
 
 if __name__ == "__main__":

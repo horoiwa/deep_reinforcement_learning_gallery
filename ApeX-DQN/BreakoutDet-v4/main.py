@@ -10,7 +10,7 @@ import tensorflow as tf
 from PIL import Image
 
 from model import DuelingQNetwork
-from buffer import GlobalPrioritizedReplayBuffer, LocalReplayBuffer
+from buffer import GlobalReplayBuffer, LocalReplayBuffer
 
 
 def preprocess_frame(frame):
@@ -21,7 +21,7 @@ def preprocess_frame(frame):
     return image_scaled.astype(np.float32)
 
 
-@ray.remote
+@ray.remote(num_cpus=1)
 class Actor:
 
     def __init__(self, pid, env_name, epsilon, alpha, buffer_size, n_frames,
@@ -121,17 +121,10 @@ class Actor:
                 return priorities, experiences, self.pid
 
 
+@ray.remote(num_cpus=1, num_gpus=1)
 class Learner:
 
-    def __init__(self, env_name="BreakoutDeterministic-v4",
-                 num_workers=5, gamma=0.99, batch_size=512,
-                 n_frames=4, lr=0.00025, eps=0.4, eps_a=0.7,
-                 update_period=4, target_update_period=500000,
-                 actor_update_period=400,
-                 reward_clip=True, nstep=3, alpha=0.6, beta_init=0.4,
-                 global_buffer_size=2000000, priority_capacity=2**21,
-                 local_buffer_size=50,
-                 compress=False):
+    def __init__(self, env_name, gamma, n_frames, lr):
 
         self.env_name = env_name
 
@@ -139,25 +132,11 @@ class Learner:
 
         self.n_frames = n_frames
 
-        self.actors = [
-            Actor.remote(pid=i, env_name=env_name,
-                         epsilon=eps ** (1 + eps_a * i / (num_workers - 1)),
-                         buffer_size=local_buffer_size,
-                         gamma=gamma, n_frames=n_frames, alpha=alpha,
-                         reward_clip=reward_clip, nstep=nstep, compress=compress)
-            for i in range(num_workers)]
-
-        self.buffer = GlobalPrioritizedReplayBuffer.remote(
-            max_len=global_buffer_size, capacity=priority_capacity,
-            alpha=alpha, compress=compress)
-
         self.action_space = gym.make(env_name).action_space.n
 
         self.qnet = DuelingQNetwork(action_space=self.action_space)
 
         self.target_qnet = DuelingQNetwork(action_space=self.action_space)
-
-        self.define_network()
 
     def define_network(self):
 
@@ -169,12 +148,20 @@ class Learner:
         #: define by run
         self.qnet(state)
         self.target_qnet(state)
-
         self.target_qnet.set_weights(self.qnet.get_weights())
+
+        return self.qnet.get_weights()
+
+    def update(self, minibatchs):
+        for batch in minibatchs:
+            pass
+
+        weights = self.qnet.get_weights()
+        return weights
 
     def learn(self, n_updates):
 
-        updates = 0
+        learning_steps = 0
 
         current_weights = ray.put(self.qnet.get_weights())
 
@@ -192,11 +179,42 @@ class Learner:
         print(time.time() - s)
 
 
-def main():
+def main(env_name="BreakoutDeterministic-v4",
+         num_actors=5, gamma=0.99, batch_size=512,
+         n_frames=4, lr=0.00025, epsilon=0.4, eps_alpha=0.7,
+         update_period=50, target_update_period=2500,
+         reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
+         global_buffer_size=2000000, priority_capacity=2**21,
+         local_buffer_size=100, compress=True):
+
     ray.init(local_mode=False)
-    learner = Learner(num_workers=2)
-    learner.learn(30)
+
+    learner = Learner.remote(
+        env_name=env_name, gamma=gamma, n_frames=n_frames, lr=lr)
+
+    current_weights = ray.put(ray.get(learner.define_network.remote()))
+
+    global_buffer = GlobalReplayBuffer(
+        max_len=global_buffer_size, capacity=priority_capacity,
+        alpha=alpha, beta=beta, compress=compress)
+
+    actors = [Actor.remote(
+        pid=i, env_name=env_name,
+        epsilon=epsilon ** (1 + eps_alpha * i / (num_actors - 1)),
+        buffer_size=local_buffer_size,
+        gamma=gamma, n_frames=n_frames, alpha=alpha,
+        reward_clip=reward_clip, nstep=nstep,
+        compress=compress) for i in range(num_actors)]
+
+    learning_steps = 0
+    while True:
+        #: collect trajectory and add global_buffer
+        break
+        #: 1 update
+        pass
+        if learning_steps % 100 == 0:
+            gobal_buffer.remove()
 
 
 if __name__ == "__main__":
-    main()
+    main(num_actors=4)
