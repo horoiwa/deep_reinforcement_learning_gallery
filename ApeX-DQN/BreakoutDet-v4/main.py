@@ -1,27 +1,27 @@
 import collections
+import time
+import pickle
+import zlib
 
 import ray
 import gym
 import numpy as np
 import tensorflow as tf
+from PIL import Image
 
 from model import DuelingQNetwork
 from buffer import GlobalPrioritizedReplayBuffer, LocalReplayBuffer
 
 
 def preprocess_frame(frame):
-    """ frame preprocessing only for Breakout """
-    image = tf.cast(tf.convert_to_tensor(frame), tf.float32)
-    image_gray = tf.image.rgb_to_grayscale(image)
-    image_crop = tf.image.crop_to_bounding_box(image_gray, 34, 0, 160, 160)
-    image_resize = tf.image.resize(image_crop, [84, 84])
-    image_scaled = tf.divide(image_resize, 255)
-
-    frame = image_scaled.numpy()[:, :, 0]
-
-    return frame
+    """Breakout only"""
+    image = Image.fromarray(frame)
+    image = image.convert("L").crop((0, 34, 160, 200)).resize((84, 84))
+    image_scaled = np.array(image) / 255.0
+    return image_scaled.astype(np.float32)
 
 
+@ray.remote
 class Actor:
 
     def __init__(self, pid, env_name, epsilon, alpha, buffer_size, n_frames,
@@ -48,15 +48,17 @@ class Actor:
         self.buffer_size = buffer_size
 
         self.local_buffer = LocalReplayBuffer(
-            reward_clip=reward_clip, nstep=nstep,
-            gamma=gamma, compress=compress)
+            reward_clip=reward_clip, gamma=gamma, nstep=nstep)
 
         self.local_qnet = DuelingQNetwork(action_space=self.action_space)
+
+        self.compress = compress
 
         self.define_network()
 
     def define_network(self):
 
+        #: define by run
         frame = preprocess_frame(self.env.reset())
         for _ in range(self.n_frames):
             self.frames.append(frame)
@@ -92,12 +94,15 @@ class Actor:
                     self.frames.append(frame)
 
             if len(self.local_buffer) == self.buffer_size:
+
                 minibatch, experiences = self.local_buffer.pull()
+
                 states, actions, rewards, next_states, dones = minibatch
 
                 next_actions, next_qvalues = self.local_qnet.sample_actions(next_states)
 
                 next_actions_onehot = tf.one_hot(next_actions, self.action_space)
+
                 max_next_qvalues = tf.reduce_sum(
                     next_qvalues * next_actions_onehot, axis=1, keepdims=True)
 
@@ -108,17 +113,21 @@ class Actor:
                     actions.flatten().astype(np.int32), self.action_space)
                 Q = tf.reduce_sum(qvalues * actions_onehot, axis=1, keepdims=True)
 
-                priorities = (np.abs(TQ - Q) + 0.001) ** self.alpha
+                priorities = ((np.abs(TQ - Q) + 0.001) ** self.alpha).flatten()
 
-                return priorities, experiences
+                if self.compress:
+                    experiences = [zlib.compress(pickle.dumps(exp)) for exp in experiences]
+
+                return priorities, experiences, self.pid
 
 
 class Learner:
 
     def __init__(self, env_name="BreakoutDeterministic-v4",
                  num_workers=5, gamma=0.99, batch_size=512,
-                 n_frames=4, lr=0.00025,
+                 n_frames=4, lr=0.00025, eps=0.4, eps_a=0.7,
                  update_period=4, target_update_period=500000,
+                 actor_update_period=400,
                  reward_clip=True, nstep=3, alpha=0.6, beta_init=0.4,
                  global_buffer_size=2000000, priority_capacity=2**21,
                  local_buffer_size=50,
@@ -131,12 +140,14 @@ class Learner:
         self.n_frames = n_frames
 
         self.actors = [
-            Actor(pid, env_name=env_name, epsilon=0.5, buffer_size=local_buffer_size,
+            Actor.remote(pid=i, env_name=env_name,
+                         epsilon=eps ** (1 + eps_a * i / (num_workers - 1)),
+                         buffer_size=local_buffer_size,
                          gamma=gamma, n_frames=n_frames, alpha=alpha,
                          reward_clip=reward_clip, nstep=nstep, compress=compress)
-            for pid in range(num_workers)]
+            for i in range(num_workers)]
 
-        self.buffer = GlobalPrioritizedReplayBuffer(
+        self.buffer = GlobalPrioritizedReplayBuffer.remote(
             max_len=global_buffer_size, capacity=priority_capacity,
             alpha=alpha, compress=compress)
 
@@ -155,6 +166,7 @@ class Learner:
         frames = [frame] * self.n_frames
         state = np.stack(frames, axis=2)[np.newaxis, ...]
 
+        #: define by run
         self.qnet(state)
         self.target_qnet(state)
 
@@ -164,21 +176,25 @@ class Learner:
 
         updates = 0
 
-        current_weights = self.qnet.get_weights()
+        current_weights = ray.put(self.qnet.get_weights())
 
-        wip = [actor.set_weights_and_rollout(current_weights) for actor in self.actors]
+        work_in_progresses = [
+            actor.set_weights_and_rollout.remote(current_weights)
+            for actor in self.actors]
 
-        for i in range(10):
-            pass
-
-        else:
-            updates += 1
-
+        s = time.time()
+        for _ in range(12):
+            finished, work_in_progresses = ray.wait(work_in_progresses, num_returns=1)
+            priorities, experiences, pid = ray.get(finished[0])
+            self.buffer.push_on_batch.remote(priorities, experiences)
+            work_in_progresses.append(
+                self.actors[pid].set_weights_and_rollout.remote(current_weights))
+        print(time.time() - s)
 
 
 def main():
-    ray.init(local_mode=True)
-    learner = Learner(num_workers=1)
+    ray.init(local_mode=False)
+    learner = Learner(num_workers=2)
     learner.learn(30)
 
 

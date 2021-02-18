@@ -21,7 +21,7 @@ class Experience:
 
 class LocalReplayBuffer:
 
-    def __init__(self, reward_clip, nstep, gamma, compress):
+    def __init__(self, reward_clip, gamma, nstep):
 
         self.buffer = []
 
@@ -32,8 +32,6 @@ class LocalReplayBuffer:
         self.gamma = gamma
 
         self.temp_buffer = collections.deque(maxlen=nstep)
-
-        self.compress = compress
 
         self.next_idx = 0
 
@@ -88,14 +86,12 @@ class LocalReplayBuffer:
         dones = np.array(
             [exp.done for exp in experiences]).reshape(-1, 1)
 
-        if self.compress:
-            experiences = [zlib.compress(pickle.dumps(exp)) for exp in experiences]
-
         self.buffer = []
 
         return (states, actions, rewards, next_states, dones), experiences
 
 
+@ray.remote
 class GlobalPrioritizedReplayBuffer:
 
     def __init__(self, max_len, capacity, alpha, compress):
@@ -107,9 +103,9 @@ class GlobalPrioritizedReplayBuffer:
 
         self.capacity = capacity
 
-        self.sumtree = segment_tree.SumTree(capacity=capacity)
+        self.buffer = [0] * self.capacity
 
-        self.buffer = []
+        self.sumtree = segment_tree.SumTree(capacity=capacity)
 
         self.alpha = alpha
 
@@ -120,14 +116,17 @@ class GlobalPrioritizedReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-    def push_on_batch(self, experiences, priorities):
+    def push_on_batch(self, priorities, experiences):
 
         assert len(experiences) == len(priorities)
 
         for exp, priority in zip(experiences, priorities):
             self.sumtree[self.next_idx] = priority
-            self.buffer.append(exp)
+            self.buffer[self.next_idx] = exp
             self.next_idx += 1
+
+        if self.next_idx >= self.max_len:
+            self.next_idx = 0
 
     def sample_minibatch(self, batch_size: int, beta: float):
         assert beta >= 0.0
@@ -170,14 +169,6 @@ class GlobalPrioritizedReplayBuffer:
             priority = (np.abs(td_error) + 0.001) ** self.alpha
             self.sumtree[idx] = priority**self.alpha
             self.max_priority = max(self.max_priority, priority)
-
-    def cut(self):
-        if self.next_idx > self.max_len:
-            for i in range(self.max_len, self.next_idx):
-                self.sumtree[i] = 0
-
-            self.buffer = self.buffer[:self.max_len]
-            self.next_idx = 0
 
 
 if __name__ == "__main__":
