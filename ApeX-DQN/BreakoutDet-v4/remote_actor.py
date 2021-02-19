@@ -7,19 +7,19 @@ import queue
 import ray
 import gym
 import numpy as np
-import tensorflow as tf
 from PIL import Image
+import tensorflow as tf
 
 from model import DuelingQNetwork
 from buffer import LocalReplayBuffer
 from util import preprocess_frame
 
 
-@ray.remote(num_cpus=1, memory=300 * 1024 * 1024)
+@ray.remote(num_cpus=1)
 class Actor:
 
     def __init__(self, pid, env_name, epsilon, alpha, buffer_size, n_frames,
-                 gamma, nstep, reward_clip, compress):
+                 gamma, nstep, reward_clip):
 
         self.pid = pid
 
@@ -46,11 +46,11 @@ class Actor:
 
         self.local_qnet = DuelingQNetwork(action_space=self.action_space)
 
-        self.compress = compress
-
         self.define_network()
 
     def define_network(self):
+
+        tf.config.set_visible_devices([], 'GPU')
 
         #: define by run
         frame = preprocess_frame(self.env.reset())
@@ -119,7 +119,6 @@ class Actor:
 
                 priorities = ((np.abs(TQ - Q) + 0.001) ** self.alpha).flatten()
 
-                if self.compress:
-                    experiences = [zlib.compress(pickle.dumps(exp)) for exp in experiences]
+                experiences = [zlib.compress(pickle.dumps(exp)) for exp in experiences]
 
                 return priorities, experiences, self.pid

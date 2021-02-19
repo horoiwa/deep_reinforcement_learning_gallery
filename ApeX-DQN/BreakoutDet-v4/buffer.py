@@ -4,9 +4,8 @@ import zlib
 import pickle
 
 import numpy as np
-import ray
 
-import segment_tree
+import util
 
 
 @dataclass
@@ -77,7 +76,7 @@ class LocalReplayBuffer:
 
 class GlobalReplayBuffer:
 
-    def __init__(self, max_len, capacity, alpha, beta, compress):
+    def __init__(self, max_len, capacity, alpha, beta):
 
         assert capacity >= max_len, f"{capacity}  >= {max_len}"
         assert capacity & (capacity - 1) == 0
@@ -88,13 +87,11 @@ class GlobalReplayBuffer:
 
         self.buffer = [0] * self.capacity
 
-        self.sumtree = segment_tree.SumTree(capacity=capacity)
+        self.sumtree = util.SumTree(capacity=capacity)
 
         self.alpha = alpha
 
         self.beta = beta
-
-        self.compress = compress
 
         self.next_idx = 0
 
@@ -104,8 +101,7 @@ class GlobalReplayBuffer:
     def push(self, priorities, experiences):
 
         assert len(priorities) == len(experiences)
-
-        for exp, priority in zip(experiences, priorities):
+        for  priority, exp in zip(priorities, experiences):
             self.sumtree[self.next_idx] = priority
             self.buffer[self.next_idx] = exp
             self.next_idx += 1
@@ -121,25 +117,9 @@ class GlobalReplayBuffer:
             weights.append(weight)
         weights = np.array(weights) / max(weights)
 
-        if self.compress:
-            selected_experiences = [
-                pickle.loads(zlib.decompress(self.buffer[idx])) for idx in indices]
-        else:
-            selected_experiences = [self.buffer[idx] for idx in indices]
+        experiences = [self.buffer[idx] for idx in indices]
 
-        states = np.vstack(
-            [exp.state for exp in selected_experiences]).astype(np.float32)
-        actions = np.vstack(
-            [exp.action for exp in selected_experiences]).astype(np.float32)
-        rewards = np.array(
-            [exp.reward for exp in selected_experiences]).reshape(-1, 1)
-        next_states = np.vstack(
-            [exp.next_state for exp in selected_experiences]
-            ).astype(np.float32)
-        dones = np.array(
-            [exp.done for exp in selected_experiences]).reshape(-1, 1)
-
-        return indices, weights, (states, actions, rewards, next_states, dones)
+        return indices, weights, experiences
 
     def update_priorities(self, indices, td_errors):
         """ Update priorities of sampled transitions.
