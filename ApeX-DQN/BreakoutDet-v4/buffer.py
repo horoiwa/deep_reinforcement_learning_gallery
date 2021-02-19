@@ -68,30 +68,13 @@ class LocalReplayBuffer:
 
     def pull(self):
 
-        experiences = [self.buffer[idx] for idx in range(len(self.buffer))]
-
-        states = np.vstack(
-            [exp.state for exp in experiences]).astype(np.float32)
-
-        actions = np.vstack(
-            [exp.action for exp in experiences]).astype(np.float32)
-
-        rewards = np.array(
-            [exp.reward for exp in experiences]).reshape(-1, 1)
-
-        next_states = np.vstack(
-            [exp.next_state for exp in experiences]
-            ).astype(np.float32)
-
-        dones = np.array(
-            [exp.done for exp in experiences]).reshape(-1, 1)
+        experiences = self.buffer
 
         self.buffer = []
 
-        return (states, actions, rewards, next_states, dones), experiences
+        return experiences
 
 
-@ray.remote(num_cpus=1)
 class GlobalReplayBuffer:
 
     def __init__(self, max_len, capacity, alpha, beta, compress):
@@ -118,9 +101,9 @@ class GlobalReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-    def push_on_batch(self, priorities, experiences):
+    def push(self, priorities, experiences):
 
-        assert len(experiences) == len(priorities)
+        assert len(priorities) == len(experiences)
 
         for exp, priority in zip(experiences, priorities):
             self.sumtree[self.next_idx] = priority
