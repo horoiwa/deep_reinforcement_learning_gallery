@@ -50,6 +50,7 @@ class Actor:
 
     def define_network(self):
 
+        #: hide GPU from remote actor
         tf.config.set_visible_devices([], 'GPU')
 
         #: define by run

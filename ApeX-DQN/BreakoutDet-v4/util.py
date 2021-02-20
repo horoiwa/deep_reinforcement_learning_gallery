@@ -1,6 +1,7 @@
 import time
 import random
 
+import tensorflow as tf
 import numpy as np
 from PIL import Image
 
@@ -24,6 +25,18 @@ def preprocess_frame(frame):
     image = image.convert("L").crop((0, 34, 160, 200)).resize((84, 84))
     image_scaled = np.array(image) / 255.0
     return image_scaled.astype(np.float32)
+
+
+def huber_loss(target_q, q, d=1.0):
+    """
+    See https://github.com/tensorflow/tensorflow/blob/v2.4.1/tensorflow/python/keras/losses.py#L1098-L1162
+    """
+    td_error = target_q - q
+    is_smaller_than_d = tf.abs(td_error) < d
+    squared_loss = 0.5 * tf.square(td_error)
+    linear_loss = 0.5 * d ** 2 + d * (tf.abs(td_error) - d)
+    loss = tf.where(is_smaller_than_d, squared_loss, linear_loss)
+    return loss
 
 
 class SumTree:

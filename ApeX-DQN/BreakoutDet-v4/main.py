@@ -1,17 +1,19 @@
 import time
 import pickle
 import zlib
-import queue
 
 import ray
 import tensorflow as tf
+from tensorflow.python.client import device_lib
+gpus = tf.config.experimental.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(gpus[0], True)
 import gym
 import numpy as np
 
 from model import DuelingQNetwork
 from buffer import GlobalReplayBuffer
 from remote_actor import Actor
-from util import preprocess_frame, Timer
+from util import preprocess_frame, Timer, huber_loss
 
 
 @ray.remote
@@ -101,7 +103,7 @@ class Learner:
                 q = tf.reduce_sum(
                     qvalues * actions_onehot, axis=1, keepdims=True)
                 #td_loss = huber_loss(target_q, q)
-                td_loss = tf.square(target_q - q)
+                td_loss = tf.square(target_q -  q)
 
                 loss = tf.reduce_mean(per_weights * td_loss)
 
@@ -109,8 +111,8 @@ class Learner:
             self.optimizer.apply_gradients(
                 zip(grads, self.qnet.trainable_variables))
 
-            #:後処理
-            td_errors = td_loss.numpy().flatten()
+            indices_all += indices
+            td_errors_all += td_loss.numpy().flatten().tolist()
             self.update_count += 1
 
             if self.update_count % self.target_update_period == 0:
@@ -128,7 +130,7 @@ def main(env_name="BreakoutDeterministic-v4",
          global_buffer_size=2000000, priority_capacity=2**21,
          local_buffer_size=100, compress=True):
 
-    ray.init(local_mode=True)
+    ray.init(local_mode=False, num_cpus=8, num_gpus=1)
 
     learner = Learner.remote(
         env_name=env_name, gamma=gamma, nstep=nstep, lr=lr,
@@ -167,15 +169,7 @@ def main(env_name="BreakoutDeterministic-v4",
         current_weights, indices, td_errors = ray.get(orf)
         current_weights = ray.put(current_weights)
 
-    with Timer("16バッチ学習"):
-        orf = learner.update.remote(in_queue)
-        current_weights, indices, td_errors = ray.get(orf)
-        current_weights = ray.put(current_weights)
 
-    with Timer("16バッチ学習"):
-        orf = learner.update.remote(in_queue)
-        current_weights, indices, td_errors = ray.get(orf)
-        current_weights = ray.put(current_weights)
 
     ray.shutdown()
 
@@ -183,4 +177,4 @@ def main(env_name="BreakoutDeterministic-v4",
 if __name__ == "__main__":
     """ Memo
     """
-    main(num_actors=4)
+    main(num_actors=2)

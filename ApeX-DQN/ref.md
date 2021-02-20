@@ -23,3 +23,6 @@
 
 16バッチ解凍, 勾配計算(from 10000 transition)
 - 14-16 sec #: 勾配計算一回で2秒くらい？
+
+
+https://github.com/tensorflow/tensorflow/issues/25138
