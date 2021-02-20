@@ -21,7 +21,7 @@ def create_batch(minibatch):
     pass
 
 
-@ray.remote(num_cpus=4, num_gpus=1)
+@ray.remote(num_cpus=1, num_gpus=1)
 class Learner:
 
     def __init__(self, env_name, gamma, nstep, lr,
@@ -102,8 +102,7 @@ class Learner:
                     actions.flatten().astype(np.int32), self.action_space)
                 q = tf.reduce_sum(
                     qvalues * actions_onehot, axis=1, keepdims=True)
-                #td_loss = huber_loss(target_q, q)
-                td_loss = tf.square(target_q -  q)
+                td_loss = huber_loss(target_q, q)
 
                 loss = tf.reduce_mean(per_weights * td_loss)
 
@@ -130,7 +129,7 @@ def main(env_name="BreakoutDeterministic-v4",
          global_buffer_size=2000000, priority_capacity=2**21,
          local_buffer_size=100, compress=True):
 
-    ray.init(local_mode=False, num_cpus=8, num_gpus=1)
+    ray.init(local_mode=False)
 
     learner = Learner.remote(
         env_name=env_name, gamma=gamma, nstep=nstep, lr=lr,
@@ -152,7 +151,7 @@ def main(env_name="BreakoutDeterministic-v4",
     work_in_progreses = [actor.rollout.remote(current_weights) for actor in actors]
 
     with Timer("10000遷移収集"):
-        for _ in range(30):
+        for _ in range(100):
             finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
             priorities, experiences, pid = ray.get(finished[0])
             global_buffer.push(priorities, experiences)
@@ -169,12 +168,10 @@ def main(env_name="BreakoutDeterministic-v4",
         current_weights, indices, td_errors = ray.get(orf)
         current_weights = ray.put(current_weights)
 
-
-
     ray.shutdown()
 
 
 if __name__ == "__main__":
     """ Memo
     """
-    main(num_actors=2)
+    main(num_actors=6)
