@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 import collections
-import zlib
-import pickle
+import math
 
 import numpy as np
 
@@ -106,7 +105,7 @@ class GlobalReplayBuffer:
             self.buffer[self.next_idx] = exp
             self.next_idx += 1
 
-    def sample_minibatch(self, batch_size):
+    def sample_batch(self, batch_size):
 
         indices = [self.sumtree.sample() for _ in range(batch_size)]
 
@@ -127,9 +126,8 @@ class GlobalReplayBuffer:
         assert len(indices) == len(td_errors)
 
         for idx, td_error in zip(indices, td_errors):
-            priority = (np.abs(td_error) + 0.001) ** self.alpha
+            priority = (abs(td_error) + 0.001) ** self.alpha
             self.sumtree[idx] = priority**self.alpha
-            self.max_priority = max(self.max_priority, priority)
 
     def remove(self):
         pass

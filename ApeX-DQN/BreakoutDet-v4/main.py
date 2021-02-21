@@ -5,7 +5,6 @@ from concurrent import futures
 
 import ray
 import tensorflow as tf
-from tensorflow.python.client import device_lib
 import gym
 import numpy as np
 
@@ -16,7 +15,7 @@ from util import preprocess_frame, Timer, huber_loss
 
 
 
-@ray.remote(num_cpus=3, num_gpus=1)
+@ray.remote(num_cpus=1, num_gpus=1)
 class Learner:
 
     def __init__(self, env_name, gamma, nstep, lr,
@@ -57,25 +56,19 @@ class Learner:
         return self.qnet.get_weights()
 
     def update_qnetwork(self, compressed_minibatchs):
-        """
-            解凍, 勾配計算、重み返却
-            解凍をthreadingすると速い？
-        """
 
-        indices_all = []
-
-        td_errors_all = []
+        indices_all, td_errors_all = [], []
 
         with futures.ThreadPoolExecutor(max_workers=4) as executor:
-
+            """ batchをdecompressして整形する作業がわりと重いのでthreading
+            """
             work_in_progresses = [
                 executor.submit(self.prepare_minibatch, compressed)
                 for compressed in compressed_minibatchs]
 
             for ready_batch in futures.as_completed(work_in_progresses):
 
-                indices, per_weights, minibacth = ready_batch
-
+                indices, per_weights, minibacth = ready_batch.result()
                 states, actions, rewards, next_states, dones = minibacth
 
                 next_actions, _ = self.qnet.sample_actions(next_states)
@@ -114,8 +107,6 @@ class Learner:
 
     @staticmethod
     def prepare_minibatch(compressed_minibatch):
-        """ batchをdecompressして整形する作業がわりと重いので分離
-        """
         indices, per_weights, experiences = compressed_minibatch
 
         per_weights = tf.convert_to_tensor(
@@ -133,15 +124,46 @@ class Learner:
         return indices, per_weights, (states, actions, rewards, next_states, dones)
 
 
-def main(env_name="BreakoutDeterministic-v4",
-         num_actors=5, gamma=0.99, batch_size=512,
-         n_frames=4, lr=0.00025, epsilon=0.4, eps_alpha=0.7,
-         target_update_period=2500,
-         reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
-         global_buffer_size=2000000, priority_capacity=2**21,
-         local_buffer_size=100, compress=True):
+def main(
+    env_name="BreakoutDeterministic-v4",
+    num_actors=5, gamma=0.99, batch_size=512,
+    n_frames=4, lr=0.00025, epsilon=0.4, eps_alpha=0.7,
+    target_update_period=2500, num_minibatchs=16,
+    reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
+    global_buffer_size=2000000, priority_capacity=2**21,
+    local_buffer_size=100, compress=True):
 
-    ray.init(local_mode=True)
+    ray.init(local_mode=False)
+
+    learner = Learner.remote(
+        env_name=env_name, gamma=gamma, nstep=nstep, lr=lr,
+        target_update_period=target_update_period, n_frames=n_frames)
+
+    global_buffer = GlobalReplayBuffer(
+        max_len=global_buffer_size, capacity=priority_capacity,
+        alpha=alpha, beta=beta)
+
+    actors = [Actor.remote(
+        pid=i, env_name=env_name,
+        epsilon=epsilon ** (1 + eps_alpha * i / (num_actors - 1)),
+        buffer_size=local_buffer_size,
+        gamma=gamma, n_frames=n_frames, alpha=alpha,
+        reward_clip=reward_clip, nstep=nstep,
+        ) for i in range(num_actors)]
+
+    ray.shutdown()
+
+
+def test_performance(
+    env_name="BreakoutDeterministic-v4",
+    num_actors=5, gamma=0.99, batch_size=512,
+    n_frames=4, lr=0.00025, epsilon=0.4, eps_alpha=0.7,
+    target_update_period=2500, num_minibatchs=16,
+    reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
+    global_buffer_size=2000000, priority_capacity=2**21,
+    local_buffer_size=100, compress=True):
+
+    ray.init(local_mode=False)
 
     learner = Learner.remote(
         env_name=env_name, gamma=gamma, nstep=nstep, lr=lr,
@@ -163,17 +185,18 @@ def main(env_name="BreakoutDeterministic-v4",
     work_in_progreses = [actor.rollout.remote(current_weights) for actor in actors]
 
     with Timer("10000遷移収集"):
-        for _ in range(20):
+        for _ in range(100):
             finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
             priorities, experiences, pid = ray.get(finished[0])
             global_buffer.push(priorities, experiences)
             work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
 
     with Timer("16バッチ作成"):
-        in_queue = [global_buffer.sample_minibatch(batch_size) for _ in range(batch_size)]
+        compressed_minibatchs = [
+            global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
 
     with Timer("16バッチ学習"):
-        orf = learner.update_qnetwork.remote(in_queue)
+        orf = learner.update_qnetwork.remote(compressed_minibatchs)
         current_weights, indices, td_errors = ray.get(orf)
         current_weights = ray.put(current_weights)
 
@@ -186,4 +209,4 @@ def main(env_name="BreakoutDeterministic-v4",
 if __name__ == "__main__":
     """ Memo
     """
-    main(num_actors=2)
+    test_performance(num_actors=12)

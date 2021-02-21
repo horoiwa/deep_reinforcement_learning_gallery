@@ -4,6 +4,7 @@
 - 6actor 17.4 sec
 - 8actor 15.2 sec
 
+- 23 actor 6sec
 
 
 100遷移の格納
@@ -17,12 +18,17 @@
 
 16バッチ解凍(from 10000 transition)
 - 4-5 sec #:16バッチのexp解凍に4秒
+直列で処理すると１バッチの解凍だけで0.4-0.5秒程度消費する
 
 16バッチthreading解凍(from 10000 transition)
-- ?
+- 2.5 sec
+threadingの数を増やしすぎると最初のバッチがreadyになるのが遅くなるのでパフォーマンスが下がる
 
 16バッチ解凍, 勾配計算(from 10000 transition)
 - 14-16 sec #: 勾配計算一回で2秒くらい？
 
+16バッチ threading 解凍, 勾配計算(from 10000 transition)
+- 5 sec
 
-https://github.com/tensorflow/tensorflow/issues/25138
+16バッチ優先度更新：
+0.1-0.15 sec
