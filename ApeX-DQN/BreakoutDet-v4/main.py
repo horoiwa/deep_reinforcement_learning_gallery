@@ -1,12 +1,11 @@
 import time
 import pickle
 import zlib
+from concurrent import futures
 
 import ray
 import tensorflow as tf
 from tensorflow.python.client import device_lib
-gpus = tf.config.experimental.list_physical_devices('GPU')
-tf.config.experimental.set_memory_growth(gpus[0], True)
 import gym
 import numpy as np
 
@@ -16,12 +15,8 @@ from remote_actor import Actor
 from util import preprocess_frame, Timer, huber_loss
 
 
-@ray.remote
-def create_batch(minibatch):
-    pass
 
-
-@ray.remote(num_cpus=1, num_gpus=1)
+@ray.remote(num_cpus=3, num_gpus=1)
 class Learner:
 
     def __init__(self, env_name, gamma, nstep, lr,
@@ -61,7 +56,7 @@ class Learner:
 
         return self.qnet.get_weights()
 
-    def update(self, in_queue):
+    def update_qnetwork(self, compressed_minibatchs):
         """
             解凍, 勾配計算、重み返却
             解凍をthreadingすると速い？
@@ -71,54 +66,71 @@ class Learner:
 
         td_errors_all = []
 
-        for (indices, per_weights, experiences) in in_queue:
+        with futures.ThreadPoolExecutor(max_workers=4) as executor:
 
-            #: prepare
-            per_weights = tf.convert_to_tensor(
-                per_weights.reshape(-1, 1), dtype=tf.float32)
-            experiences = [pickle.loads(zlib.decompress(exp)) for exp in experiences]
+            work_in_progresses = [
+                executor.submit(self.prepare_minibatch, compressed)
+                for compressed in compressed_minibatchs]
 
-            states = np.vstack([exp.state for exp in experiences]).astype(np.float32)
-            actions = np.vstack([exp.action for exp in experiences]).astype(np.float32)
-            rewards = np.array([exp.reward for exp in experiences]).reshape(-1, 1)
-            next_states = np.vstack(
-                [exp.next_state for exp in experiences]).astype(np.float32)
-            dones = np.array([exp.done for exp in experiences]).reshape(-1, 1)
+            for ready_batch in futures.as_completed(work_in_progresses):
 
-            #: compute gradients
-            next_actions, _ = self.qnet.sample_actions(next_states)
-            _, next_qvalues = self.target_qnet.sample_actions(next_states)
+                indices, per_weights, minibacth = ready_batch
 
-            next_actions_onehot = tf.one_hot(next_actions, self.action_space)
-            max_next_qvalues = tf.reduce_sum(
-                next_qvalues * next_actions_onehot, axis=1, keepdims=True)
+                states, actions, rewards, next_states, dones = minibacth
 
-            target_q = rewards + self.gamma ** (self.nstep) * (1 - dones) * max_next_qvalues
+                next_actions, _ = self.qnet.sample_actions(next_states)
+                _, next_qvalues = self.target_qnet.sample_actions(next_states)
 
-            with tf.GradientTape() as tape:
+                next_actions_onehot = tf.one_hot(next_actions, self.action_space)
+                max_next_qvalues = tf.reduce_sum(
+                    next_qvalues * next_actions_onehot, axis=1, keepdims=True)
 
-                qvalues = self.qnet(states)
-                actions_onehot = tf.one_hot(
-                    actions.flatten().astype(np.int32), self.action_space)
-                q = tf.reduce_sum(
-                    qvalues * actions_onehot, axis=1, keepdims=True)
-                td_loss = huber_loss(target_q, q)
+                target_q = rewards + self.gamma ** (self.nstep) * (1 - dones) * max_next_qvalues
 
-                loss = tf.reduce_mean(per_weights * td_loss)
+                with tf.GradientTape() as tape:
 
-            grads = tape.gradient(loss, self.qnet.trainable_variables)
-            self.optimizer.apply_gradients(
-                zip(grads, self.qnet.trainable_variables))
+                    qvalues = self.qnet(states)
+                    actions_onehot = tf.one_hot(
+                        actions.flatten().astype(np.int32), self.action_space)
+                    q = tf.reduce_sum(
+                        qvalues * actions_onehot, axis=1, keepdims=True)
+                    td_loss = huber_loss(target_q, q)
 
-            indices_all += indices
-            td_errors_all += td_loss.numpy().flatten().tolist()
-            self.update_count += 1
+                    loss = tf.reduce_mean(per_weights * td_loss)
 
-            if self.update_count % self.target_update_period == 0:
-                self.target_qnet.set_weights(self.qnet.get_weights())
+                grads = tape.gradient(loss, self.qnet.trainable_variables)
+                self.optimizer.apply_gradients(
+                    zip(grads, self.qnet.trainable_variables))
+
+                indices_all += indices
+                td_errors_all += td_loss.numpy().flatten().tolist()
+                self.update_count += 1
+
+                if self.update_count % self.target_update_period == 0:
+                    self.target_qnet.set_weights(self.qnet.get_weights())
 
         current_weights = self.qnet.get_weights()
         return current_weights, indices_all, td_errors_all
+
+    @staticmethod
+    def prepare_minibatch(compressed_minibatch):
+        """ batchをdecompressして整形する作業がわりと重いので分離
+        """
+        indices, per_weights, experiences = compressed_minibatch
+
+        per_weights = tf.convert_to_tensor(
+            per_weights.reshape(-1, 1), dtype=tf.float32)
+
+        experiences = [pickle.loads(zlib.decompress(exp)) for exp in experiences]
+
+        states = np.vstack([exp.state for exp in experiences]).astype(np.float32)
+        actions = np.vstack([exp.action for exp in experiences]).astype(np.float32)
+        rewards = np.array([exp.reward for exp in experiences]).reshape(-1, 1)
+        next_states = np.vstack(
+            [exp.next_state for exp in experiences]).astype(np.float32)
+        dones = np.array([exp.done for exp in experiences]).reshape(-1, 1)
+
+        return indices, per_weights, (states, actions, rewards, next_states, dones)
 
 
 def main(env_name="BreakoutDeterministic-v4",
@@ -129,7 +141,7 @@ def main(env_name="BreakoutDeterministic-v4",
          global_buffer_size=2000000, priority_capacity=2**21,
          local_buffer_size=100, compress=True):
 
-    ray.init(local_mode=False)
+    ray.init(local_mode=True)
 
     learner = Learner.remote(
         env_name=env_name, gamma=gamma, nstep=nstep, lr=lr,
@@ -151,22 +163,22 @@ def main(env_name="BreakoutDeterministic-v4",
     work_in_progreses = [actor.rollout.remote(current_weights) for actor in actors]
 
     with Timer("10000遷移収集"):
-        for _ in range(100):
+        for _ in range(20):
             finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
             priorities, experiences, pid = ray.get(finished[0])
             global_buffer.push(priorities, experiences)
             work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
 
-    in_queue = []
     with Timer("16バッチ作成"):
-        for _ in range(16):
-            minibatch = global_buffer.sample_minibatch(batch_size)
-            in_queue.append(minibatch)
+        in_queue = [global_buffer.sample_minibatch(batch_size) for _ in range(batch_size)]
 
     with Timer("16バッチ学習"):
-        orf = learner.update.remote(in_queue)
+        orf = learner.update_qnetwork.remote(in_queue)
         current_weights, indices, td_errors = ray.get(orf)
         current_weights = ray.put(current_weights)
+
+    with Timer("16バッチ優先度更新"):
+        global_buffer.update_priorities(indices, td_errors)
 
     ray.shutdown()
 
@@ -174,4 +186,4 @@ def main(env_name="BreakoutDeterministic-v4",
 if __name__ == "__main__":
     """ Memo
     """
-    main(num_actors=6)
+    main(num_actors=2)

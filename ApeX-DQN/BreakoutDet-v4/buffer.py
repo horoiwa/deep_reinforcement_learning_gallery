@@ -101,7 +101,7 @@ class GlobalReplayBuffer:
     def push(self, priorities, experiences):
 
         assert len(priorities) == len(experiences)
-        for  priority, exp in zip(priorities, experiences):
+        for priority, exp in zip(priorities, experiences):
             self.sumtree[self.next_idx] = priority
             self.buffer[self.next_idx] = exp
             self.next_idx += 1
