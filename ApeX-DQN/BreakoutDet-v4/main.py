@@ -17,7 +17,7 @@ from util import preprocess_frame, Timer, huber_loss
 @ray.remote(num_cpus=1, num_gpus=1)
 class Learner:
 
-    def __init__(self, env_name, gamma, nstep, lr,
+    def __init__(self, env_name, gamma, nstep,
                  target_update_period, n_frames):
 
         self.env_name = env_name
@@ -36,7 +36,7 @@ class Learner:
 
         self.n_frames = n_frames
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=lr)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0001)
 
         self.update_count = 0
 
@@ -99,6 +99,7 @@ class Learner:
                 self.update_count += 1
 
                 if self.update_count % self.target_update_period == 0:
+                    print("== target_update ==")
                     self.target_qnet.set_weights(self.qnet.get_weights())
 
         current_weights = self.qnet.get_weights()
@@ -125,8 +126,8 @@ class Learner:
 
 def main(num_actors, env_name="BreakoutDeterministic-v4",
          gamma=0.99, batch_size=512,
-         n_frames=4, lr=0.00025, epsilon=0.4, eps_alpha=0.7,
-         target_update_period=2500, num_minibatchs=16,
+         n_frames=4, epsilon=0.4, eps_alpha=0.7,
+         target_update_period=1600, num_minibatchs=16,
          reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
          global_buffer_size=2**21,
          local_buffer_size=100, compress=True):
@@ -146,7 +147,7 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
         ) for i in range(num_actors)]
 
     learner = Learner.remote(
-        env_name=env_name, gamma=gamma, nstep=nstep, lr=lr,
+        env_name=env_name, gamma=gamma, nstep=nstep,
         target_update_period=target_update_period, n_frames=n_frames)
 
     test_actor = TestActor.remote(env_name=env_name)
@@ -163,46 +164,58 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
         global_buffer.push(priorities, experiences)
         work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
 
+    print("Setup finished")
+
     minibatchs = [global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
-    learner_future = learner.update_qnetwork.remote(minibatchs)
+    learner_job = learner.update_qnetwork.remote(minibatchs)
+    learner_count += 1
 
     next_minibatchs = [global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
 
-    test_feature = test_actor.play.remote(current_weights)
+    tester_job = test_actor.play.remote(current_weights)
 
-    actor_count = 0
-    while True:
-        finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
-        priorities, experiences, pid = ray.get(finished[0])
+    s = time.time()
+    count = 0
+    while learner_count <= 2000:
+
+        actor_finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
+        priorities, experiences, pid = ray.get(actor_finished[0])
         global_buffer.push(priorities, experiences)
         work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
-        actor_count += 1
+        count += 1
 
-        if actor_count >= 10:
+        if count == 30:
+            learner_finished, _ = ray.wait([learner_job], num_returns=1)
+        else:
+            learner_finished, _ = ray.wait([learner_job], timeout=0)
 
-            finished, _ = ray.wait(learner_future, timeout=0)
+        if learner_finished:
+            current_weights, indices, td_errors = ray.get(learner_finished[0])
+            current_weights = ray.put(current_weights)
 
-            if finished:
-                print(actor_count)
-                current_weights, indices, td_errors = ray.get(finished)
-                current_weights = ray.put(current_weights)
+            learner_job = learner.update_qnetwork.remote(next_minibatchs)
 
-                learner_future = learner.update_qnetwork.remote(next_minibatchs)
+            global_buffer.update_priorities(indices, td_errors)
+            next_minibatchs = [global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
 
-                global_buffer.update_priorities(indices, td_errors)
-                next_minibatchs = [global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
+            learner_count += 1
+            count = 0
 
-                actor_count = 0
+            if learner_count % 20 == 0:
+                episode_steps, episode_rewards = ray.get(tester_job)
+                tester_job = test_actor.play.remote(current_weights)
+                buffer_size = len(global_buffer)
+                print(learner_count, episode_steps, episode_rewards)
+                s = time.time()
 
-        if learner_count % 1000 == 0:
-            episode_steps, episode_rewards = ray.get(test_feature)
-            print(learner_count, episode_steps, episode_rewards)
-            test_feature = test_actor.play.remote(current_weights)
+
+def test_play():
+    pass
 
 
 def test_performance(num_actors, env_name="BreakoutDeterministic-v4",
                      gamma=0.99, batch_size=512,
-                     n_frames=4, lr=0.00025, epsilon=0.4, eps_alpha=0.7,
+                     n_frames=4, epsilon=0.4, eps_alpha=0.7,
                      target_update_period=2500, num_minibatchs=16,
                      reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
                      global_buffer_size=2000000, priority_capacity=2**21,
@@ -211,7 +224,7 @@ def test_performance(num_actors, env_name="BreakoutDeterministic-v4",
     ray.init(local_mode=False)
 
     learner = Learner.remote(
-        env_name=env_name, gamma=gamma, nstep=nstep, lr=lr,
+        env_name=env_name, gamma=gamma, nstep=nstep,
         target_update_period=target_update_period, n_frames=n_frames)
 
     global_buffer = GlobalReplayBuffer(
@@ -252,5 +265,6 @@ def test_performance(num_actors, env_name="BreakoutDeterministic-v4",
 
 
 if __name__ == "__main__":
-    main(num_actors=2)
+    main(num_actors=20)
+    test_play()
     #test_performance(num_actors=12)
