@@ -194,12 +194,13 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
         work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
         count += 1
 
-        if count == 50:
+        if count == 40:
             learner_finished, _ = ray.wait([learner_job], num_returns=1)
         else:
             learner_finished, _ = ray.wait([learner_job], timeout=0)
 
         if learner_finished:
+            print(learner_count)
             current_weights, indices, td_errors = ray.get(learner_finished[0])
             current_weights = ray.put(current_weights)
 
@@ -212,7 +213,6 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
             count = 0
 
             if learner_count % 20 == 0:
-                print(learner_count)
                 episode_steps, episode_rewards = ray.get(tester_job)
                 layers = ray.get(test_actor.get_layers.remote(-3))
                 tester_job = test_actor.play.remote(current_weights)
