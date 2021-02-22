@@ -1,6 +1,8 @@
 import time
 import pickle
 import zlib
+import shutil
+from pathlib import Path
 from concurrent import futures
 
 import ray
@@ -10,7 +12,7 @@ import numpy as np
 
 from model import DuelingQNetwork
 from buffer import GlobalReplayBuffer
-from remote_actor import Actor, TestActor
+from remote_actor import Actor, RemoteTestActor
 from util import preprocess_frame, Timer, huber_loss
 
 
@@ -53,6 +55,9 @@ class Learner:
         self.target_qnet.set_weights(self.qnet.get_weights())
 
         return self.qnet.get_weights()
+
+    def save(self, save_path):
+        self.qnet.save_weights(save_path)
 
     def update_qnetwork(self, compressed_minibatchs):
 
@@ -127,12 +132,17 @@ class Learner:
 def main(num_actors, env_name="BreakoutDeterministic-v4",
          gamma=0.99, batch_size=512,
          n_frames=4, epsilon=0.4, eps_alpha=0.7,
-         target_update_period=1600, num_minibatchs=16,
+         target_update_period=2500, num_minibatchs=16,
          reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
          global_buffer_size=2**21,
          local_buffer_size=100, compress=True):
 
     ray.init(local_mode=False)
+
+    logdir = Path(__file__).parent / "log"
+    if logdir.exists():
+        shutil.rmtree(logdir)
+    summary_writer = tf.summary.create_file_writer(str(logdir))
 
     global_buffer = GlobalReplayBuffer(
         capacity=global_buffer_size,
@@ -150,9 +160,9 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
         env_name=env_name, gamma=gamma, nstep=nstep,
         target_update_period=target_update_period, n_frames=n_frames)
 
-    test_actor = TestActor.remote(env_name=env_name)
-
     current_weights = ray.put(ray.get(learner.define_network.remote()))
+
+    test_actor = RemoteTestActor.remote(env_name=env_name)
 
     work_in_progreses = [actor.rollout.remote(current_weights) for actor in actors]
 
@@ -176,7 +186,7 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
 
     s = time.time()
     count = 0
-    while learner_count <= 2000:
+    while learner_count <= 2500:
 
         actor_finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
         priorities, experiences, pid = ray.get(actor_finished[0])
@@ -184,7 +194,7 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
         work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
         count += 1
 
-        if count == 30:
+        if count == 50:
             learner_finished, _ = ray.wait([learner_job], num_returns=1)
         else:
             learner_finished, _ = ray.wait([learner_job], timeout=0)
@@ -202,15 +212,38 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
             count = 0
 
             if learner_count % 20 == 0:
+                print(learner_count)
                 episode_steps, episode_rewards = ray.get(tester_job)
+                layers = ray.get(test_actor.get_layers.remote(-3))
                 tester_job = test_actor.play.remote(current_weights)
-                buffer_size = len(global_buffer)
-                print(learner_count, episode_steps, episode_rewards)
+                elapsed_time = (time.time() - s) / 20
+
+                with summary_writer.as_default():
+                    tf.summary.scalar("test_steps", episode_steps, step=learner_count)
+                    tf.summary.scalar("test_rewards", episode_rewards, step=learner_count)
+                    tf.summary.scalar("buffer_size", len(global_buffer), step=learner_count)
+                    tf.summary.scalar("Elapsed time", elapsed_time, step=learner_count)
+
+                    for layer in layers:
+                        for var in layer.variables:
+                            tf.summary.histogram(var.name, var, step=learner_count)
+
+                print(learner_count, episode_steps,  episode_rewards)
                 s = time.time()
 
+            if learner_count % 500 == 0:
+                print("Model Saved")
+                learner.save.remote("checkpoints/qnet")
 
-def test_play():
-    pass
+
+def test_play(env_name="BreakoutDeterministic-v4"):
+
+    ray.init()
+    test_actor = RemoteTestActor.remote(env_name=env_name)
+    res = test_actor.play_with_video.remote(
+            checkpoint_path="checkpoints/qnet", monitor_dir="mp4")
+    rewards = ray.get(res)
+    print(rewards)
 
 
 def test_performance(num_actors, env_name="BreakoutDeterministic-v4",

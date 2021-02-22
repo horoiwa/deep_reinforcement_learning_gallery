@@ -34,6 +34,7 @@ class LocalReplayBuffer:
         self.next_idx = 0
 
     def __len__(self):
+
         return len(self.buffer)
 
     def push(self, transition):
@@ -91,8 +92,11 @@ class GlobalReplayBuffer:
 
         self.next_idx = 0
 
+        self.full = False
+
     def __len__(self):
-        return len(self.buffer)
+
+        return len(self.buffer) if self.full else self.next_idx
 
     def push(self, priorities, experiences):
 
@@ -103,6 +107,7 @@ class GlobalReplayBuffer:
             self.buffer[self.next_idx] = exp
             self.next_idx += 1
             if self.next_idx == self.capacity:
+                self.full = True
                 self.next_idx = 0
 
     def sample_batch(self, batch_size):

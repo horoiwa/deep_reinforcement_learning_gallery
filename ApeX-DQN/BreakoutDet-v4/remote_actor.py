@@ -1,6 +1,8 @@
 import collections
 import pickle
 import zlib
+from pathlib import Path
+import shutil
 
 import ray
 import gym
@@ -132,9 +134,11 @@ class Actor:
 
 
 @ray.remote(num_cpus=1)
-class TestActor:
+class RemoteTestActor:
 
     def __init__(self, env_name, n_frames=4):
+
+        self.env_name = env_name
 
         self.env = gym.make(env_name)
 
@@ -164,19 +168,27 @@ class TestActor:
 
         self.qnet(state)
 
+    def get_layers(self, idx):
+        return self.qnet.layers[idx:]
+
     def play(self, current_weights):
 
         self.qnet.set_weights(current_weights)
 
         episode_steps, episode_rewards = 0, 0
 
+        frame = preprocess_frame(self.env.reset())
+        for _ in range(self.n_frames):
+            self.frames.append(frame)
+
         state = np.stack(self.frames, axis=2)[np.newaxis, ...]
 
-        while True:
+        done = False
+        while not done:
 
             state = np.stack(self.frames, axis=2)[np.newaxis, ...]
 
-            action = self.qnet.sample_action(state, epsilon=0.05)
+            action = self.qnet.sample_action(state, epsilon=0.1)
 
             next_frame, reward, done, _ = self.env.step(action)
 
@@ -186,10 +198,48 @@ class TestActor:
 
             episode_rewards += reward
 
-            if done or (episode_steps > 1000 and episode_rewards < 10):
-                frame = preprocess_frame(self.env.reset())
-                for _ in range(self.n_frames):
-                    self.frames.append(frame)
+            if episode_steps > 1000 and episode_rewards < 10:
                 break
 
         return episode_steps, episode_rewards
+
+    def play_with_video(self, checkpoint_path, monitor_dir):
+
+        monitor_dir = Path(monitor_dir)
+        if monitor_dir.exists():
+            shutil.rmtree(monitor_dir)
+        monitor_dir.mkdir()
+        env = gym.wrappers.Monitor(
+            gym.make(self.env_name), monitor_dir, force=True,
+            video_callable=(lambda ep: True))
+
+        frame = preprocess_frame(env.reset())
+        frames = collections.deque(
+            [frame] * self.n_frames, maxlen=self.n_frames)
+
+        state = np.stack(frames, axis=2)[np.newaxis, ...]
+        self.qnet(state)
+        self.qnet.load_weights(checkpoint_path)
+
+        episode_steps, episode_rewards = 0, 0
+
+        state = np.stack(self.frames, axis=2)[np.newaxis, ...]
+
+        done = False
+        while not done:
+
+            state = np.stack(self.frames, axis=2)[np.newaxis, ...]
+
+            action = self.qnet.sample_action(state, epsilon=0.05)
+            print(action)
+
+            next_frame, reward, done, _ = self.env.step(action)
+
+            self.frames.append(preprocess_frame(next_frame))
+
+            episode_steps += 1
+
+            episode_rewards += reward
+
+        return episode_rewards
+
