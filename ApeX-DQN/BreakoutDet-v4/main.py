@@ -10,9 +10,8 @@ import numpy as np
 
 from model import DuelingQNetwork
 from buffer import GlobalReplayBuffer
-from remote_actor import Actor
+from remote_actor import Actor, TestActor
 from util import preprocess_frame, Timer, huber_loss
-
 
 
 @ray.remote(num_cpus=1, num_gpus=1)
@@ -124,23 +123,18 @@ class Learner:
         return indices, per_weights, (states, actions, rewards, next_states, dones)
 
 
-def main(
-    env_name="BreakoutDeterministic-v4",
-    num_actors=5, gamma=0.99, batch_size=512,
-    n_frames=4, lr=0.00025, epsilon=0.4, eps_alpha=0.7,
-    target_update_period=2500, num_minibatchs=16,
-    reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
-    global_buffer_size=2000000, priority_capacity=2**21,
-    local_buffer_size=100, compress=True):
+def main(num_actors, env_name="BreakoutDeterministic-v4",
+         gamma=0.99, batch_size=512,
+         n_frames=4, lr=0.00025, epsilon=0.4, eps_alpha=0.7,
+         target_update_period=2500, num_minibatchs=16,
+         reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
+         global_buffer_size=2**21,
+         local_buffer_size=100, compress=True):
 
     ray.init(local_mode=False)
 
-    learner = Learner.remote(
-        env_name=env_name, gamma=gamma, nstep=nstep, lr=lr,
-        target_update_period=target_update_period, n_frames=n_frames)
-
     global_buffer = GlobalReplayBuffer(
-        max_len=global_buffer_size, capacity=priority_capacity,
+        capacity=global_buffer_size,
         alpha=alpha, beta=beta)
 
     actors = [Actor.remote(
@@ -151,17 +145,68 @@ def main(
         reward_clip=reward_clip, nstep=nstep,
         ) for i in range(num_actors)]
 
-    ray.shutdown()
+    learner = Learner.remote(
+        env_name=env_name, gamma=gamma, nstep=nstep, lr=lr,
+        target_update_period=target_update_period, n_frames=n_frames)
+
+    test_actor = TestActor.remote(env_name=env_name)
+
+    current_weights = ray.put(ray.get(learner.define_network.remote()))
+
+    work_in_progreses = [actor.rollout.remote(current_weights) for actor in actors]
+
+    learner_count = 0
+    MIN_EXPERIENCES = 50000
+    for _ in range(MIN_EXPERIENCES // local_buffer_size):
+        finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
+        priorities, experiences, pid = ray.get(finished[0])
+        global_buffer.push(priorities, experiences)
+        work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
+
+    minibatchs = [global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
+    learner_future = learner.update_qnetwork.remote(minibatchs)
+
+    next_minibatchs = [global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
+
+    test_feature = test_actor.play.remote(current_weights)
+
+    local_count = 0
+    while True:
+        finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
+        priorities, experiences, pid = ray.get(finished[0])
+        global_buffer.push(priorities, experiences)
+        work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
+        local_count += 1
+
+        if local_count >= 10:
+
+            finished, _ = ray.wait(learner_future, timeout=0)
+
+            if finished:
+                print(local_count)
+                current_weights, indices, td_errors = ray.get(finished)
+                current_weights = ray.put(current_weights)
+
+                learner_future = learner.update_qnetwork.remote(next_minibatchs)
+
+                global_buffer.update_priorities(indices, td_errors)
+                next_minibatchs = [global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
+
+                local_count = 0
+
+        if learner_count % 1000 == 0:
+            episode_steps, episode_rewards = ray.get(test_feature)
+            print(learner_count, episode_steps, episode_rewards)
+            test_feature = test_actor.play.remote(current_weights)
 
 
-def test_performance(
-    env_name="BreakoutDeterministic-v4",
-    num_actors=5, gamma=0.99, batch_size=512,
-    n_frames=4, lr=0.00025, epsilon=0.4, eps_alpha=0.7,
-    target_update_period=2500, num_minibatchs=16,
-    reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
-    global_buffer_size=2000000, priority_capacity=2**21,
-    local_buffer_size=100, compress=True):
+def test_performance(num_actors, env_name="BreakoutDeterministic-v4",
+                     gamma=0.99, batch_size=512,
+                     n_frames=4, lr=0.00025, epsilon=0.4, eps_alpha=0.7,
+                     target_update_period=2500, num_minibatchs=16,
+                     reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
+                     global_buffer_size=2000000, priority_capacity=2**21,
+                     local_buffer_size=100, compress=True):
 
     ray.init(local_mode=False)
 
@@ -207,6 +252,5 @@ def test_performance(
 
 
 if __name__ == "__main__":
-    """ Memo
-    """
-    test_performance(num_actors=12)
+    main(num_actors=2)
+    #test_performance(num_actors=12)

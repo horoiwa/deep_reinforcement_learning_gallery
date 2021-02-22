@@ -104,4 +104,3 @@ if __name__ == "__main__":
     print(samples.count(1))
     print(samples.count(2))
     print(samples.count(3))
-

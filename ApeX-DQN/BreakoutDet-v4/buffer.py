@@ -75,16 +75,13 @@ class LocalReplayBuffer:
 
 class GlobalReplayBuffer:
 
-    def __init__(self, max_len, capacity, alpha, beta):
+    def __init__(self, capacity, alpha, beta):
 
-        assert capacity >= max_len, f"{capacity}  >= {max_len}"
         assert capacity & (capacity - 1) == 0
-
-        self.max_len = max_len
 
         self.capacity = capacity
 
-        self.buffer = [0] * self.capacity
+        self.buffer = [None] * self.capacity
 
         self.sumtree = util.SumTree(capacity=capacity)
 
@@ -100,10 +97,13 @@ class GlobalReplayBuffer:
     def push(self, priorities, experiences):
 
         assert len(priorities) == len(experiences)
+
         for priority, exp in zip(priorities, experiences):
             self.sumtree[self.next_idx] = priority
             self.buffer[self.next_idx] = exp
             self.next_idx += 1
+            if self.next_idx == self.capacity:
+                self.next_idx = 0
 
     def sample_batch(self, batch_size):
 
@@ -128,9 +128,6 @@ class GlobalReplayBuffer:
         for idx, td_error in zip(indices, td_errors):
             priority = (abs(td_error) + 0.001) ** self.alpha
             self.sumtree[idx] = priority**self.alpha
-
-    def remove(self):
-        pass
 
 
 if __name__ == "__main__":

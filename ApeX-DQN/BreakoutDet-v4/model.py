@@ -3,24 +3,7 @@ import tensorflow as tf
 import tensorflow.keras.layers as kl
 
 
-class SamplingMixin:
-
-    def sample_action(self, x, epsilon):
-        if np.random.random() > epsilon:
-            selected_actions, _ = self.sample_actions(x)
-            selected_action = selected_actions.numpy()[0]
-        else:
-            selected_action = np.random.choice(self.action_space)
-
-        return selected_action
-
-    def sample_actions(self, x):
-        qvalues = self(x)
-        selected_actions = tf.cast(tf.argmax(qvalues, axis=1), tf.int32)
-        return selected_actions, qvalues
-
-
-class DuelingQNetwork(tf.keras.Model, SamplingMixin):
+class DuelingQNetwork(tf.keras.Model):
 
     def __init__(self, action_space):
 
@@ -65,3 +48,16 @@ class DuelingQNetwork(tf.keras.Model, SamplingMixin):
 
         return q_values
 
+    def sample_action(self, x, epsilon):
+        if np.random.random() > epsilon:
+            selected_actions, _ = self.sample_actions(x)
+            selected_action = selected_actions.numpy()[0]
+        else:
+            selected_action = np.random.choice(self.action_space)
+
+        return selected_action
+
+    def sample_actions(self, x):
+        qvalues = self(x)
+        selected_actions = tf.cast(tf.argmax(qvalues, axis=1), tf.int32)
+        return selected_actions, qvalues
