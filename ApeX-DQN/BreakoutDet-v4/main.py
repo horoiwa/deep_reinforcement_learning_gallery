@@ -170,20 +170,20 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
 
     test_feature = test_actor.play.remote(current_weights)
 
-    local_count = 0
+    actor_count = 0
     while True:
         finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
         priorities, experiences, pid = ray.get(finished[0])
         global_buffer.push(priorities, experiences)
         work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
-        local_count += 1
+        actor_count += 1
 
-        if local_count >= 10:
+        if actor_count >= 10:
 
             finished, _ = ray.wait(learner_future, timeout=0)
 
             if finished:
-                print(local_count)
+                print(actor_count)
                 current_weights, indices, td_errors = ray.get(finished)
                 current_weights = ray.put(current_weights)
 
@@ -192,7 +192,7 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
                 global_buffer.update_priorities(indices, td_errors)
                 next_minibatchs = [global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
 
-                local_count = 0
+                actor_count = 0
 
         if learner_count % 1000 == 0:
             episode_steps, episode_rewards = ray.get(test_feature)
