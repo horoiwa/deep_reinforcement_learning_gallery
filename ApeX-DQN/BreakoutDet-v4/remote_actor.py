@@ -46,6 +46,10 @@ class Actor:
 
         self.local_qnet = DuelingQNetwork(action_space=self.action_space)
 
+        self.episode_steps = 0
+
+        self.episode_rewards = 0
+
         self.lives = 5  #: Breakout only
 
         self.define_network()
@@ -65,6 +69,8 @@ class Actor:
 
     def rollout(self, current_weights):
 
+        tf.config.set_visible_devices([], 'GPU')
+
         self.local_qnet.set_weights(current_weights)
 
         state = np.stack(self.frames, axis=2)[np.newaxis, ...]
@@ -76,6 +82,10 @@ class Actor:
             action = self.local_qnet.sample_action(state, self.epsilon)
 
             next_frame, reward, done, info = self.env.step(action)
+
+            self.episode_steps += 1
+
+            self.episode_rewards += reward
 
             self.frames.append(preprocess_frame(next_frame))
 
@@ -91,6 +101,9 @@ class Actor:
             self.local_buffer.push(transition)
 
             if done:
+                print(self.pid, self.episode_steps, self.episode_rewards, self.epsilon)
+                self.episode_steps = 0
+                self.episode_rewards = 0
                 self.lives = 5
                 frame = preprocess_frame(self.env.reset())
                 for _ in range(self.n_frames):

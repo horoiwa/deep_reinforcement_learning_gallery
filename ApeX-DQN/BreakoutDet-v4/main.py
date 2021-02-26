@@ -20,7 +20,7 @@ from util import preprocess_frame, Timer, huber_loss
 class Learner:
 
     def __init__(self, env_name, gamma, nstep,
-                 target_update_period, n_frames):
+                 target_update_period, n_frames, logdir):
 
         self.env_name = env_name
 
@@ -38,7 +38,9 @@ class Learner:
 
         self.n_frames = n_frames
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.0001)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00015)
+
+        self.summary_writer = tf.summary.create_file_writer(str(logdir))
 
         self.update_count = 0
 
@@ -62,7 +64,6 @@ class Learner:
     def update_qnetwork(self, compressed_minibatchs):
 
         indices_all, td_errors_all = [], []
-
         with futures.ThreadPoolExecutor(max_workers=4) as executor:
             """ batchをdecompressして整形する作業がわりと重いのでthreading
             """
@@ -91,11 +92,12 @@ class Learner:
                         actions.flatten().astype(np.int32), self.action_space)
                     q = tf.reduce_sum(
                         qvalues * actions_onehot, axis=1, keepdims=True)
-                    td_loss = huber_loss(target_q, q)
-
+                    #td_loss = huber_loss(target_q, q)
+                    td_loss = tf.square(target_q - q)
                     loss = tf.reduce_mean(per_weights * td_loss)
 
                 grads = tape.gradient(loss, self.qnet.trainable_variables)
+                grads, _ = tf.clip_by_global_norm(grads, 40.0)
                 self.optimizer.apply_gradients(
                     zip(grads, self.qnet.trainable_variables))
 
@@ -106,6 +108,10 @@ class Learner:
                 if self.update_count % self.target_update_period == 0:
                     print("== target_update ==")
                     self.target_qnet.set_weights(self.qnet.get_weights())
+
+                if self.update_count % 32 == 0:
+                    with self.summary_writer.as_default():
+                        tf.summary.scalar("loss_learner", loss, step=self.update_count)
 
         current_weights = self.qnet.get_weights()
         return current_weights, indices_all, td_errors_all
@@ -132,7 +138,7 @@ class Learner:
 def main(num_actors, env_name="BreakoutDeterministic-v4",
          gamma=0.99, batch_size=512,
          n_frames=4, epsilon=0.4, eps_alpha=0.7,
-         target_update_period=2500, num_minibatchs=16,
+         target_update_period=1500, num_minibatchs=16,
          reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
          global_buffer_size=2**21,
          local_buffer_size=100, compress=True):
@@ -158,7 +164,8 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
 
     learner = Learner.remote(
         env_name=env_name, gamma=gamma, nstep=nstep,
-        target_update_period=target_update_period, n_frames=n_frames)
+        target_update_period=target_update_period,
+        n_frames=n_frames, logdir=logdir)
 
     current_weights = ray.put(ray.get(learner.define_network.remote()))
 
@@ -194,13 +201,13 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
         work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
         count += 1
 
-        if count == 40:
+        if count == 60:
             learner_finished, _ = ray.wait([learner_job], num_returns=1)
         else:
             learner_finished, _ = ray.wait([learner_job], timeout=0)
 
         if learner_finished:
-            print(learner_count)
+            print("Leaner", learner_count)
             current_weights, indices, td_errors = ray.get(learner_finished[0])
             current_weights = ray.put(current_weights)
 
@@ -212,8 +219,9 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
             learner_count += 1
             count = 0
 
-            if learner_count % 20 == 0:
+            if learner_count % 10 == 0:
                 episode_steps, episode_rewards = ray.get(tester_job)
+                print("TEST:", episode_steps, episode_rewards)
                 layers = ray.get(test_actor.get_layers.remote(-3))
                 tester_job = test_actor.play.remote(current_weights)
                 elapsed_time = (time.time() - s) / 20
@@ -246,58 +254,58 @@ def test_play(env_name="BreakoutDeterministic-v4"):
     print(rewards)
 
 
-def test_performance(num_actors, env_name="BreakoutDeterministic-v4",
-                     gamma=0.99, batch_size=512,
-                     n_frames=4, epsilon=0.4, eps_alpha=0.7,
-                     target_update_period=2500, num_minibatchs=16,
-                     reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
-                     global_buffer_size=2000000, priority_capacity=2**21,
-                     local_buffer_size=100, compress=True):
+# def test_performance(num_actors, env_name="BreakoutDeterministic-v4",
+#                      gamma=0.99, batch_size=512,
+#                      n_frames=4, epsilon=0.4, eps_alpha=0.7,
+#                      target_update_period=2500, num_minibatchs=16,
+#                      reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
+#                      global_buffer_size=2000000, priority_capacity=2**21,
+#                      local_buffer_size=100, compress=True):
 
-    ray.init(local_mode=False)
+#     ray.init(local_mode=False)
 
-    learner = Learner.remote(
-        env_name=env_name, gamma=gamma, nstep=nstep,
-        target_update_period=target_update_period, n_frames=n_frames)
+#     learner = Learner.remote(
+#         env_name=env_name, gamma=gamma, nstep=nstep,
+#         target_update_period=target_update_period, n_frames=n_frames)
 
-    global_buffer = GlobalReplayBuffer(
-        max_len=global_buffer_size, capacity=priority_capacity,
-        alpha=alpha, beta=beta)
+#     global_buffer = GlobalReplayBuffer(
+#         max_len=global_buffer_size, capacity=priority_capacity,
+#         alpha=alpha, beta=beta)
 
-    actors = [Actor.remote(
-        pid=i, env_name=env_name,
-        epsilon=epsilon ** (1 + eps_alpha * i / (num_actors - 1)),
-        buffer_size=local_buffer_size,
-        gamma=gamma, n_frames=n_frames, alpha=alpha,
-        reward_clip=reward_clip, nstep=nstep,
-        ) for i in range(num_actors)]
+#     actors = [Actor.remote(
+#         pid=i, env_name=env_name,
+#         epsilon=epsilon ** (1 + eps_alpha * i / (num_actors - 1)),
+#         buffer_size=local_buffer_size,
+#         gamma=gamma, n_frames=n_frames, alpha=alpha,
+#         reward_clip=reward_clip, nstep=nstep,
+#         ) for i in range(num_actors)]
 
-    current_weights = ray.put(ray.get(learner.define_network.remote()))
-    work_in_progreses = [actor.rollout.remote(current_weights) for actor in actors]
+#     current_weights = ray.put(ray.get(learner.define_network.remote()))
+#     work_in_progreses = [actor.rollout.remote(current_weights) for actor in actors]
 
-    with Timer("10000遷移収集"):
-        for _ in range(100):
-            finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
-            priorities, experiences, pid = ray.get(finished[0])
-            global_buffer.push(priorities, experiences)
-            work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
+#     with Timer("10000遷移収集"):
+#         for _ in range(100):
+#             finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
+#             priorities, experiences, pid = ray.get(finished[0])
+#             global_buffer.push(priorities, experiences)
+#             work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
 
-    with Timer("16バッチ作成"):
-        compressed_minibatchs = [
-            global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
+#     with Timer("16バッチ作成"):
+#         compressed_minibatchs = [
+#             global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
 
-    with Timer("16バッチ学習"):
-        orf = learner.update_qnetwork.remote(compressed_minibatchs)
-        current_weights, indices, td_errors = ray.get(orf)
-        current_weights = ray.put(current_weights)
+#     with Timer("16バッチ学習"):
+#         orf = learner.update_qnetwork.remote(compressed_minibatchs)
+#         current_weights, indices, td_errors = ray.get(orf)
+#         current_weights = ray.put(current_weights)
 
-    with Timer("16バッチ優先度更新"):
-        global_buffer.update_priorities(indices, td_errors)
+#     with Timer("16バッチ優先度更新"):
+#         global_buffer.update_priorities(indices, td_errors)
 
-    ray.shutdown()
+#     ray.shutdown()
 
 
 if __name__ == "__main__":
-    main(num_actors=20)
-    test_play()
+    main(num_actors=10)
+    #test_play()
     #test_performance(num_actors=12)
