@@ -201,12 +201,13 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
         work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
         count += 1
 
-        if count == 60:
-            learner_finished, _ = ray.wait([learner_job], num_returns=1)
-        else:
-            learner_finished, _ = ray.wait([learner_job], timeout=0)
+        #if count == 60:
+        #    learner_finished, _ = ray.wait([learner_job], num_returns=1)
+        #else:
+        learner_finished, _ = ray.wait([learner_job], timeout=0)
 
         if learner_finished:
+            print(count)
             print("Leaner", learner_count)
             current_weights, indices, td_errors = ray.get(learner_finished[0])
             current_weights = ray.put(current_weights)

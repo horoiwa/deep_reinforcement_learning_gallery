@@ -101,7 +101,7 @@ class Actor:
             self.local_buffer.push(transition)
 
             if done:
-                print(self.pid, self.episode_steps, self.episode_rewards, self.epsilon)
+                print(self.pid, self.episode_steps, self.episode_rewards)
                 self.episode_steps = 0
                 self.episode_rewards = 0
                 self.lives = 5
@@ -185,6 +185,8 @@ class RemoteTestActor:
         return self.qnet.layers[idx:]
 
     def play(self, current_weights):
+
+        tf.config.set_visible_devices([], 'GPU')
 
         self.qnet.set_weights(current_weights)
 
