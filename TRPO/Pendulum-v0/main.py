@@ -11,7 +11,6 @@ import gym
 from gym import wrappers
 import matplotlib.pyplot as plt
 
-from buffer import ReplayBuffer
 from models import PolicyNetwork, ValueNetwork
 from util import compute_logprob, compute_kl, cg, restore_shape
 
