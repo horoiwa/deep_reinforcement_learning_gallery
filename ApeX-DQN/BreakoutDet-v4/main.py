@@ -20,7 +20,7 @@ from util import preprocess_frame, Timer, huber_loss
 class Learner:
 
     def __init__(self, env_name, gamma, nstep,
-                 target_update_period, n_frames, logdir):
+                 target_update_period, n_frames):
 
         self.env_name = env_name
 
@@ -38,9 +38,11 @@ class Learner:
 
         self.n_frames = n_frames
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.00015)
+        #self.optimizer = tf.keras.optimizers.Adam(lr=0.0001)
 
-        self.summary_writer = tf.summary.create_file_writer(str(logdir))
+        self.optimizer = tf.keras.optimizers.RMSprop(
+            learning_rate= 0.00025 / 4, rho=0.95, momentum=0.0,
+            epsilon=1.5e-07, centered=True)
 
         self.update_count = 0
 
@@ -64,6 +66,7 @@ class Learner:
     def update_qnetwork(self, compressed_minibatchs):
 
         indices_all, td_errors_all = [], []
+        loss_list = []
         with futures.ThreadPoolExecutor(max_workers=4) as executor:
             """ batchをdecompressして整形する作業がわりと重いのでthreading
             """
@@ -103,18 +106,16 @@ class Learner:
 
                 indices_all += indices
                 td_errors_all += td_loss.numpy().flatten().tolist()
+                loss_list.append(loss.numpy())
                 self.update_count += 1
 
                 if self.update_count % self.target_update_period == 0:
                     print("== target_update ==")
                     self.target_qnet.set_weights(self.qnet.get_weights())
 
-                if self.update_count % 32 == 0:
-                    with self.summary_writer.as_default():
-                        tf.summary.scalar("loss_learner", loss, step=self.update_count)
-
+        loss_mean = np.array(loss_list).mean()
         current_weights = self.qnet.get_weights()
-        return current_weights, indices_all, td_errors_all
+        return current_weights, indices_all, td_errors_all, loss_mean
 
     @staticmethod
     def prepare_minibatch(compressed_minibatch):
@@ -137,8 +138,8 @@ class Learner:
 
 def main(num_actors, env_name="BreakoutDeterministic-v4",
          gamma=0.99, batch_size=512,
-         n_frames=4, epsilon=0.4, eps_alpha=0.7,
-         target_update_period=1500, num_minibatchs=16,
+         n_frames=4, epsilon=0.4, eps_alpha=7.,
+         target_update_period=2400, num_minibatchs=16,
          reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
          global_buffer_size=2**21,
          local_buffer_size=100, compress=True):
@@ -154,9 +155,13 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
         capacity=global_buffer_size,
         alpha=alpha, beta=beta)
 
+    #epsilons = np.linspace(0.05, 0.4, num_actors)
+    epsilons = [epsilon ** (1 + eps_alpha * i / (num_actors - 1)) for i in range(num_workers)]
+    epsilons = [max(0.01, eps) for eps in epsilons]
+
     actors = [Actor.remote(
         pid=i, env_name=env_name,
-        epsilon=epsilon ** (1 + eps_alpha * i / (num_actors - 1)),
+        epsilon=epsilons[i],
         buffer_size=local_buffer_size,
         gamma=gamma, n_frames=n_frames, alpha=alpha,
         reward_clip=reward_clip, nstep=nstep,
@@ -165,7 +170,7 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
     learner = Learner.remote(
         env_name=env_name, gamma=gamma, nstep=nstep,
         target_update_period=target_update_period,
-        n_frames=n_frames, logdir=logdir)
+        n_frames=n_frames)
 
     current_weights = ray.put(ray.get(learner.define_network.remote()))
 
@@ -184,16 +189,16 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
     print("Setup finished")
 
     minibatchs = [global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
-    learner_job = learner.update_qnetwork.remote(minibatchs)
+    learner_future = learner.update_qnetwork.remote(minibatchs)
     learner_count += 1
 
     next_minibatchs = [global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
 
-    tester_job = test_actor.play.remote(current_weights)
+    tester_future = test_actor.play.remote(current_weights)
 
     s = time.time()
     count = 0
-    while learner_count <= 2500:
+    while learner_count <= 5000:
 
         actor_finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
         priorities, experiences, pid = ray.get(actor_finished[0])
@@ -201,31 +206,30 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
         work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
         count += 1
 
-        #if count == 60:
-        #    learner_finished, _ = ray.wait([learner_job], num_returns=1)
-        #else:
-        learner_finished, _ = ray.wait([learner_job], timeout=0)
+        learner_finished, _ = ray.wait([learner_future], timeout=0)
 
         if learner_finished:
-            print(count)
+            print("Actor cycle", count)
             print("Leaner", learner_count)
-            current_weights, indices, td_errors = ray.get(learner_finished[0])
+            current_weights, indices, td_errors, loss_mean = ray.get(learner_finished[0])
             current_weights = ray.put(current_weights)
 
-            learner_job = learner.update_qnetwork.remote(next_minibatchs)
+            learner_future = learner.update_qnetwork.remote(next_minibatchs)
 
             global_buffer.update_priorities(indices, td_errors)
             next_minibatchs = [global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
 
             learner_count += 1
             count = 0
+            with summary_writer.as_default():
+                tf.summary.scalar("learner_loss", loss_mean, step=learner_count)
 
             if learner_count % 10 == 0:
-                episode_steps, episode_rewards = ray.get(tester_job)
+                episode_steps, episode_rewards = ray.get(tester_future)
                 print("TEST:", episode_steps, episode_rewards)
                 layers = ray.get(test_actor.get_layers.remote(-3))
-                tester_job = test_actor.play.remote(current_weights)
-                elapsed_time = (time.time() - s) / 20
+                tester_future = test_actor.play.remote(current_weights)
+                elapsed_time = (time.time() - s) / 10
 
                 with summary_writer.as_default():
                     tf.summary.scalar("test_steps", episode_steps, step=learner_count)
@@ -248,7 +252,7 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
 def test_play(env_name="BreakoutDeterministic-v4"):
 
     ray.init()
-    test_actor = RemoteTestActor.remote(env_name=env_name)
+    test_actor = RemoteTestActor.remote(env_name=env_name, epsilon=0.01)
     res = test_actor.play_with_video.remote(
             checkpoint_path="checkpoints/qnet", monitor_dir="mp4")
     rewards = ray.get(res)
@@ -307,6 +311,8 @@ def test_play(env_name="BreakoutDeterministic-v4"):
 
 
 if __name__ == "__main__":
-    main(num_actors=10)
-    #test_play()
+    start = time.time()
+    main(num_actors=20)
+    test_play()
+    print("Finished:", time.time() - start)
     #test_performance(num_actors=12)

@@ -66,6 +66,7 @@ coverage.xml
 *.pot
 
 log/
+log_learner/
 
 # Django stuff:
 *.log

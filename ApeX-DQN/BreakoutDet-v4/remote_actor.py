@@ -101,7 +101,7 @@ class Actor:
             self.local_buffer.push(transition)
 
             if done:
-                print(self.pid, self.episode_steps, self.episode_rewards)
+                print(self.pid, self.episode_steps, self.episode_rewards, round(self.epsilon, 3))
                 self.episode_steps = 0
                 self.episode_rewards = 0
                 self.lives = 5
@@ -149,7 +149,7 @@ class Actor:
 @ray.remote(num_cpus=1)
 class RemoteTestActor:
 
-    def __init__(self, env_name, n_frames=4):
+    def __init__(self, env_name, epsilon=0.05, n_frames=4):
 
         self.env_name = env_name
 
@@ -157,7 +157,7 @@ class RemoteTestActor:
 
         self.action_space = self.env.action_space.n
 
-        self.epsilon = 0.05
+        self.epsilon = epsilon
 
         self.n_frames = n_frames
 
@@ -246,7 +246,6 @@ class RemoteTestActor:
             state = np.stack(self.frames, axis=2)[np.newaxis, ...]
 
             action = self.qnet.sample_action(state, epsilon=0.05)
-            print(action)
 
             next_frame, reward, done, _ = self.env.step(action)
 
