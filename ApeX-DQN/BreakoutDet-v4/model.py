@@ -1,3 +1,5 @@
+import random
+
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras.layers as kl
@@ -49,7 +51,8 @@ class DuelingQNetwork(tf.keras.Model):
         return q_values
 
     def sample_action(self, x, epsilon):
-        if np.random.random() > epsilon:
+
+        if random.random() > epsilon:
             selected_actions, _ = self.sample_actions(x)
             selected_action = selected_actions.numpy()[0]
         else:

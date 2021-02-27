@@ -75,7 +75,7 @@ class Actor:
 
         state = np.stack(self.frames, axis=2)[np.newaxis, ...]
 
-        while True:
+        for _ in range(self.buffer_size):
 
             state = np.stack(self.frames, axis=2)[np.newaxis, ...]
 
@@ -109,41 +109,39 @@ class Actor:
                 for _ in range(self.n_frames):
                     self.frames.append(frame)
 
-            if len(self.local_buffer) == self.buffer_size:
+        experiences = self.local_buffer.pull()
 
-                experiences = self.local_buffer.pull()
+        states = np.vstack(
+            [exp.state for exp in experiences]).astype(np.float32)
+        actions = np.vstack(
+            [exp.action for exp in experiences]).astype(np.float32)
+        rewards = np.array(
+            [exp.reward for exp in experiences]).reshape(-1, 1)
+        next_states = np.vstack(
+            [exp.next_state for exp in experiences]
+            ).astype(np.float32)
+        dones = np.array(
+            [exp.done for exp in experiences]).reshape(-1, 1)
 
-                states = np.vstack(
-                    [exp.state for exp in experiences]).astype(np.float32)
-                actions = np.vstack(
-                    [exp.action for exp in experiences]).astype(np.float32)
-                rewards = np.array(
-                    [exp.reward for exp in experiences]).reshape(-1, 1)
-                next_states = np.vstack(
-                    [exp.next_state for exp in experiences]
-                    ).astype(np.float32)
-                dones = np.array(
-                    [exp.done for exp in experiences]).reshape(-1, 1)
+        next_actions, next_qvalues = self.local_qnet.sample_actions(next_states)
 
-                next_actions, next_qvalues = self.local_qnet.sample_actions(next_states)
+        next_actions_onehot = tf.one_hot(next_actions, self.action_space)
 
-                next_actions_onehot = tf.one_hot(next_actions, self.action_space)
+        max_next_qvalues = tf.reduce_sum(
+            next_qvalues * next_actions_onehot, axis=1, keepdims=True)
 
-                max_next_qvalues = tf.reduce_sum(
-                    next_qvalues * next_actions_onehot, axis=1, keepdims=True)
+        TQ = rewards + self.gamma ** (self.nstep) * (1 - dones) * max_next_qvalues
 
-                TQ = rewards + self.gamma ** (self.nstep) * (1 - dones) * max_next_qvalues
+        qvalues = self.local_qnet(states)
+        actions_onehot = tf.one_hot(
+            actions.flatten().astype(np.int32), self.action_space)
+        Q = tf.reduce_sum(qvalues * actions_onehot, axis=1, keepdims=True)
 
-                qvalues = self.local_qnet(states)
-                actions_onehot = tf.one_hot(
-                    actions.flatten().astype(np.int32), self.action_space)
-                Q = tf.reduce_sum(qvalues * actions_onehot, axis=1, keepdims=True)
+        priorities = ((np.abs(TQ - Q) + 0.001) ** self.alpha).flatten()
 
-                priorities = ((np.abs(TQ - Q) + 0.001) ** self.alpha).flatten()
+        experiences = [zlib.compress(pickle.dumps(exp)) for exp in experiences]
 
-                experiences = [zlib.compress(pickle.dumps(exp)) for exp in experiences]
-
-                return priorities, experiences, self.pid
+        return priorities, experiences, self.pid
 
 
 @ray.remote(num_cpus=1)

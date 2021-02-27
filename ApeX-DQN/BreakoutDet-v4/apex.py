@@ -95,6 +95,7 @@ class Learner:
                         actions.flatten().astype(np.int32), self.action_space)
                     q = tf.reduce_sum(
                         qvalues * actions_onehot, axis=1, keepdims=True)
+
                     #td_loss = huber_loss(target_q, q)
                     td_loss = tf.square(target_q - q)
                     loss = tf.reduce_mean(per_weights * td_loss)
