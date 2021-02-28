@@ -157,8 +157,8 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
         alpha=alpha, beta=beta)
 
     #epsilons = np.linspace(0.05, 0.4, num_actors)
-    epsilons = [epsilon ** (1 + eps_alpha * i / (num_actors - 1)) for i in range(num_workers)]
-    epsilons = [max(0.01, eps) for eps in epsilons]
+    epsilons = [epsilon ** (1 + eps_alpha * i / (num_actors - 1)) for i in range(num_actors)]
+    epsilons = [max(0.005, eps) for eps in epsilons]
 
     actors = [Actor.remote(
         pid=i, env_name=env_name,
@@ -253,9 +253,9 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
 def test_play(env_name="BreakoutDeterministic-v4"):
 
     ray.init()
-    test_actor = RemoteTestActor.remote(env_name=env_name, epsilon=0.01)
+    test_actor = RemoteTestActor.remote(env_name=env_name)
     res = test_actor.play_with_video.remote(
-            checkpoint_path="checkpoints/qnet", monitor_dir="mp4")
+            checkpoint_path="checkpoints/qnet", monitor_dir="mp4", epsilon=0.0)
     rewards = ray.get(res)
     print(rewards)
 
@@ -313,7 +313,7 @@ def test_play(env_name="BreakoutDeterministic-v4"):
 
 if __name__ == "__main__":
     start = time.time()
-    main(num_actors=20)
+    main(num_actors=22)
     test_play()
     print("Finished:", time.time() - start)
     #test_performance(num_actors=12)

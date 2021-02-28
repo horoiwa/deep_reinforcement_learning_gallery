@@ -182,7 +182,7 @@ class RemoteTestActor:
     def get_layers(self, idx):
         return self.qnet.layers[idx:]
 
-    def play(self, current_weights):
+    def play(self, current_weights, epsilon=0.01):
 
         tf.config.set_visible_devices([], 'GPU')
 
@@ -201,7 +201,7 @@ class RemoteTestActor:
 
             state = np.stack(self.frames, axis=2)[np.newaxis, ...]
 
-            action = self.qnet.sample_action(state, epsilon=0.1)
+            action = self.qnet.sample_action(state, epsilon=epsilon)
 
             next_frame, reward, done, _ = self.env.step(action)
 
@@ -216,7 +216,7 @@ class RemoteTestActor:
 
         return episode_steps, episode_rewards
 
-    def play_with_video(self, checkpoint_path, monitor_dir):
+    def play_with_video(self, checkpoint_path, monitor_dir, epsilon=0.01):
 
         monitor_dir = Path(monitor_dir)
         if monitor_dir.exists():
@@ -243,7 +243,7 @@ class RemoteTestActor:
 
             state = np.stack(self.frames, axis=2)[np.newaxis, ...]
 
-            action = self.qnet.sample_action(state, epsilon=0.05)
+            action = self.qnet.sample_action(state, epsilon)
 
             next_frame, reward, done, _ = self.env.step(action)
 
