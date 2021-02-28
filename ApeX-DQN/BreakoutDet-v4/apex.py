@@ -313,7 +313,7 @@ def test_play(env_name="BreakoutDeterministic-v4"):
 
 if __name__ == "__main__":
     start = time.time()
-    main(num_actors=22)
+    main(num_actors=20)
     test_play()
     print("Finished:", time.time() - start)
     #test_performance(num_actors=12)
