@@ -255,7 +255,7 @@ def test_play(env_name="BreakoutDeterministic-v4"):
     ray.init()
     test_actor = RemoteTestActor.remote(env_name=env_name)
     res = test_actor.play_with_video.remote(
-            checkpoint_path="checkpoints/qnet", monitor_dir="mp4", epsilon=0.0)
+            checkpoint_path="checkpoints/qnet", monitor_dir="mp4", epsilon=0.01)
     rewards = ray.get(res)
     print(rewards)
 
