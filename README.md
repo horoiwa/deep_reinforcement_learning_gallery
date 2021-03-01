@@ -1,6 +1,6 @@
-# DeepRL_TF2
+# Deep Reinforment Learning gallery
 
-Deep reinforcement learning examples with tensorflow2
+Deep reinforcement learning example codes with tensorflow2
 
 ## Requirements
 
@@ -8,7 +8,6 @@ Deep reinforcement learning examples with tensorflow2
 
 <br>
 
-## 参考文献
 
 ### DQN (Deep Q Network)
 
