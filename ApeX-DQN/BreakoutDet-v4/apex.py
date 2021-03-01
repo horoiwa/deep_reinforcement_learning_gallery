@@ -139,7 +139,7 @@ class Learner:
 
 def main(num_actors, env_name="BreakoutDeterministic-v4",
          gamma=0.99, batch_size=512,
-         n_frames=4, epsilon=0.4, eps_alpha=7.,
+         n_frames=4, epsilon=0.5, eps_alpha=7.,
          target_update_period=2400, num_minibatchs=16,
          reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
          global_buffer_size=2**21,
@@ -158,7 +158,7 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
 
     #epsilons = np.linspace(0.05, 0.4, num_actors)
     epsilons = [epsilon ** (1 + eps_alpha * i / (num_actors - 1)) for i in range(num_actors)]
-    epsilons = [max(0.005, eps) for eps in epsilons]
+    epsilons = [max(0.01, eps) for eps in epsilons]
 
     actors = [Actor.remote(
         pid=i, env_name=env_name,
@@ -195,7 +195,7 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
 
     next_minibatchs = [global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
 
-    tester_future = test_actor.play.remote(current_weights)
+    tester_future = test_actor.play.remote(current_weights, epsilon=0.01)
 
     s = time.time()
     count = 0
@@ -229,7 +229,7 @@ def main(num_actors, env_name="BreakoutDeterministic-v4",
                 episode_steps, episode_rewards = ray.get(tester_future)
                 print("TEST:", episode_steps, episode_rewards)
                 layers = ray.get(test_actor.get_layers.remote(-3))
-                tester_future = test_actor.play.remote(current_weights)
+                tester_future = test_actor.play.remote(current_weights, epsilon=0.01)
                 elapsed_time = (time.time() - s) / 10
 
                 with summary_writer.as_default():
@@ -260,60 +260,9 @@ def test_play(env_name="BreakoutDeterministic-v4"):
     print(rewards)
 
 
-# def test_performance(num_actors, env_name="BreakoutDeterministic-v4",
-#                      gamma=0.99, batch_size=512,
-#                      n_frames=4, epsilon=0.4, eps_alpha=0.7,
-#                      target_update_period=2500, num_minibatchs=16,
-#                      reward_clip=True, nstep=3, alpha=0.6, beta=0.4,
-#                      global_buffer_size=2000000, priority_capacity=2**21,
-#                      local_buffer_size=100, compress=True):
-
-#     ray.init(local_mode=False)
-
-#     learner = Learner.remote(
-#         env_name=env_name, gamma=gamma, nstep=nstep,
-#         target_update_period=target_update_period, n_frames=n_frames)
-
-#     global_buffer = GlobalReplayBuffer(
-#         max_len=global_buffer_size, capacity=priority_capacity,
-#         alpha=alpha, beta=beta)
-
-#     actors = [Actor.remote(
-#         pid=i, env_name=env_name,
-#         epsilon=epsilon ** (1 + eps_alpha * i / (num_actors - 1)),
-#         buffer_size=local_buffer_size,
-#         gamma=gamma, n_frames=n_frames, alpha=alpha,
-#         reward_clip=reward_clip, nstep=nstep,
-#         ) for i in range(num_actors)]
-
-#     current_weights = ray.put(ray.get(learner.define_network.remote()))
-#     work_in_progreses = [actor.rollout.remote(current_weights) for actor in actors]
-
-#     with Timer("10000遷移収集"):
-#         for _ in range(100):
-#             finished, work_in_progreses = ray.wait(work_in_progreses, num_returns=1)
-#             priorities, experiences, pid = ray.get(finished[0])
-#             global_buffer.push(priorities, experiences)
-#             work_in_progreses.extend([actors[pid].rollout.remote(current_weights)])
-
-#     with Timer("16バッチ作成"):
-#         compressed_minibatchs = [
-#             global_buffer.sample_batch(batch_size) for _ in range(num_minibatchs)]
-
-#     with Timer("16バッチ学習"):
-#         orf = learner.update_qnetwork.remote(compressed_minibatchs)
-#         current_weights, indices, td_errors = ray.get(orf)
-#         current_weights = ray.put(current_weights)
-
-#     with Timer("16バッチ優先度更新"):
-#         global_buffer.update_priorities(indices, td_errors)
-
-#     ray.shutdown()
-
-
 if __name__ == "__main__":
     start = time.time()
-    main(num_actors=20)
-    test_play()
+    main(num_actors=21)
     print("Finished:", time.time() - start)
-    #test_performance(num_actors=12)
+    ray.shutdown()
+    test_play()
