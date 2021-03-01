@@ -1,3 +1,5 @@
+import time
+
 import gym
 import ray
 import numpy as np
@@ -100,11 +102,10 @@ class Replay:
         for priority, transition in zip(priorities, transitions):
             self.priorities[self.count] = priority
             self.buffer[self.count] = transition
+            self.count += 1
             if self.count == self.buffer_size:
                 self.count = 0
                 self.is_full = True
-            else:
-                self.count += 1
 
     def update_priority(self, sampled_indices, td_errors):
         assert len(sampled_indices) == len(td_errors)
@@ -225,6 +226,8 @@ class Tester:
 
 def main(num_actors, gamma=0.98, env_name="CartPole-v0"):
 
+    s = time.time()
+
     ray.init()
     history = []
 
@@ -232,9 +235,9 @@ def main(num_actors, gamma=0.98, env_name="CartPole-v0"):
     actors = [Actor.remote(pid=i, env_name=env_name, epsilon=epsilons[i], gamma=gamma)
               for i in range(num_actors)]
 
-    replay = Replay(buffer_size=2**13)
+    replay = Replay(buffer_size=2**14)
 
-    learner = Learner.remote(env_name=env_name, gamma=gamma, env_name=env_name)
+    learner = Learner.remote(env_name=env_name, gamma=gamma)
     current_weights = ray.get(learner.define_network.remote())
     current_weights = ray.put(current_weights)
 
@@ -262,9 +265,9 @@ def main(num_actors, gamma=0.98, env_name="CartPole-v0"):
         replay.add(td_errors, transitions)
         wip_actors.extend([actors[pid].rollout.remote(current_weights)])
 
-        finished_learner, _ = ray.wait(wip_learner, timeout=0)
+        finished_learner, _ = ray.wait([wip_learner], timeout=0)
         if finished_learner:
-            current_weights, indices, td_errors = ray.get(finished_learner)
+            current_weights, indices, td_errors = ray.get(finished_learner[0])
             wip_learner = learner.update_network.remote(minibatchs)
             current_weights = ray.put(current_weights)
             #: 優先度の更新とminibatchの作成はlearnerよりも十分に速いという前提
@@ -280,12 +283,12 @@ def main(num_actors, gamma=0.98, env_name="CartPole-v0"):
                 history.append((update_cycles-5, test_score))
                 wip_tester = tester.test_play.remote(current_weights, epsilon=0.01)
 
+    wallclocktime = round(time.time() - s, 2)
     cycles, scores = zip(*history)
     plt.plot(cycles, scores)
+    plt.title(f"total time: {wallclocktime} sec")
     plt.ylabel("test_score(epsilon=0.01)")
     plt.savefig("log/history.png")
-
-
 
 
 if __name__ == '__main__':
