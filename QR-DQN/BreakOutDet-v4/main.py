@@ -227,7 +227,7 @@ class QRDQNAgent:
 
             while not done:
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
-                action = self.qnet.sample_action(state, epsilon=0.1)
+                action = self.qnet.sample_action(state, epsilon=0.01)
                 next_frame, reward, done, info = env.step(action)
                 frames.append(frame_preprocess(next_frame))
 
