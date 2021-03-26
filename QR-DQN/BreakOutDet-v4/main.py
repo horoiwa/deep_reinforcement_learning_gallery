@@ -149,22 +149,29 @@ class QRDQNAgent:
         (states, actions, rewards,
          next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size)
 
-        next_actions, next_quantile_values = self.target_qnet.sample_actions(next_states)
-        next_actions = next_actions.numpy().flatten()
+        next_actions, next_quantile_values_all = self.target_qnet.sample_actions(next_states)
 
         assert self.batch_size == states.shape[0] == len(next_actions)
 
-        next_action_indices = [(i, next_actions[i]) for i in range(self.batch_size)]
-        max_next_quantile_values = tf.gather_nd(
-            next_quantile_values, indices=next_action_indices, batch_dims=0)
-        target_quantile_values = rewards + self.gamma * (1 - dones) * max_next_quantile_values
+        next_actions_onehot = tf.one_hot(next_actions.numpy().flatten(), self.action_space)
+        next_actions_mask = tf.expand_dims(next_actions_onehot, axis=2)
+        next_quantile_values = tf.reduce_sum(
+            next_quantile_values_all * next_actions_mask, axis=1, keepdims=True)
 
-        actions = actions.flatten()
-        action_indices = [(i, int(actions[i])) for i in range(self.batch_size)]
+        target_quantile_values = np.zeros_like(next_quantile_values)
+        for i in range(self.batch_size):
+            target_quantile_values[i, ...] = rewards[i] + self.gamma * (1 - dones[i]) * next_quantile_values[i, ...]
+        target_quantile_values = tf.repeat(target_quantile_values, self.N, axis=1)
 
         with tf.GradientTape() as tape:
             quantile_values_all = self.qnet(states)
-            quantile_values = tf.gather_nd(quantile_values_all, action_indices, batch_dims=0)
+            actions_onehot = tf.one_hot(
+                actions.flatten().astype(np.int32), self.action_space)
+            actions_mask = tf.expand_dims(actions_onehot, axis=2)
+            quantile_values = tf.reduce_sum(
+                quantile_values_all * actions_mask, axis=1, keepdims=True)
+            quantile_values = tf.repeat(
+                tf.transpose(quantile_values, [0, 2, 1]), self.N, axis=2)
 
             td_errors = target_quantile_values - quantile_values
 
@@ -176,10 +183,12 @@ class QRDQNAgent:
 
             #: quantile huberloss
             indicator = tf.stop_gradient(tf.where(td_errors < 0, 1., 0.))
-            quantile_huberloss = tf.abs(self.quantiles - indicator) * huberloss
-            loss = tf.reduce_mean(
-                tf.reduce_mean(quantile_huberloss, axis=1, keepdims=True)
-                )
+            quantile_weights = tf.abs(self.quantiles - indicator)
+            quantile_huberloss = quantile_weights * huberloss
+
+            loss = tf.reduce_mean(quantile_huberloss, axis=2)
+            loss = tf.reduce_sum(loss, axis=1)
+            loss = tf.reduce_mean(loss)
 
         grads = tape.gradient(loss, self.qnet.trainable_variables)
         self.optimizer.apply_gradients(
