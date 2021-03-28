@@ -14,7 +14,7 @@ from util import frame_preprocess
 class QRDQNAgent:
 
     def __init__(self, env_name="BreakoutDeterministic-v4",
-                 N=200, gamma=0.98,
+                 N=50, gamma=0.98,
                  n_frames=4, batch_size=32,
                  buffer_size=1000000,
                  update_period=4,
@@ -48,7 +48,7 @@ class QRDQNAgent:
 
         self.replay_buffer = ReplayBuffer(max_len=buffer_size)
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.00005, epsilon=0.01/32)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00025, epsilon=0.01/32)
 
         self.steps = 0
 
