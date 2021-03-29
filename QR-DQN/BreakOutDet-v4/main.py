@@ -68,12 +68,12 @@ class QRDQNAgent:
 
     @property
     def epsilon(self):
-        if self.steps <= 500000:
-            return max(0.99 * (500000 - self.steps) / 500000, 0.1)
-        elif self.steps <= 1000000:
-            return 0.01 + 0.09 * (1000000 - self.steps) / 500000
+        if self.steps <= 1000000:
+            return max(0.99 * (1000000 - self.steps) / 1000000, 0.1)
+        elif self.steps <= 2000000:
+            return 0.05 + 0.05 * (2000000 - self.steps) / 2000000
         else:
-            return 0.01
+            return 0.05
 
     def learn(self, n_episodes, logdir="log"):
 
