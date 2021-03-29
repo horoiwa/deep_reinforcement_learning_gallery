@@ -17,7 +17,7 @@ class QRDQNAgent:
                  N=50, gamma=0.98,
                  n_frames=4, batch_size=32,
                  buffer_size=1000000,
-                 update_period=4,
+                 update_period=8,
                  target_update_period=10000):
 
         self.env_name = env_name
@@ -48,7 +48,7 @@ class QRDQNAgent:
 
         self.replay_buffer = ReplayBuffer(max_len=buffer_size)
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.00025, epsilon=0.01/32)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00015, epsilon=0.01/32)
 
         self.steps = 0
 
