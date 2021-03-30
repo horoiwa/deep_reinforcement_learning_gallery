@@ -48,7 +48,7 @@ class QRDQNAgent:
 
         self.replay_buffer = ReplayBuffer(max_len=buffer_size)
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.00015, epsilon=0.01/32)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00025, epsilon=0.01/32)
 
         self.steps = 0
 
@@ -173,6 +173,7 @@ class QRDQNAgent:
             quantile_values = tf.repeat(
                 tf.transpose(quantile_values, [0, 2, 1]), self.N, axis=2)
 
+            #: (batchsize, N, N)
             td_errors = target_quantile_values - quantile_values
 
             #: huberloss(k=1.0)
@@ -183,11 +184,12 @@ class QRDQNAgent:
 
             #: quantile huberloss
             indicator = tf.stop_gradient(tf.where(td_errors < 0, 1., 0.))
-            quantile_weights = tf.abs(self.quantiles - indicator)
+            quantiles = tf.repeat(tf.expand_dims(self.quantiles, axis=1), self.N, axis=1)
+            quantile_weights = tf.abs(quantiles - indicator)
             quantile_huberloss = quantile_weights * huberloss
 
-            loss = tf.reduce_mean(quantile_huberloss, axis=2)
-            loss = tf.reduce_sum(loss, axis=1)
+            loss = tf.reduce_sum(quantile_huberloss, axis=2)
+            loss = tf.reduce_mean(loss, axis=1)
             loss = tf.reduce_mean(loss)
 
         grads = tape.gradient(loss, self.qnet.trainable_variables)
