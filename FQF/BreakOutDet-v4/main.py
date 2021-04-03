@@ -188,8 +188,8 @@ class QRDQNAgent:
             quantile_weights = tf.abs(quantiles - indicator)
             quantile_huberloss = quantile_weights * huberloss
 
-            loss = tf.reduce_mean(quantile_huberloss, axis=2)
-            loss = tf.reduce_sum(loss, axis=1)
+            loss = tf.reduce_sum(quantile_huberloss, axis=2)
+            loss = tf.reduce_mean(loss, axis=1)
             loss = tf.reduce_mean(loss)
 
         grads = tape.gradient(loss, self.qnet.trainable_variables)
