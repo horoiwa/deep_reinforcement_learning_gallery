@@ -192,9 +192,10 @@ class QRDQNAgent:
             loss = tf.reduce_sum(loss, axis=1)
             loss = tf.reduce_mean(loss)
 
-        grads = tape.gradient(loss, self.qnet.trainable_variables)
+        variables = self.qnet.trainable_variables
+        grads = tape.gradient(loss, variables)
         self.optimizer.apply_gradients(
-            zip(grads, self.qnet.trainable_variables))
+            zip(grads, variables))
 
         return loss
 
