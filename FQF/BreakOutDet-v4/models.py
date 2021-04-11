@@ -24,17 +24,17 @@ class FQFNetwork(tf.keras.Model):
 
         self.state_embedding_dim = state_embedding_dim
 
-        self.quatile_embedding_dim = quantile_embedding_dim
+        self.quantile_embedding_dim = quantile_embedding_dim
 
         self.state_embedding_layer = StateEmbeddingNetwork()
 
         self.fraction_proposal_layer = FractionProposalNetwork(
-            num_quantiles, self.quatile_embedding_dim, self.state_embedding_dim)
+            num_quantiles, self.quantile_embedding_dim, self.state_embedding_dim)
 
         self.quantile_function_layer = QuantileFunctionNetwork(
-            self.action_space, self.state_embedding_dim, self.quatile_embedding_dim)
+            self.action_space, self.state_embedding_dim, self.quantile_embedding_dim)
 
-    def call(self, x, given_quantiles_all=None):
+    def call(self, state):
         """
             Note:
 
@@ -46,23 +46,33 @@ class FQFNetwork(tf.keras.Model):
                            (length==num_quantiles)
         """
 
-        batch_size = x.shape[0]
-
-        state_embedded = self.state_embedding_layer(x, batch_size)
+        state_embedded = self.state_embedding_layer(state)
         assert state_embedded.shape[1] == self.state_embedding_dim
 
-        if given_quantiles_all:
-            quantiles_all = given_quantiles_all
-        else:
-            quantiles_all = self.fraction_proposal_layer(state_embedded)
-
-        quantiles_hat = (quantiles_all[:, 1:] + quantiles_all[:, :-1]) / 2.  # (batch_size, num_quantiles)
+        quantiles_all = self.fraction_proposal_layer(state_embedded)
+        quantiles_hat = (quantiles_all[:, 1:] + quantiles_all[:, :-1]) / 2.
         quantile_hat_probs = quantiles_all[:, 1:] - quantiles_all[:, :-1]
 
         quantile_hat_values = self.quantile_function_layer(
             state_embedded, quantiles_hat)
 
-        return (quantile_hat_values, quantile_hat_probs)
+        return (quantile_hat_values, quantile_hat_probs, quantiles_all)
+
+    def compute_fraction_loss(self, states, actions):
+
+        state_embedded = self.state_embedding_layer(states)
+        quantiles_all = self.fraction_proposal_layer(state_embedded)
+
+        quantiles = quantiles_all[:, 1:-1]
+        loss = 2 * self.quantile_function_layer(state_embedded, quantiles)
+
+        quantiles_hat = (quantiles_all[:, 1:] + quantiles_all[:, :-1]) / 2.
+        quantile_hat_values = self.quantile_function_layer(state_embedded, quantiles_hat)
+
+        loss += quantile_hat_values[:, :, 1:]
+        loss += quantile_hat_values[:, :, :-1]
+
+        return loss
 
     def sample_action(self, x, epsilon):
 
@@ -75,7 +85,7 @@ class FQFNetwork(tf.keras.Model):
         return selected_action
 
     def sample_actions(self, state):
-        quantile_hat_values, quantile_hat_probs = self(state)
+        quantile_hat_values, quantile_hat_probs, _ = self(state)
         quantile_hat_probs = tf.repeat(
             tf.expand_dims(quantile_hat_probs, axis=1),
             self.action_space, axis=1)
@@ -103,7 +113,7 @@ class StateEmbeddingNetwork(tf.keras.layers.Layer):
 
         self.flatten1 = kl.Flatten()
 
-    def call(self, x, batch_size):
+    def call(self, x):
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.conv3(x)
@@ -218,10 +228,13 @@ if __name__ == "__main__":
     state = np.stack([state1, state2], axis=0)
     state = tf.convert_to_tensor(state, dtype=tf.float32)
 
+    action = tf.convert_to_tensor([[1], [1]], dtype=tf.float32)
+
     fqf_net = FQFNetwork(action_space=4, num_quantiles=10, quantile_embedding_dim=12)
 
-    out = fqf_net(state)
+    quantile_hat_values, quantile_hat_probs, quantiles_all = fqf_net(state)
     fqf_net.sample_actions(state)
+    fqf_net.compute_fraction_loss(state, action)
 
     #selected_actions, quantile_qvalues = qnet.sample_actions(state)
     #print(selected_actions.numpy().flatten())
