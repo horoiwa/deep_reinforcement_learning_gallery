@@ -14,7 +14,7 @@ from util import frame_preprocess
 class FQFAgent:
 
     def __init__(self, env_name="BreakoutDeterministic-v4",
-                 num_quantiles=32, fqf_factor=0.000001,
+                 num_quantiles=24, fqf_factor=0.000001,
                  state_embedding_dim=3136, quantile_embedding_dim=64,
                  gamma=0.99, n_frames=4, batch_size=32,
                  buffer_size=1000000,
@@ -36,12 +36,14 @@ class FQFAgent:
         self.action_space = gym.make(self.env_name).action_space.n
 
         self.fqf_network = FQFNetwork(
-            action_space=self.action_space, num_quantiles=32,
+            action_space=self.action_space,
+            num_quantiles=self.num_quantiles,
             state_embedding_dim=self.state_embedding_dim,
             quantile_embedding_dim=self.quantile_embedding_dim)
 
         self.target_fqf_network = FQFNetwork(
-            action_space=self.action_space, num_quantiles=32,
+            action_space=self.action_space,
+            num_quantiles=self.num_quantiles,
             state_embedding_dim=self.state_embedding_dim,
             quantile_embedding_dim=self.quantile_embedding_dim)
 
@@ -152,7 +154,7 @@ class FQFAgent:
                     tf.summary.scalar("test_step", test_steps[0], step=self.steps)
 
             if episode % 500 == 0:
-                self.qnet.save_weights("checkpoints/qnet")
+                self.fqf_network.save_weights("checkpoints/qnet")
                 print("Model Saved")
 
     def update_network(self):
@@ -160,11 +162,75 @@ class FQFAgent:
         (states, actions, rewards,
          next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size)
 
-        with tf.GradientTape() as tape1:
-            import pdb; pdb.set_trace()
-            state_embedded = self.fqf_network.state_embedding_layer(states)
-            _, taus_hat, _ = self.fqf_network.propose_fraction(state_embedded)
+        rewards = rewards.reshape((self.batch_size, 1, 1))
+        dones = dones.reshape((self.batch_size, 1, 1))
 
+        with tf.GradientTape() as tape:
+
+            #: Compute F(τ^)
+            state_embedded = self.fqf_network.state_embedding_layer(states)
+
+            taus, taus_hat, taus_hat_probs = self.fqf_network.propose_fractions(state_embedded)
+            tf.stop_gradient(taus_hat)
+
+            quantiles = self.fqf_network.quantile_function(
+                state_embedded, taus_hat)
+            actions_onehot = tf.one_hot(
+                actions.flatten().astype(np.int32), self.action_space)
+            actions_mask = tf.expand_dims(actions_onehot, axis=2)
+            quantiles = tf.reduce_sum(
+                quantiles * actions_mask, axis=1, keepdims=True)
+
+            #: Compute F(τ^)
+            next_actions, target_quantiles = self.target_fqf_network.greedy_action_on_given_taus(
+                next_states, taus_hat, taus_hat_probs)
+
+            next_actions_onehot = tf.one_hot(next_actions.numpy().flatten(), self.action_space)
+            next_actions_mask = tf.expand_dims(next_actions_onehot, axis=2)
+            target_quantiles = tf.reduce_sum(
+                target_quantiles * next_actions_mask, axis=1, keepdims=True)
+
+            #: TF(τ^)
+            target_quantiles = rewards + self.gamma * (1-dones) * target_quantiles
+            target_quantiles = tf.stop_gradient(target_quantiles)
+
+            #: Compute Quantile regression loss
+            target_quantiles = tf.repeat(
+                target_quantiles, self.num_quantiles, axis=1)
+            quantiles = tf.repeat(
+                tf.transpose(quantiles, [0, 2, 1]), self.num_quantiles, axis=2)
+
+            #: huberloss
+            bellman_errors = target_quantiles - quantiles
+            is_smaller_than_k = tf.abs(bellman_errors) < self.k
+            squared_loss = 0.5 * tf.square(bellman_errors)
+            linear_loss = self.k * (tf.abs(bellman_errors) - 0.5 * self.k)
+
+            huberloss = tf.where(is_smaller_than_k, squared_loss, linear_loss)
+
+            #: quantile loss
+            indicator = tf.stop_gradient(tf.where(bellman_errors < 0, 1., 0.))
+            _taus_hat = tf.repeat(
+                tf.expand_dims(taus_hat, axis=2), self.num_quantiles, axis=2)
+
+            quantile_factors = tf.abs(_taus_hat - indicator)
+            quantile_huberloss = quantile_factors * huberloss
+
+            loss = tf.reduce_mean(
+                tf.reduce_sum(quantile_huberloss, axis=2),
+                axis=1)
+            loss = tf.reduce_mean(loss)
+
+        state_embedding_vars = self.fqf_network.state_embedding_layer.trainable_variables
+        quantile_function_vars = self.fqf_network.quantile_function.trainable_variables
+
+        import pdb; pdb.set_trace()
+        variables = state_embedding_vars + quantile_function_vars
+        grads = tape.gradient(loss, variables)
+
+        fraction_proposal_vars = self.fqf_network.fraction_proposal_layer.tainable_variables
+
+        return loss
 
     def dummy_update_network(self):
 
@@ -173,8 +239,6 @@ class FQFAgent:
 
         next_actions, next_quantile_values_all = self.target_fqf_network.sample_actions(next_states)
 
-        with tf.GradientTape() as tape:
-            pass
 
         assert self.batch_size == states.shape[0] == len(next_actions)
 

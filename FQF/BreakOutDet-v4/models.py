@@ -31,32 +31,30 @@ class FQFNetwork(tf.keras.Model):
         self.fraction_proposal_layer = FractionProposalNetwork(
             num_quantiles, self.quantile_embedding_dim, self.state_embedding_dim)
 
-        self.quantile_function_layer = QuantileFunctionNetwork(
+        self.quantile_function = QuantileFunctionNetwork(
             self.action_space, self.state_embedding_dim, self.quantile_embedding_dim)
 
     def call(self, state):
         """
             Note:
 
-            quantiles_all: τ = 0, ..., 1.0
-                           (length==num_quantiles+1)
-            quantiles: Excluding τ=0,1 from quantiles_all,
-                       (length==num_quantiles-1)
-            quantiles_hat: τ^_{i} = (τ_{i} + τ_{i+1}) / 2
-                           (length==num_quantiles)
+            taus: τ = 0, ..., 1. (length==num_quantiles+1)
+            taus_hat: τ^_{i} = (τ_{i} + τ_{i+1}) / 2 , (length==num_quantiles)
         """
 
         state_embedded = self.state_embedding_layer(state)
+
         assert state_embedded.shape[1] == self.state_embedding_dim
 
-        _, taus_hat, taus_hat_probs = self.propose_fraction(state_embedded)
+        _, taus_hat, taus_hat_probs = self.propose_fractions(state_embedded)
 
-        quantiles_tau_hat = self.quantile_function_layer(
+        quantiles_tau_hat = self.quantile_function(
             state_embedded, taus_hat)
 
         return (taus_hat, taus_hat_probs, quantiles_tau_hat)
 
-    def propose_fraction(self, state_embedded):
+    @tf.function
+    def propose_fractions(self, state_embedded):
 
         taus = self.fraction_proposal_layer(state_embedded)
         taus_hat = (taus[:, 1:] + taus[:, :-1]) / 2.
@@ -67,16 +65,35 @@ class FQFNetwork(tf.keras.Model):
     def sample_action(self, x, epsilon):
 
         if random.random() > epsilon:
-            selected_actions, _ = self.sample_actions(x)
+            selected_actions, _ = self.greedy_action(x)
             selected_action = selected_actions[0][0].numpy()
         else:
             selected_action = np.random.choice(self.action_space)
 
         return selected_action
 
-    def sample_actions(self, state):
+    def greedy_action(self, state):
 
         _, taus_hat_probs, quantiles_tau_hat = self(state)
+
+        taus_hat_probs = tf.repeat(
+            tf.expand_dims(taus_hat_probs, axis=1),
+            self.action_space, axis=1)
+
+        weighted_quantiles_tau_hat = quantiles_tau_hat * taus_hat_probs
+        q_means = tf.reduce_mean(
+            weighted_quantiles_tau_hat, axis=2, keepdims=True)
+        selected_actions = tf.argmax(q_means, axis=1)
+
+        return selected_actions, quantiles_tau_hat
+
+    def greedy_action_on_given_taus(self, state, taus_hat, taus_hat_probs):
+
+        assert taus_hat.shape[1] == taus_hat_probs.shape[1]
+
+        state_embedded = self.state_embedding_layer(state)
+
+        quantiles_tau_hat = self.quantile_function(state_embedded, taus_hat)
 
         taus_hat_probs = tf.repeat(
             tf.expand_dims(taus_hat_probs, axis=1),
@@ -103,6 +120,7 @@ class FQFNetwork(tf.keras.Model):
         gradients_tau = 2 * quantile_values - quantile_hat_values[:, :, 1:] - quantile_hat_values[:, :, :-1]
 
         return gradients_tau
+
 
 class StateEmbeddingNetwork(tf.keras.layers.Layer):
 
@@ -148,16 +166,17 @@ class FractionProposalNetwork(tf.keras.layers.Layer):
 
         logits = self.dense_1(state_embedded)
         taus_excluding_zero = tf.cumsum(
-            tf.nn.softmax(logits, axis=1), axis=1)  # (batch_size, num_quantiles)
+            tf.nn.softmax(logits, axis=1), axis=1)
         tau_zero = tf.zeros([batch_size, 1], dtype=tf.float32)
-        taus = tf.concat([tau_zero, taus_excluding_zero], axis=-1)  # (batch_size, num_quantiles+1)
+        taus = tf.concat([tau_zero, taus_excluding_zero], axis=-1)
 
         return taus
 
 
 class QuantileFunctionNetwork(tf.keras.layers.Layer):
 
-    def __init__(self, action_space, state_embedding_dim, quantile_embedding_dim):
+    def __init__(self, action_space,
+                 state_embedding_dim, quantile_embedding_dim):
 
         super(QuantileFunctionNetwork, self).__init__()
 
