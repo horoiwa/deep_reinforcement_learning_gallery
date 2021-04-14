@@ -6,49 +6,58 @@ import numpy as np
 import tensorflow as tf
 import collections
 
-from model import QuantileQNetwork
+from models import FQFNetwork
 from buffer import Experience, ReplayBuffer
 from util import frame_preprocess
 
 
-class QRDQNAgent:
+class FQFAgent:
 
     def __init__(self, env_name="BreakoutDeterministic-v4",
-                 N=50, gamma=0.98,
-                 n_frames=4, batch_size=32,
+                 num_quantiles=32, fqf_factor=0.000001,
+                 state_embedding_dim=3136, quantile_embedding_dim=64,
+                 gamma=0.99, n_frames=4, batch_size=32,
                  buffer_size=1000000,
                  update_period=8,
-                 target_update_period=10000):
+                 target_update_period=8000):
 
         self.env_name = env_name
 
-        self.gamma = gamma
+        self.num_quantiles = num_quantiles
 
-        self.N = N
+        self.state_embedding_dim = state_embedding_dim
 
-        self.quantiles = [1/(2*N) + i * 1 / N for i in range(N)]
+        self.quantile_embedding_dim = quantile_embedding_dim
 
         self.k = 1.0
 
         self.n_frames = n_frames
+
+        self.action_space = gym.make(self.env_name).action_space.n
+
+        self.fqf_network = FQFNetwork(
+            action_space=self.action_space, num_quantiles=32,
+            state_embedding_dim=self.state_embedding_dim,
+            quantile_embedding_dim=self.quantile_embedding_dim)
+
+        self.target_fqf_network = FQFNetwork(
+            action_space=self.action_space, num_quantiles=32,
+            state_embedding_dim=self.state_embedding_dim,
+            quantile_embedding_dim=self.quantile_embedding_dim)
+
+        self._define_network()
+
+        self.gamma = gamma
+
+        self.replay_buffer = ReplayBuffer(max_len=buffer_size)
+
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00025, epsilon=0.01/32)
 
         self.batch_size = batch_size
 
         self.update_period = update_period
 
         self.target_update_period = target_update_period
-
-        self.action_space = gym.make(self.env_name).action_space.n
-
-        self.qnet = QuantileQNetwork(actions_space=self.action_space, N=N)
-
-        self.target_qnet = QuantileQNetwork(actions_space=self.action_space, N=N)
-
-        self._define_network()
-
-        self.replay_buffer = ReplayBuffer(max_len=buffer_size)
-
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.00025, epsilon=0.01/32)
 
         self.steps = 0
 
@@ -62,9 +71,9 @@ class QRDQNAgent:
             frames.append(frame)
 
         state = np.stack(frames, axis=2)[np.newaxis, ...]
-        self.qnet(state)
-        self.target_qnet(state)
-        self.target_qnet.set_weights(self.qnet.get_weights())
+        self.fqf_network(state)
+        self.target_fqf_network(state)
+        self.target_fqf_network.set_weights(self.fqf_network.get_weights())
 
     @property
     def epsilon(self):
@@ -83,6 +92,7 @@ class QRDQNAgent:
         self.summary_writer = tf.summary.create_file_writer(str(logdir))
 
         for episode in range(1, n_episodes+1):
+
             env = gym.make(self.env_name)
 
             frames = collections.deque(maxlen=4)
@@ -98,7 +108,7 @@ class QRDQNAgent:
                 self.steps += 1
                 episode_steps += 1
                 state = np.stack(frames, axis=2)[np.newaxis, ...]
-                action = self.qnet.sample_action(state, epsilon=self.epsilon)
+                action = self.fqf_network.sample_action(state, epsilon=self.epsilon)
                 next_frame, reward, done, info = env.step(action)
                 episode_rewards += reward
                 frames.append(frame_preprocess(next_frame))
@@ -110,16 +120,16 @@ class QRDQNAgent:
                     break
                 else:
                     if info["ale.lives"] != lives:
-                        lives = info["ale.lives"]
                         #: life loss as episode ends
+                        lives = info["ale.lives"]
                         exp = Experience(state, action, reward, next_state, True)
                     else:
                         exp = Experience(state, action, reward, next_state, done)
 
                     self.replay_buffer.push(exp)
 
-                if (len(self.replay_buffer) > 20000) and (self.steps % self.update_period == 0):
-                #if (len(self.replay_buffer) > 500) and (self.steps % self.update_period == 0):
+                #if (len(self.replay_buffer) > 20000) and (self.steps % self.update_period == 0):
+                if (len(self.replay_buffer) > 300) and (self.steps % self.update_period == 0):
                     loss = self.update_network()
 
                     with self.summary_writer.as_default():
@@ -146,10 +156,25 @@ class QRDQNAgent:
                 print("Model Saved")
 
     def update_network(self):
+
         (states, actions, rewards,
          next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size)
 
-        next_actions, next_quantile_values_all = self.target_qnet.sample_actions(next_states)
+        with tf.GradientTape() as tape1:
+            import pdb; pdb.set_trace()
+            state_embedded = self.fqf_network.state_embedding_layer(states)
+            _, taus_hat, _ = self.fqf_network.propose_fraction(state_embedded)
+
+
+    def dummy_update_network(self):
+
+        (states, actions, rewards,
+         next_states, dones) = self.replay_buffer.get_minibatch(self.batch_size)
+
+        next_actions, next_quantile_values_all = self.target_fqf_network.sample_actions(next_states)
+
+        with tf.GradientTape() as tape:
+            pass
 
         assert self.batch_size == states.shape[0] == len(next_actions)
 
@@ -255,7 +280,7 @@ class QRDQNAgent:
 
 
 def main():
-    agent = QRDQNAgent()
+    agent = FQFAgent()
     agent.learn(n_episodes=6001)
     agent.test_play(n_testplay=10,
                     checkpoint_path="checkpoints/qnet",
