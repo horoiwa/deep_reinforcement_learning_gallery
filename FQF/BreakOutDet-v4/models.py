@@ -106,21 +106,6 @@ class FQFNetwork(tf.keras.Model):
 
         return selected_actions, quantiles_tau_hat
 
-    def compute_gradients_tau(self, states, actions):
-
-        state_embedded = self.state_embedding_layer(states)
-        quantiles_all = self.fraction_proposal_layer(state_embedded)
-
-        quantiles = quantiles_all[:, 1:-1]
-        quantile_values = self.quantile_function_layer(state_embedded, quantiles)
-
-        quantiles_hat = (quantiles_all[:, 1:] + quantiles_all[:, :-1]) / 2.
-        quantile_hat_values = self.quantile_function_layer(state_embedded, quantiles_hat)
-
-        gradients_tau = 2 * quantile_values - quantile_hat_values[:, :, 1:] - quantile_hat_values[:, :, :-1]
-
-        return gradients_tau
-
 
 class StateEmbeddingNetwork(tf.keras.layers.Layer):
 
