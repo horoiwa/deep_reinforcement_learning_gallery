@@ -140,10 +140,12 @@ class FQFAgent:
 
                 if (len(self.replay_buffer) > 20000) and (self.steps % self.update_period == 0):
                 #if (len(self.replay_buffer) > 300) and (self.steps % self.update_period == 0):
-                    loss, loss_tau, entropy = self.update_network()
+                    loss, loss_fp, entropy = self.update_network()
 
                     with self.summary_writer.as_default():
                         tf.summary.scalar("loss", loss, step=self.steps)
+                        tf.summary.scalar("loss_fp", loss_fp, step=self.steps)
+                        tf.summary.scalar("entropy", entropy, step=self.steps)
                         tf.summary.scalar("epsilon", self.epsilon, step=self.steps)
                         tf.summary.scalar("buffer_size", len(self.replay_buffer), step=self.steps)
                         tf.summary.scalar("train_score", episode_rewards, step=self.steps)
@@ -246,8 +248,13 @@ class FQFAgent:
             dw_dtau = 2 * quantiles - quantiles_hat[:, :, 1:] - quantiles_hat[:, :, :-1]
             dw_dtau = tf.reduce_sum(dw_dtau * actions_mask, axis=1)
 
+            taus = tf.clip_by_value(taus, 0.001, 0.999)
+            entropy = tf.reduce_sum(-1 * taus * tf.math.log(taus), axis=1)
+
             loss_fp = tf.reduce_mean(tf.square(dw_dtau), axis=1)
-            loss_fp += self.ent_coef * entropy
+            loss_fp += -1 * self.ent_coef * entropy
+
+            loss_fp = tf.reduce_mean(loss_fp)
 
         fp_variables = self.fqf_network.fraction_proposal_layer.trainable_variables
         grads_fp = tape2.gradient(
@@ -256,7 +263,7 @@ class FQFAgent:
         self.optimizer.apply_gradients(zip(grads, variables))
         self.optimizer_fpl.apply_gradients(zip(grads_fp, fp_variables))
 
-        return loss, loss_fp, entropy
+        return loss, loss_fp, tf.reduce_mean(entropy)
 
     def test_play(self, n_testplay=1, monitor_dir=None,
                   checkpoint_path=None):
@@ -346,5 +353,5 @@ def debug():
 
 
 if __name__ == '__main__':
-    # main()
-    debug()
+    main()
+    #debug()
