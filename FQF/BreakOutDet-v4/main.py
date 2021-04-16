@@ -14,7 +14,7 @@ from util import frame_preprocess
 class FQFAgent:
 
     def __init__(self, env_name,
-                 num_quantiles=24, fqf_factor=0.000001, ent_coef=0.001,
+                 num_quantiles=32, fqf_factor=0.000001, ent_coef=0.001,
                  state_embedding_dim=3136, quantile_embedding_dim=64,
                  gamma=0.99, n_frames=4, batch_size=32,
                  buffer_size=1000000,
