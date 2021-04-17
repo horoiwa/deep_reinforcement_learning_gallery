@@ -142,7 +142,7 @@ class FractionProposalNetwork(tf.keras.layers.Layer):
 
         self.state_embedding_dim = state_embedding_dim
 
-        self.dense_1 = kl.Dense(num_quantiles, activation=None,
+        self.dense_1 = kl.Dense(num_quantiles-1, activation=None,
                                 kernel_initializer="he_normal")
 
     def call(self, state_embedded):
@@ -150,10 +150,14 @@ class FractionProposalNetwork(tf.keras.layers.Layer):
         batch_size = state_embedded.shape[0]
 
         logits = self.dense_1(state_embedded)
-        taus_excluding_zero = tf.cumsum(
+        taus_center = tf.cumsum(
             tf.nn.softmax(logits, axis=1), axis=1)
+        taus_center = tf.clip_by_value(taus_center, 0.04, 0.96)
+
         tau_zero = tf.zeros([batch_size, 1], dtype=tf.float32)
-        taus = tf.concat([tau_zero, taus_excluding_zero], axis=-1)
+        tau_one = tf.ones([batch_size, 1], dtype=tf.float32)
+
+        taus = tf.concat([tau_zero, taus_center, tau_one], axis=-1)
 
         return taus
 

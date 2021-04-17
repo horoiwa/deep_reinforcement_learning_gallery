@@ -14,7 +14,7 @@ from util import frame_preprocess
 class FQFAgent:
 
     def __init__(self, env_name,
-                 num_quantiles=32, fqf_factor=0.000001, ent_coef=0.001,
+                 num_quantiles=32, fqf_factor=0.000001, ent_coef=1.0,
                  state_embedding_dim=3136, quantile_embedding_dim=64,
                  gamma=0.99, n_frames=4, batch_size=32,
                  buffer_size=1000000,
@@ -245,11 +245,11 @@ class FQFAgent:
             taus_hat = (taus_all[:, 1:] + taus_all[:, :-1]) / 2.
             quantiles_hat = self.fqf_network.quantile_function(
                 state_embedded, taus_hat)
+
             dw_dtau = 2 * quantiles - quantiles_hat[:, :, 1:] - quantiles_hat[:, :, :-1]
             dw_dtau = tf.reduce_sum(dw_dtau * actions_mask, axis=1)
 
-            taus = tf.clip_by_value(taus, 0.001, 0.999)
-            entropy = tf.reduce_sum(-1 * taus * tf.math.log(taus), axis=1)
+            entropy = tf.reduce_sum(-1 * taus_hat * tf.math.log(taus_hat), axis=1)
 
             loss_fp = tf.reduce_mean(tf.square(dw_dtau), axis=1)
             loss_fp += -1 * self.ent_coef * entropy
@@ -257,8 +257,7 @@ class FQFAgent:
             loss_fp = tf.reduce_mean(loss_fp)
 
         fp_variables = self.fqf_network.fraction_proposal_layer.trainable_variables
-        grads_fp = tape2.gradient(
-            loss_fp, fp_variables, output_gradients=dw_dtau)
+        grads_fp = tape2.gradient(loss_fp, fp_variables)
 
         self.optimizer.apply_gradients(zip(grads, variables))
         self.optimizer_fpl.apply_gradients(zip(grads_fp, fp_variables))
@@ -348,8 +347,10 @@ def debug():
         agent.replay_buffer.push(exp)
 
     loss = agent.update_network()
+
     fqf = agent.fqf_network
     state_embedded = fqf.state_embedding_layer(state)
+    import pdb; pdb.set_trace()
 
 
 if __name__ == '__main__':
