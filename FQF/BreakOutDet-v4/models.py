@@ -152,7 +152,7 @@ class FractionProposalNetwork(tf.keras.layers.Layer):
         logits = self.dense_1(state_embedded)
         taus_center = tf.cumsum(
             tf.nn.softmax(logits, axis=1), axis=1)
-        taus_center = tf.clip_by_value(taus_center, 0.04, 0.96)
+        taus_center = tf.clip_by_value(taus_center, 0.1, 0.9)
 
         tau_zero = tf.zeros([batch_size, 1], dtype=tf.float32)
         tau_one = tf.ones([batch_size, 1], dtype=tf.float32)

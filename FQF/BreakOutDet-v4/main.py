@@ -14,7 +14,7 @@ from util import frame_preprocess
 class FQFAgent:
 
     def __init__(self, env_name,
-                 num_quantiles=32, fqf_factor=0.000001, ent_coef=1.0,
+                 num_quantiles=32, fqf_factor=0.000001, ent_coef=0.001,
                  state_embedding_dim=3136, quantile_embedding_dim=64,
                  gamma=0.99, n_frames=4, batch_size=32,
                  buffer_size=1000000,
@@ -250,7 +250,6 @@ class FQFAgent:
             dw_dtau = tf.reduce_sum(dw_dtau * actions_mask, axis=1)
 
             entropy = tf.reduce_sum(-1 * taus_hat * tf.math.log(taus_hat), axis=1)
-
             loss_fp = tf.reduce_mean(tf.square(dw_dtau), axis=1)
             loss_fp += -1 * self.ent_coef * entropy
 
@@ -354,5 +353,5 @@ def debug():
 
 
 if __name__ == '__main__':
-    main()
-    #debug()
+    #main()
+    debug()
