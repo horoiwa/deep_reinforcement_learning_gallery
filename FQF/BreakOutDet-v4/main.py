@@ -14,7 +14,7 @@ from util import frame_preprocess
 class FQFAgent:
 
     def __init__(self, env_name,
-                 num_quantiles=32, fqf_factor=0.000001, ent_coef=0.001,
+                 num_quantiles=32, fqf_factor=0.000001*0.1, ent_coef=0.001,
                  state_embedding_dim=3136, quantile_embedding_dim=64,
                  gamma=0.99, n_frames=4, batch_size=32,
                  buffer_size=1000000,
@@ -138,8 +138,8 @@ class FQFAgent:
 
                     self.replay_buffer.push(exp)
 
-                if (len(self.replay_buffer) > 20000) and (self.steps % self.update_period == 0):
-                #if (len(self.replay_buffer) > 300) and (self.steps % self.update_period == 0):
+                if (len(self.replay_buffer) > 50000) and (self.steps % self.update_period == 0):
+
                     loss, loss_fp, entropy = self.update_network()
 
                     with self.summary_writer.as_default():
@@ -181,7 +181,7 @@ class FQFAgent:
             state_embedded = self.fqf_network.state_embedding_layer(states)
 
             taus, taus_hat, taus_hat_probs = self.fqf_network.propose_fractions(state_embedded)
-            tf.stop_gradient(taus_hat)
+            taus_hat, taus_hat_probs = tf.stop_gradient(taus_hat), tf.stop_gradient(taus_hat_probs)
 
             quantiles = self.fqf_network.quantile_function(
                 state_embedded, taus_hat)
@@ -250,9 +250,9 @@ class FQFAgent:
             dw_dtau = tf.reduce_sum(dw_dtau * actions_mask, axis=1)
 
             entropy = tf.reduce_sum(-1 * taus_hat * tf.math.log(taus_hat), axis=1)
+
             loss_fp = tf.reduce_mean(tf.square(dw_dtau), axis=1)
             loss_fp += -1 * self.ent_coef * entropy
-
             loss_fp = tf.reduce_mean(loss_fp)
 
         fp_variables = self.fqf_network.fraction_proposal_layer.trainable_variables
@@ -326,32 +326,5 @@ def main():
                     monitor_dir="mp4")
 
 
-def debug():
-    agent = FQFAgent(env_name="BreakoutDeterministic-v4")
-    env = gym.make("BreakoutDeterministic-v4")
-    frames = collections.deque(maxlen=4)
-    frame = frame_preprocess(env.reset())
-    for _ in range(4):
-        frames.append(frame)
-    state = np.stack(frames, axis=2)[np.newaxis, ...]
-
-    agent.fqf_network.load_weights("checkpoints/fqfnet")
-    for _ in range(64):
-        state = np.stack(frames, axis=2)[np.newaxis, ...]
-        action = agent.fqf_network.sample_action(state, epsilon=0.1)
-        next_frame, reward, done, info = env.step(action)
-        frames.append(frame_preprocess(next_frame))
-        next_state = np.stack(frames, axis=2)[np.newaxis, ...]
-        exp = Experience(state, action, reward, next_state, done)
-        agent.replay_buffer.push(exp)
-
-    loss = agent.update_network()
-
-    fqf = agent.fqf_network
-    state_embedded = fqf.state_embedding_layer(state)
-    import pdb; pdb.set_trace()
-
-
 if __name__ == '__main__':
-    #main()
-    debug()
+    main()
