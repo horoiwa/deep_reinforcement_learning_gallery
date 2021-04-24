@@ -1,0 +1,6 @@
+tensorflow >= 2.1
+ray >= 1.0
+tensorflow-probability
+gym
+numpy
+Pillow
