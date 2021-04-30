@@ -124,7 +124,6 @@ class Actor:
 
         priorities = self.eta * tf.reduce_max(td_errors_abs, axis=0) \
             + (1 - self.eta) * tf.reduce_mean(td_errors_abs, axis=0)
-
         priorities = (priorities + 0.001) ** self.alpha
 
         return priorities.numpy().tolist(), segments
@@ -133,7 +132,8 @@ class Actor:
 @ray.remote(num_cpus=1, num_gpus=1)
 class Learner:
 
-    def __init__(self, env_name, gamma, burnin_length, unroll_length):
+    def __init__(self, env_name, gamma, eta, alpha,
+                 burnin_length, unroll_length):
         self.env_name = env_name
         self.action_space = gym.make(self.env_name).action_space.n
 
@@ -142,6 +142,9 @@ class Learner:
         self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
 
         self.gamma = gamma
+        self.eta = eta
+        self.alpha = alpha
+
         self.burnin_len = burnin_length
         self.unroll_len = unroll_length
 
@@ -164,9 +167,6 @@ class Learner:
               weights (List[float]): Importance sampling weights
               segments (List[Segment]):
                 Segment: sequence of transitions
-
-        Returns:
-            [type]: [description]
         """
 
         indices_all = []
@@ -193,12 +193,10 @@ class Learner:
 
             #: burn-in with stored-state
             for t in range(self.burnin_len):
-                _, (c0, h0) = self.q_network(states_burnin, states=[c0, h0])
+                _, (c0, h0) = self.q_network(states_burnin[t], states=[c0, h0])
 
             #: Compute TQ
-            assert next_states_unroll.shape[0] == self.unroll_len
-            next_qvalues = []
-            c, h = c0, h0
+            next_qvalues, c, h = [], c0, h0
             for t in range(self.unroll_len):
                 q, (c, h) = self.target_q_network(next_states_unroll[t], states=[c, h])
                 next_qvalues.append(q)
@@ -210,43 +208,36 @@ class Learner:
                 next_qvalues * next_actions_onehot, axis=2, keepdims=False)    # (unroll_len, batch_size)
             TQ = rewards + self.gamma * (1 - dones) * next_maxQ                # (unroll_len, batch_size)
 
-            import pdb; pdb.set_trace()
             with tf.GradientTape() as tape:
-                qvalues = []
-                c, h = c0, h0
-                for t in range(self.burnin_len, self.burnin_len+self.unroll_len):
-                    q, (c, h) = self.q_network(states[t], states=[c, h])
+                qvalues, c, h = [], c0, h0
+                for t in range(self.unroll_len):
+                    q, (c, h) = self.q_network(states_unroll[t], states=[c, h])
                     qvalues.append(q)
                 qvalues = tf.stack(qvalues)                                          # (unroll_len, batch_size, action_space)
                 actions_onehot = tf.one_hot(actions, self.action_space)
                 Q = tf.reduce_sum(qvalues * actions_onehot, axis=2, keepdims=False)  # (unroll_len, batch_size)
 
-                #: compute qvlalue of last next-state in segment
-                remaining_qvalue, _ = self.q_network(last_state, states=[c, h])
-                remaining_qvalue = tf.expand_dims(remaining_qvalue, axis=0)          # (1, batch_size, action_space)
-
-                next_qvalues = tf.concat([qvalues[1:], remaining_qvalue], axis=0)    # (unroll_len, batch_size, action_space)
-                next_actions = tf.argmax(next_qvalues, axis=2)                       # (unroll_len, batch_size)
-                next_actions_onehot = tf.one_hot(next_actions, self.action_space)    # (unroll_len, batch_size, action_space)
-                next_maxQ = tf.reduce_sum(
-                    next_qvalues * next_actions_onehot, axis=2, keepdims=False)      # (unroll_len, batch_size)
-
-                TQ = rewards + self.gamma * (1 - dones) * next_maxQ  # (unroll_len, batch_size)
-
                 td_errors = TQ - Q
-
+                loss = tf.reduce_mean(tf.square(td_errors) * weights)
 
             grads = tape.gradient(loss, self.q_network.trainable_variables)
             grads, _ = tf.clip_by_global_norm(grads, 40.0)
             self.optimizer.apply_gradients(
                 zip(grads, self.q_network.trainable_variables))
 
+            #: Compute priority
+            td_errors_abs = tf.abs(td_errors)
+            priorities = self.eta * tf.reduce_max(td_errors_abs, axis=0) \
+                + (1 - self.eta) * tf.reduce_mean(td_errors_abs, axis=0)
+            priorities = (priorities + 0.001) ** self.alpha
+
             indices_all += indices
-            td_errors_all += td_errors.numpy().flatten().tolist()
+            priorities_all += priorities.numpy().tolist()
 
         current_weights = self.q_network.get_weights()
         self.target_q_network.set_weights(current_weights)
-        return current_weights, indices_all, td_errors_all
+
+        return current_weights, indices_all, priorities_all
 
 
 @ray.remote
@@ -302,6 +293,7 @@ def main(num_actors,
     replay = SegmentReplayBuffer(buffer_size=2**14)
 
     learner = Learner.remote(env_name=env_name, gamma=gamma,
+                             eta=eta, alpha=alpha,
                              burnin_length=burnin_length,
                              unroll_length=unroll_length)
 
