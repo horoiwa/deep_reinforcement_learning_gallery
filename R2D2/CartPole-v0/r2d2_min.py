@@ -65,9 +65,7 @@ class Actor:
         c, h = self.q_network.lstm.get_initial_state(
             batch_size=1, dtype=tf.float32)
         done = False
-
         episode_rewards = 0
-
         while not done:
             action, (next_c, next_h) = self.q_network.sample_action(state, c, h, self.epsilon)
             next_state, reward, done, _ = env.step(action)
@@ -139,7 +137,7 @@ class Learner:
 
         self.q_network = RecurrentQNetwork(self.action_space)
         self.target_q_network = RecurrentQNetwork(self.action_space)
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0001)
 
         self.gamma = gamma
         self.eta = eta
@@ -263,12 +261,15 @@ class Tester:
         env = gym.make(self.env_name)
         state = env.reset()
         episode_rewards = 0
+
+        c, h = self.q_network.lstm.get_initial_state(
+            batch_size=1, dtype=tf.float32)
         done = False
         while not done:
-            action = self.q_network.sample_action(state, epsilon)
+            action, (next_c, next_h) = self.q_network.sample_action(state, c, h, epsilon)
             next_state, reward, done, _ = env.step(action)
             episode_rewards += reward
-            state = next_state
+            state, c, h = next_state, next_c, next_h
 
         return episode_rewards
 
@@ -283,7 +284,7 @@ def main(num_actors,
     ray.init(local_mode=True)
     history = []
 
-    epsilons = np.linspace(0.05, 0.5, num_actors) if num_actors > 1 else [0.3]
+    epsilons = np.linspace(0.1, 0.5, num_actors) if num_actors > 1 else [0.3]
     actors = [Actor.remote(pid=i, env_name=env_name, epsilon=epsilons[i],
                            gamma=gamma, eta=eta, alpha=alpha,
                            burnin_length=burnin_length,
@@ -320,9 +321,9 @@ def main(num_actors,
 
     minibatchs = [replay.sample_minibatch(batch_size=32) for _ in range(16)]
 
-    update_cycles = 1
+    learner_cycles = 1
     actor_cycles = 0
-    while update_cycles <= 200:
+    while learner_cycles <= 50:
         actor_cycles += 1
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
         priorities, segments, pid = ray.get(finished[0])
@@ -332,22 +333,22 @@ def main(num_actors,
 
         finished_learner, _ = ray.wait([wip_learner], timeout=0)
         if finished_learner:
-            current_weights, indices, td_errors = ray.get(finished_learner[0])
+            current_weights, indices, priorities = ray.get(finished_learner[0])
             wip_learner = learner.update_network.remote(minibatchs)
             current_weights = ray.put(current_weights)
 
             #: 優先度の更新とminibatchの作成はlearnerよりも十分に速いという前提
-            replay.update_priority(indices, td_errors)
+            replay.update_priority(indices, priorities)
             minibatchs = [replay.sample_minibatch(batch_size=32) for _ in range(16)]
-            print(actor_cycles)
-            update_cycles += 1
+            print("Actor cycle:", actor_cycles)
+            learner_cycles += 1
             actor_cycles = 0
 
-            if update_cycles % 5 == 0:
+            if learner_cycles % 5 == 0:
                 test_score = ray.get(wip_tester)
-                print(update_cycles, test_score)
-                history.append((update_cycles-5, test_score))
-                wip_tester = tester.test_play.remote(current_weights, epsilon=0.01)
+                print("Cycle:", learner_cycles, "Score:", test_score)
+                history.append((learner_cycles-5, test_score))
+                wip_tester = tester.test_play.remote(current_weights, epsilon=0.1)
 
     wallclocktime = round(time.time() - s, 2)
     cycles, scores = zip(*history)

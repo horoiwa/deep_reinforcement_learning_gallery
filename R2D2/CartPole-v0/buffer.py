@@ -98,7 +98,7 @@ class SegmentReplayBuffer:
 
         #: Compute importance sampling weights
         weights = []
-        current_size = len(self.buffer) if self.full else self.count
+        current_size = len(self.segment_buffer) if self.full else self.count
         for idx in sampled_indices:
             prob = self.priorities[idx] / self.priorities.sum()
             weight = (prob * current_size)**(-self.beta)
