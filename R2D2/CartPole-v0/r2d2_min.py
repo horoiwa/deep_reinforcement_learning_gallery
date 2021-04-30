@@ -130,65 +130,20 @@ class Actor:
         return priorities.numpy().tolist(), segments
 
 
-class Replay:
-
-    def __init__(self, buffer_size):
-
-        self.buffer_size = buffer_size
-        self.priorities = SumTree(capacity=self.buffer_size)
-        self.buffer = [None] * self.buffer_size
-
-        self.alpha = 0.6
-        self.beta = 0.4
-
-        self.count = 0
-        self.is_full = False
-
-    def add(self, td_errors, transitions):
-        assert len(td_errors) == len(transitions)
-        priorities = (np.abs(td_errors) + 0.001) ** self.alpha
-        for priority, transition in zip(priorities, transitions):
-            self.priorities[self.count] = priority
-            self.buffer[self.count] = transition
-            self.count += 1
-            if self.count == self.buffer_size:
-                self.count = 0
-                self.is_full = True
-
-    def update_priority(self, sampled_indices, td_errors):
-        assert len(sampled_indices) == len(td_errors)
-        for idx, td_error in zip(sampled_indices, td_errors):
-            priority = (abs(td_error) + 0.001) ** self.alpha
-            self.priorities[idx] = priority**self.alpha
-
-    def sample_minibatch(self, batch_size):
-
-        sampled_indices = [self.priorities.sample() for _ in range(batch_size)]
-
-        #: compute prioritized experience replay weights
-        weights = []
-        current_size = len(self.buffer) if self.is_full else self.count
-        for idx in sampled_indices:
-            prob = self.priorities[idx] / self.priorities.sum()
-            weight = (prob * current_size)**(-self.beta)
-            weights.append(weight)
-        weights = np.array(weights) / max(weights)
-
-        experiences = [self.buffer[idx] for idx in sampled_indices]
-
-        return sampled_indices, weights, experiences
-
-
 @ray.remote(num_cpus=1, num_gpus=1)
 class Learner:
 
-    def __init__(self, gamma, env_name):
+    def __init__(self, env_name, gamma, burnin_length, unroll_length):
         self.env_name = env_name
         self.action_space = gym.make(self.env_name).action_space.n
+
         self.q_network = RecurrentQNetwork(self.action_space)
         self.target_q_network = RecurrentQNetwork(self.action_space)
-        self.gamma = gamma
         self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
+
+        self.gamma = gamma
+        self.burnin_len = burnin_length
+        self.unroll_len = unroll_length
 
     def define_network(self):
         env = gym.make(self.env_name)
@@ -202,33 +157,84 @@ class Learner:
         return current_weights
 
     def update_network(self, minibatchs):
+        """
+        Args:
+            minibatchs (List[Tuple(indices, weights, segments)])
+              indices (List[float]): indices of replay buffer
+              weights (List[float]): Importance sampling weights
+              segments (List[Segment]):
+                Segment: sequence of transitions
+
+        Returns:
+            [type]: [description]
+        """
 
         indices_all = []
-        td_errors_all = []
+        priorities_all = []
 
-        for (indices, weights, transitions) in minibatchs:
+        for (indices, weights, segments) in minibatchs:
 
-            states, actions, rewards, next_states, dones = zip(*transitions)
+            states = np.stack([seg.states for seg in segments], axis=1)    # (burnin_len+unroll_len, batch_size, obs_dim)
+            actions = np.stack([seg.actions for seg in segments], axis=1)  # (unroll_len, batch_size)
+            rewards = np.stack([seg.rewards for seg in segments], axis=1)  # (unroll_len, batch_size)
+            dones = np.stack([seg.dones for seg in segments], axis=1)      # (unroll_len, batch_size)
+            last_state = np.stack([seg.last_state for seg in segments])    # (batch_size, obs_dim)
+            last_state = tf.expand_dims(last_state, axis=0)                # (1, batch_size, obs_dim)
 
-            states = np.vstack(states)
-            actions = np.array(actions)
-            rewards = np.vstack(rewards)
-            next_states = np.vstack(next_states)
-            dones = np.vstack(dones)
+            states_burnin = states[:self.burnin_len]  # (burnin_len, batch_size, obs_dim)
+            states_unroll = states[self.burnin_len:]  # (unroll_len, batch_size, obs_dim)
+            next_states_unroll = tf.concat(
+                [states[self.burnin_len+1:], last_state], axis=0)
 
-            next_qvalues = self.q_network(next_states)
-            next_actions = tf.cast(tf.argmax(next_qvalues, axis=1), tf.int32)
-            next_actions_onehot = tf.one_hot(next_actions, self.action_space)
+            c0 = tf.convert_to_tensor(
+                np.vstack([seg.c_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
+            h0 = tf.convert_to_tensor(
+                np.vstack([seg.h_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
+
+            #: burn-in with stored-state
+            for t in range(self.burnin_len):
+                _, (c0, h0) = self.q_network(states_burnin, states=[c0, h0])
+
+            #: Compute TQ
+            assert next_states_unroll.shape[0] == self.unroll_len
+            next_qvalues = []
+            c, h = c0, h0
+            for t in range(self.unroll_len):
+                q, (c, h) = self.target_q_network(next_states_unroll[t], states=[c, h])
+                next_qvalues.append(q)
+
+            next_qvalues = tf.stack(next_qvalues)                              # (unroll_len, batch_size, action_space)
+            next_actions = tf.argmax(next_qvalues, axis=2)                     # (unroll_len, batch_size)
+            next_actions_onehot = tf.one_hot(next_actions, self.action_space)  # (unroll_len, batch_size, action_space)
             next_maxQ = tf.reduce_sum(
-                next_qvalues * next_actions_onehot, axis=1, keepdims=True)
-            TQ = rewards + self.gamma * (1 - dones) * next_maxQ
+                next_qvalues * next_actions_onehot, axis=2, keepdims=False)    # (unroll_len, batch_size)
+            TQ = rewards + self.gamma * (1 - dones) * next_maxQ                # (unroll_len, batch_size)
 
+            import pdb; pdb.set_trace()
             with tf.GradientTape() as tape:
-                qvalues = self.q_network(states)
+                qvalues = []
+                c, h = c0, h0
+                for t in range(self.burnin_len, self.burnin_len+self.unroll_len):
+                    q, (c, h) = self.q_network(states[t], states=[c, h])
+                    qvalues.append(q)
+                qvalues = tf.stack(qvalues)                                          # (unroll_len, batch_size, action_space)
                 actions_onehot = tf.one_hot(actions, self.action_space)
-                Q = tf.reduce_sum(qvalues * actions_onehot, axis=1, keepdims=True)
-                td_errors = tf.square(TQ - Q)
-                loss = tf.reduce_mean(weights * td_errors)
+                Q = tf.reduce_sum(qvalues * actions_onehot, axis=2, keepdims=False)  # (unroll_len, batch_size)
+
+                #: compute qvlalue of last next-state in segment
+                remaining_qvalue, _ = self.q_network(last_state, states=[c, h])
+                remaining_qvalue = tf.expand_dims(remaining_qvalue, axis=0)          # (1, batch_size, action_space)
+
+                next_qvalues = tf.concat([qvalues[1:], remaining_qvalue], axis=0)    # (unroll_len, batch_size, action_space)
+                next_actions = tf.argmax(next_qvalues, axis=2)                       # (unroll_len, batch_size)
+                next_actions_onehot = tf.one_hot(next_actions, self.action_space)    # (unroll_len, batch_size, action_space)
+                next_maxQ = tf.reduce_sum(
+                    next_qvalues * next_actions_onehot, axis=2, keepdims=False)      # (unroll_len, batch_size)
+
+                TQ = rewards + self.gamma * (1 - dones) * next_maxQ  # (unroll_len, batch_size)
+
+                td_errors = TQ - Q
+
 
             grads = tape.gradient(loss, self.q_network.trainable_variables)
             grads, _ = tf.clip_by_global_norm(grads, 40.0)
@@ -239,6 +245,7 @@ class Learner:
             td_errors_all += td_errors.numpy().flatten().tolist()
 
         current_weights = self.q_network.get_weights()
+        self.target_q_network.set_weights(current_weights)
         return current_weights, indices_all, td_errors_all
 
 
@@ -294,7 +301,10 @@ def main(num_actors,
 
     replay = SegmentReplayBuffer(buffer_size=2**14)
 
-    learner = Learner.remote(env_name=env_name, gamma=gamma)
+    learner = Learner.remote(env_name=env_name, gamma=gamma,
+                             burnin_length=burnin_length,
+                             unroll_length=unroll_length)
+
     current_weights = ray.get(learner.define_network.remote())
     current_weights = ray.put(current_weights)
 
@@ -303,15 +313,15 @@ def main(num_actors,
     wip_actors = [actor.sync_weights_and_rollout.remote(current_weights)
                   for actor in actors]
 
-    for _ in range(30):
+    for _ in range(10):
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
         priorities, segments, pid = ray.get(finished[0])
         replay.put(priorities, segments)
         wip_actors.extend(
             [actors[pid].sync_weights_and_rollout.remote(current_weights)])
 
+    # minibatchs: (indices, weights, segments)
     minibatchs = [replay.sample_minibatch(batch_size=32) for _ in range(16)]
-    import pdb; pdb.set_trace()
     wip_learner = learner.update_network.remote(minibatchs)
 
     wip_tester = tester.test_play.remote(current_weights, epsilon=0.01)

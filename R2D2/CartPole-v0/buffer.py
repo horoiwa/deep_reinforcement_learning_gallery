@@ -1,6 +1,8 @@
 import collections
 import random
 
+import numpy as np
+
 
 Transition = collections.namedtuple(
     "Transition", ["state", "action", "reward", "next_state", "done", "c", "h"])
@@ -21,6 +23,10 @@ class EpisodeBuffer:
         return len(self.transitions)
 
     def put(self, transition):
+        """
+            Optional:
+                reward-clipping や n-step-return はここで計算しておくとよい
+        """
         #: transition: (s, a, r, s2, done, c, h)
         self.transitions.append(Transition(*transition))
 
