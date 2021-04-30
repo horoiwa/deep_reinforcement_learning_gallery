@@ -6,15 +6,15 @@ import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
 
-from segment_tree import SumTree
 from model import RecurrentQNetwork
-from buffer import EpisodeBuffer
+from buffer import EpisodeBuffer, SegmentReplayBuffer
 
 
 @ray.remote
 class Actor:
 
-    def __init__(self, pid, env_name, epsilon, gamma,
+    def __init__(self, pid, env_name,
+                 epsilon, gamma, eta, alpha,
                  burnin_length, unroll_length):
 
         self.pid = pid
@@ -24,6 +24,9 @@ class Actor:
         self.q_network = RecurrentQNetwork(self.action_space)
         self.epsilon = epsilon
         self.gamma = gamma
+
+        self.eta = eta
+        self.alpha = alpha  # priority exponent
 
         self.burnin_len = burnin_length
         self.unroll_len = unroll_length
@@ -38,10 +41,21 @@ class Actor:
         c, h = self.q_network.lstm.get_initial_state(batch_size=1, dtype=tf.float32)
         self.q_network(np.atleast_2d(state), states=[c, h])
 
-    def rollout(self, current_weights):
+    def sync_weights_and_rollout(self, current_weights):
 
         #: グローバルQ-Networkと重みを同期
         self.q_network.set_weights(current_weights)
+
+        priorities, segments = [], []
+
+        while len(segments) < 10:
+            _priorities, _segments = self.rollout()
+            priorities += _priorities
+            segments += _segments
+
+        return priorities, segments, self.pid
+
+    def rollout(self) -> (list, list):
 
         env = gym.make(self.env_name)
         episode_buffer = EpisodeBuffer(burnin_length=self.burnin_len,
@@ -70,11 +84,11 @@ class Actor:
 
         """ Compute initial priority
         """
-        states = np.stack([seg.states for seg in segments], axis=1)    # (timestep, batch_size, obs_dim)
-        actions = np.stack([seg.actions for seg in segments], axis=1)  # (timestep, batch_size)
-        rewards = np.stack([seg.rewards for seg in segments], axis=1)  # (timestep, batch_size)
-        dones = np.stack([seg.dones for seg in segments], axis=1)      # (timestep, batch_size)
-        last_state = np.stack([seg.last_state for seg in segments])   # (batch_size, obs_dim)
+        states = np.stack([seg.states for seg in segments], axis=1)    # (burnin_len+unroll_len, batch_size, obs_dim)
+        actions = np.stack([seg.actions for seg in segments], axis=1)  # (unroll_len, batch_size)
+        rewards = np.stack([seg.rewards for seg in segments], axis=1)  # (unroll_len, batch_size)
+        dones = np.stack([seg.dones for seg in segments], axis=1)      # (unroll_len, batch_size)
+        last_state = np.stack([seg.last_state for seg in segments])    # (batch_size, obs_dim)
 
         c = tf.convert_to_tensor(
             np.vstack([seg.c_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
@@ -89,24 +103,31 @@ class Actor:
         for t in range(self.burnin_len, self.burnin_len+self.unroll_len):
             q, (c, h) = self.q_network(states[t], states=[c, h])
             qvalues.append(q)
-        qvalues = tf.stack(qvalues)  #: (unroll_len, batch_size, action_space)
+        qvalues = tf.stack(qvalues)                                          # (unroll_len, batch_size, action_space)
         actions_onehot = tf.one_hot(actions, self.action_space)
-        Q = tf.reduce_sum(qvalues * actions_onehot, axis=1, keepdims=True)
+        Q = tf.reduce_sum(qvalues * actions_onehot, axis=2, keepdims=False)  # (unroll_len, batch_size)
 
         #: compute qvlalue of last next-state in segment
         remaining_qvalue, _ = self.q_network(last_state, states=[c, h])
-        remaining_qvalue = tf.expand_dims(remaining_qvalue, axis=0)  # (1, batch_size, action_space)
+        remaining_qvalue = tf.expand_dims(remaining_qvalue, axis=0)          # (1, batch_size, action_space)
 
-        next_qvalues = tf.concat([qvalues[1:], remaining_qvalue], axis=0)  # (unroll_len, batch_size, action_space)
-        next_actions = tf.argmax(next_qvalues, axis=2)  # (unroll_len, batch_size)
-        next_actions_onehot = tf.one_hot(next_actions, self.action_space)  # (unroll_len, batch_size, action_space)
+        next_qvalues = tf.concat([qvalues[1:], remaining_qvalue], axis=0)    # (unroll_len, batch_size, action_space)
+        next_actions = tf.argmax(next_qvalues, axis=2)                       # (unroll_len, batch_size)
+        next_actions_onehot = tf.one_hot(next_actions, self.action_space)    # (unroll_len, batch_size, action_space)
+        next_maxQ = tf.reduce_sum(
+            next_qvalues * next_actions_onehot, axis=2, keepdims=False)      # (unroll_len, batch_size)
 
-        import pdb; pdb.set_trace()
+        TQ = rewards + self.gamma * (1 - dones) * next_maxQ  # (unroll_len, batch_size)
 
-        TQ = rewards + self.gamma * (1 - dones) * next_maxQ
-        td_errors = (TQ - Q).numpy().flatten()
+        td_errors = TQ - Q
+        td_errors_abs = tf.abs(td_errors)
 
-        return td_errors, segments, self.pid
+        priorities = self.eta * tf.reduce_max(td_errors_abs, axis=0) \
+            + (1 - self.eta) * tf.reduce_mean(td_errors_abs, axis=0)
+
+        priorities = (priorities + 0.001) ** self.alpha
+
+        return priorities.numpy().tolist(), segments
 
 
 class Replay:
@@ -126,57 +147,6 @@ class Replay:
     def add(self, td_errors, transitions):
         assert len(td_errors) == len(transitions)
         priorities = (np.abs(td_errors) + 0.001) ** self.alpha
-        for priority, transition in zip(priorities, transitions):
-            self.priorities[self.count] = priority
-            self.buffer[self.count] = transition
-            self.count += 1
-            if self.count == self.buffer_size:
-                self.count = 0
-                self.is_full = True
-
-    def update_priority(self, sampled_indices, td_errors):
-        assert len(sampled_indices) == len(td_errors)
-        for idx, td_error in zip(sampled_indices, td_errors):
-            priority = (abs(td_error) + 0.001) ** self.alpha
-            self.priorities[idx] = priority**self.alpha
-
-    def sample_minibatch(self, batch_size):
-
-        sampled_indices = [self.priorities.sample() for _ in range(batch_size)]
-
-        #: compute prioritized experience replay weights
-        weights = []
-        current_size = len(self.buffer) if self.is_full else self.count
-        for idx in sampled_indices:
-            prob = self.priorities[idx] / self.priorities.sum()
-            weight = (prob * current_size)**(-self.beta)
-            weights.append(weight)
-        weights = np.array(weights) / max(weights)
-
-        experiences = [self.buffer[idx] for idx in sampled_indices]
-
-        return sampled_indices, weights, experiences
-
-
-class EpisodicPrioritizedReplayBuffer:
-
-    def __init__(self, buffer_size=2**12):
-
-        self.buffer_size = buffer_size
-        self.priorities = SumTree(capacity=self.buffer_size)
-        self.buffer = [None] * self.buffer_size
-
-        self.alpha = 0.6
-        self.beta = 0.4
-
-        self.count = 0
-        self.is_full = False
-
-    def add(self, td_errors, transitions):
-        assert len(td_errors) == len(transitions)
-
-        priorities = (np.abs(td_errors) + 0.001) ** self.alpha
-
         for priority, transition in zip(priorities, transitions):
             self.priorities[self.count] = priority
             self.buffer[self.count] = transition
@@ -305,7 +275,9 @@ class Tester:
         return episode_rewards
 
 
-def main(num_actors, gamma=0.997, env_name="CartPole-v0",
+def main(num_actors,
+         env_name="CartPole-v0",
+         gamma=0.997, eta=0.9, alpha=0.9,
          burnin_length=4, unroll_length=4):
 
     s = time.time()
@@ -315,11 +287,12 @@ def main(num_actors, gamma=0.997, env_name="CartPole-v0",
 
     epsilons = np.linspace(0.05, 0.5, num_actors) if num_actors > 1 else [0.3]
     actors = [Actor.remote(pid=i, env_name=env_name, epsilon=epsilons[i],
-                           gamma=gamma, burnin_length=burnin_length,
+                           gamma=gamma, eta=eta, alpha=alpha,
+                           burnin_length=burnin_length,
                            unroll_length=unroll_length)
               for i in range(num_actors)]
 
-    replay = Replay(buffer_size=2**14)
+    replay = SegmentReplayBuffer(buffer_size=2**14)
 
     learner = Learner.remote(env_name=env_name, gamma=gamma)
     current_weights = ray.get(learner.define_network.remote())
@@ -327,13 +300,15 @@ def main(num_actors, gamma=0.997, env_name="CartPole-v0",
 
     tester = Tester.remote(env_name=env_name)
 
-    wip_actors = [actor.rollout.remote(current_weights) for actor in actors]
+    wip_actors = [actor.sync_weights_and_rollout.remote(current_weights)
+                  for actor in actors]
 
     for _ in range(30):
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
-        td_errors, transitions, pid = ray.get(finished[0])
-        replay.add(td_errors, transitions)
-        wip_actors.extend([actors[pid].rollout.remote(current_weights)])
+        priorities, segments, pid = ray.get(finished[0])
+        replay.put(priorities, segments)
+        wip_actors.extend(
+            [actors[pid].sync_weights_and_rollout.remote(current_weights)])
 
     minibatchs = [replay.sample_minibatch(batch_size=32) for _ in range(16)]
     wip_learner = learner.update_network.remote(minibatchs)
