@@ -57,49 +57,51 @@ class SegmentReplayBuffer:
 
         self.buffer_size = buffer_size
         self.priorities = SumTree(capacity=self.buffer_size)
-        self.buffer = [None] * self.buffer_size
+        self.segment_buffer = [None] * self.buffer_size
 
-        self.alpha = 0.6
-        self.beta = 0.4
+        self.beta = 0.6  # importance sampling exponent
 
         self.count = 0
-        self.is_full = False
+        self.full = False
+
+    def __len__(self):
+        return len(self.segment_buffer) if self.full else self.count
 
     def put(self, priorities: list, segments: list):
         assert len(priorities) == len(segments)
 
-        for priority, transition in zip(priorities, segments):
+        for priority, segment in zip(priorities, segments):
 
             self.priorities[self.count] = priority
-            self.buffer[self.count] = transition
+            self.segment_buffer[self.count] = segment
 
             self.count += 1
             if self.count == self.buffer_size:
                 self.count = 0
-                self.is_full = True
+                self.full = True
 
-    def update_priority(self, sampled_indices, td_errors):
-        assert len(sampled_indices) == len(td_errors)
-        for idx, td_error in zip(sampled_indices, td_errors):
-            priority = (abs(td_error) + 0.001) ** self.alpha
-            self.priorities[idx] = priority**self.alpha
+    def update_priority(self, sampled_indices, priorities):
+        assert len(sampled_indices) == len(priorities)
+
+        for idx, priority in zip(sampled_indices, priorities):
+            self.priorities[idx] = priority
 
     def sample_minibatch(self, batch_size):
 
         sampled_indices = [self.priorities.sample() for _ in range(batch_size)]
 
-        #: compute prioritized experience replay weights
+        #: Compute importance sampling weights
         weights = []
-        current_size = len(self.buffer) if self.is_full else self.count
+        current_size = len(self.buffer) if self.full else self.count
         for idx in sampled_indices:
             prob = self.priorities[idx] / self.priorities.sum()
             weight = (prob * current_size)**(-self.beta)
             weights.append(weight)
         weights = np.array(weights) / max(weights)
 
-        experiences = [self.buffer[idx] for idx in sampled_indices]
+        sampled_segments = [self.segment_buffer[idx] for idx in sampled_indices]
 
-        return sampled_indices, weights, experiences
+        return sampled_indices, weights, sampled_segments
 
 
 class SumTree:

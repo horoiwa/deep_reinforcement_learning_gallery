@@ -311,18 +311,22 @@ def main(num_actors,
             [actors[pid].sync_weights_and_rollout.remote(current_weights)])
 
     minibatchs = [replay.sample_minibatch(batch_size=32) for _ in range(16)]
+    import pdb; pdb.set_trace()
     wip_learner = learner.update_network.remote(minibatchs)
-    minibatchs = [replay.sample_minibatch(batch_size=32) for _ in range(16)]
+
     wip_tester = tester.test_play.remote(current_weights, epsilon=0.01)
+
+    minibatchs = [replay.sample_minibatch(batch_size=32) for _ in range(16)]
 
     update_cycles = 1
     actor_cycles = 0
     while update_cycles <= 200:
         actor_cycles += 1
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
-        td_errors, transitions, pid = ray.get(finished[0])
-        replay.add(td_errors, transitions)
-        wip_actors.extend([actors[pid].rollout.remote(current_weights)])
+        priorities, segments, pid = ray.get(finished[0])
+        replay.put(priorities, segments)
+        wip_actors.extend(
+            [actors[pid].sync_weights_and_rollout.remote(current_weights)])
 
         finished_learner, _ = ray.wait([wip_learner], timeout=0)
         if finished_learner:
