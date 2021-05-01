@@ -288,7 +288,7 @@ class Tester:
         c, h = self.q_network.lstm.get_initial_state(batch_size=1, dtype=tf.float32)
         self.q_network(np.atleast_2d(state), states=[c, h])
 
-    def test_play(self, current_weights, epsilon, monitor_dir=None):
+    def test_play(self, current_weights, epsilon):
 
         self.q_network.set_weights(current_weights)
 
@@ -298,18 +298,21 @@ class Tester:
         frames = collections.deque(
             [frame] * self.n_frames, maxlen=self.n_frames)
 
-        episode_rewards = 0
+        episode_rewards, steps = 0, 0
 
         c, h = self.q_network.lstm.get_initial_state(
             batch_size=1, dtype=tf.float32)
         done = False
         while not done:
+            steps += 1
             state = np.stack(frames, axis=2)[np.newaxis, ...]
             action, (next_c, next_h) = self.q_network.sample_action(state, c, h, epsilon)
             next_frame, reward, done, _ = env.step(action)
             frames.append(self.frame_process_func(next_frame))
             episode_rewards += reward
             c, h = next_c, next_h
+            if steps > 500 and episode_rewards < 5:
+                break
 
         return episode_rewards
 
@@ -320,8 +323,6 @@ def main(num_actors,
          batch_size=64, update_iter=16,
          gamma=0.997, eta=0.9, alpha=0.9,
          burnin_length=40, unroll_length=40):
-
-    s = time.time()
 
     ray.init(local_mode=True)
 
@@ -372,7 +373,7 @@ def main(num_actors,
                   for _ in range(update_iter)]
     wip_learner = learner.update_network.remote(minibatchs)
 
-    wip_tester = tester.test_play.remote(current_weights, epsilon=0.05)
+    wip_tester = tester.test_play.remote(current_weights, epsilon=0.01)
 
     minibatchs = [replay.sample_minibatch(batch_size=batch_size)
                   for _ in range(update_iter)]
@@ -413,18 +414,16 @@ def main(num_actors,
 
                 test_rewards = ray.get(wip_tester)
                 history.append((learner_cycles-5, test_rewards))
-                wip_tester = tester.test_play.remote(current_weights, epsilon=0.05)
+                wip_tester = tester.test_play.remote(current_weights, epsilon=0.01)
                 print("Cycle:", learner_cycles, "Score:", test_rewards)
 
                 with summary_writer.as_default():
                     tf.summary.scalar("test_rewards", test_rewards, step=learner_cycles)
                     tf.summary.scalar("buffer_size", len(replay), step=learner_cycles)
 
-    wallclocktime = round(time.time() - s, 2)
     cycles, scores = zip(*history)
     plt.plot(cycles, scores)
-    plt.title(f"total time: {wallclocktime} sec")
-    plt.ylabel("test_score(epsilon=0.1)")
+    plt.ylabel("test_score(epsilon=0.01)")
     plt.savefig("log/history.png")
 
 

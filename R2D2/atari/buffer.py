@@ -22,6 +22,10 @@ class EpisodeBuffer:
     def __len__(self):
         return len(self.transitions)
 
+    @staticmethod()
+    def reward_clipping(reward):
+        return reward
+
     def add(self, transition):
         """
             Optional:
