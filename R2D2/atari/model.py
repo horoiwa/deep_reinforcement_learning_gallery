@@ -29,7 +29,6 @@ class RecurrentDuelingQNetwork(tf.keras.Model):
                                    kernel_initializer="he_normal")
 
     def call(self, x, states):
-
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.conv3(x)
@@ -39,8 +38,9 @@ class RecurrentDuelingQNetwork(tf.keras.Model):
 
         value = self.value(x)
         advantages = self.advantages(x)
+        advantages_mean = tf.reduce_mean(advantages, axis=1, keepdims=True)
+        advantages_scaled = advantages - advantages_mean
 
-        advantages_scaled = advantages - tf.math.reduce_mean(advantages)
         qvalues = value + advantages_scaled
 
         return qvalues, states

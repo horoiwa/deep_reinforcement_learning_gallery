@@ -41,7 +41,7 @@ class Actor:
 
     def define_network(self):
 
-        tf.config.set_visible_devices([], 'GPU')
+        #tf.config.set_visible_devices([], 'GPU')
 
         env = gym.make(self.env_name)
 
@@ -323,7 +323,7 @@ def main(num_actors,
 
     s = time.time()
 
-    ray.init(local_mode=False)
+    ray.init(local_mode=True)
 
     logdir = Path(__file__).parent / "log"
     if logdir.exists():
@@ -431,4 +431,4 @@ def main(num_actors,
 if __name__ == '__main__':
     env_name = "BreakoutDeterministic-v4"
     #env_name = "MsPacmanDeterministic-v4"
-    main(env_name=env_name, num_actors=21)
+    main(env_name=env_name, num_actors=1)

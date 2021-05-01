@@ -59,7 +59,7 @@ class EpisodeBuffer:
 
 class SegmentReplayBuffer:
 
-    def __init__(self, buffer_size=2**12):
+    def __init__(self, buffer_size):
 
         self.buffer_size = buffer_size
         self.priorities = SumTree(capacity=self.buffer_size)
