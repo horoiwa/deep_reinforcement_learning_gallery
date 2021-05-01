@@ -19,7 +19,7 @@ class Actor:
 
     def __init__(self, pid, env_name, n_frames,
                  epsilon, gamma, eta, alpha,
-                 burnin_length, unroll_length):
+                 nstep, burnin_length, unroll_length):
 
         self.pid = pid
         self.env_name = env_name
@@ -34,6 +34,7 @@ class Actor:
         self.eta = eta
         self.alpha = alpha  # priority exponent
 
+        self.nstep = nstep
         self.burnin_len = burnin_length
         self.unroll_len = unroll_length
 
@@ -69,7 +70,8 @@ class Actor:
     def _rollout(self) -> (list, list):
 
         env = gym.make(self.env_name)
-        episode_buffer = EpisodeBuffer(burnin_length=self.burnin_len,
+        episode_buffer = EpisodeBuffer(nstep=self.nstep, gamma=self.gamma,
+                                       burnin_length=self.burnin_len,
                                        unroll_length=self.unroll_len)
 
         frame = self.frame_process_func(env.reset())
@@ -319,7 +321,7 @@ class Tester:
 
 def main(num_actors,
          env_name="BreakoutDeterministic-v4",
-         n_frames=4,
+         n_frames=4, nstep=5,
          batch_size=64, update_iter=16,
          gamma=0.997, eta=0.9, alpha=0.9,
          burnin_length=40, unroll_length=40):
@@ -342,6 +344,7 @@ def main(num_actors,
     actors = [Actor.remote(pid=i, env_name=env_name, n_frames=n_frames,
                            epsilon=epsilons[i],
                            gamma=gamma, eta=eta, alpha=alpha,
+                           nstep=nstep,
                            burnin_length=burnin_length,
                            unroll_length=unroll_length)
               for i in range(num_actors)]
