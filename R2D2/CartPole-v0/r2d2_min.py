@@ -1,4 +1,6 @@
 import time
+import shutil
+from pathlib import Path
 
 import gym
 import ray
@@ -169,6 +171,7 @@ class Learner:
 
         indices_all = []
         priorities_all = []
+        losses = []
 
         for (indices, weights, segments) in minibatchs:
 
@@ -232,11 +235,13 @@ class Learner:
 
             indices_all += indices
             priorities_all += priorities.numpy().tolist()
+            losses.append(loss_weighted)
 
         self.target_q_network.set_weights(self.q_network.get_weights())
         current_weights = self.q_network.get_weights()
+        loss_mean = np.array(losses).mean()
 
-        return current_weights, indices_all, priorities_all
+        return current_weights, indices_all, priorities_all, loss_mean
 
 
 @ray.remote
@@ -284,6 +289,12 @@ def main(num_actors,
     s = time.time()
 
     ray.init(local_mode=False)
+
+    logdir = Path(__file__).parent / "log"
+    if logdir.exists():
+        shutil.rmtree(logdir)
+    summary_writer = tf.summary.create_file_writer(str(logdir))
+
     history = []
 
     epsilons = np.linspace(0.1, 0.8, num_actors) if num_actors > 1 else [0.3]
@@ -327,6 +338,7 @@ def main(num_actors,
 
     learner_cycles = 1
     actor_cycles = 0
+    n_segment_added = 0
     while learner_cycles <= 100:
         actor_cycles += 1
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
@@ -334,10 +346,11 @@ def main(num_actors,
         replay.add(priorities, segments)
         wip_actors.extend(
             [actors[pid].sync_weights_and_rollout.remote(current_weights)])
+        n_segment_added += len(segments)
 
         finished_learner, _ = ray.wait([wip_learner], timeout=0)
         if finished_learner:
-            current_weights, indices, priorities = ray.get(finished_learner[0])
+            current_weights, indices, priorities, loss = ray.get(finished_learner[0])
             wip_learner = learner.update_network.remote(minibatchs)
             current_weights = ray.put(current_weights)
 
@@ -345,15 +358,26 @@ def main(num_actors,
             replay.update_priority(indices, priorities)
             minibatchs = [replay.sample_minibatch(batch_size=batch_size)
                           for _ in range(update_iter)]
-            print("Actor cycle:", actor_cycles)
+
+            print("Actor cycle:", actor_cycles, "Added:", n_segment_added)
+
             learner_cycles += 1
             actor_cycles = 0
+            n_segment_added = 0
+
+            with summary_writer.as_default():
+                tf.summary.scalar("learner_loss", loss, step=learner_cycles)
 
             if learner_cycles % 5 == 0:
-                test_score = ray.get(wip_tester)
-                print("Cycle:", learner_cycles, "Score:", test_score)
-                history.append((learner_cycles-5, test_score))
+
+                test_rewards = ray.get(wip_tester)
+                history.append((learner_cycles-5, test_rewards))
                 wip_tester = tester.test_play.remote(current_weights, epsilon=0.05)
+                print("Cycle:", learner_cycles, "Score:", test_rewards)
+
+                with summary_writer.as_default():
+                    tf.summary.scalar("test_rewards", test_rewards, step=learner_cycles)
+                    tf.summary.scalar("buffer_size", len(replay), step=learner_cycles)
 
     wallclocktime = round(time.time() - s, 2)
     cycles, scores = zip(*history)
