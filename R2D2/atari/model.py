@@ -47,7 +47,6 @@ class RecurrentDuelingQNetwork(tf.keras.Model):
 
     def sample_action(self, x, c, h, epsilon):
 
-        x = np.atleast_2d(x).astype(np.float32)
         qvalues, state = self(x, states=[c, h])
 
         if random.random() > epsilon:

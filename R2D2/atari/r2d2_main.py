@@ -1,16 +1,17 @@
-import time
+import collections
 import shutil
+import time
 from pathlib import Path
 
 import gym
-import ray
-import numpy as np
-import tensorflow as tf
 import matplotlib.pyplot as plt
+import numpy as np
+import ray
+import tensorflow as tf
 
-from model import RecurrentDuelingQNetwork
-from buffer import EpisodeBuffer, SegmentReplayBuffer
 import util
+from buffer import EpisodeBuffer, SegmentReplayBuffer
+from model import RecurrentDuelingQNetwork
 
 
 @ray.remote
@@ -39,7 +40,9 @@ class Actor:
         self.define_network()
 
     def define_network(self):
+
         tf.config.set_visible_devices([], 'GPU')
+
         env = gym.make(self.env_name)
 
         frame = self.frame_process_func(env.reset())
@@ -69,32 +72,38 @@ class Actor:
         episode_buffer = EpisodeBuffer(burnin_length=self.burnin_len,
                                        unroll_length=self.unroll_len)
 
-        state = env.reset().astype(np.float32)
+        frame = self.frame_process_func(env.reset())
+        frames = collections.deque(
+            [frame] * self.n_frames, maxlen=self.n_frames)
+
         c, h = self.q_network.lstm.get_initial_state(
             batch_size=1, dtype=tf.float32)
         done = False
         episode_rewards = 0
         while not done:
+
+            state = np.stack(frames, axis=2)[np.newaxis, ...]
+
             action, (next_c, next_h) = self.q_network.sample_action(state, c, h, self.epsilon)
-            next_state, reward, done, _ = env.step(action)
-            episode_rewards += reward
+            next_frame, reward, done, _ = env.step(action)
+            frames.append(self.frame_process_func(next_frame))
+            next_state = np.stack(frames, axis=2)[np.newaxis, ...]
 
             transition = (state, action, reward, next_state, done, c, h)
             episode_buffer.add(transition)
 
-            state, c, h = next_state, next_c, next_h
-
-        #print(episode_rewards)
+            episode_rewards += reward
+            c, h = next_c, next_h
 
         segments = episode_buffer.pull()
 
         """ Compute initial priority
         """
-        states = np.stack([seg.states for seg in segments], axis=1)    # (burnin_len+unroll_len, batch_size, obs_dim)
+        states = np.stack([np.vstack(seg.states) for seg in segments], axis=1)  # (burnin_len+unroll_len, batch_size, obs_dim)
         actions = np.stack([seg.actions for seg in segments], axis=1)  # (unroll_len, batch_size)
         rewards = np.stack([seg.rewards for seg in segments], axis=1)  # (unroll_len, batch_size)
         dones = np.stack([seg.dones for seg in segments], axis=1)      # (unroll_len, batch_size)
-        last_state = np.stack([seg.last_state for seg in segments])    # (batch_size, obs_dim)
+        last_state = np.vstack([seg.last_state for seg in segments])   # (batch_size, obs_dim)
 
         c = tf.convert_to_tensor(
             np.vstack([seg.c_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
@@ -188,11 +197,11 @@ class Learner:
 
         for (indices, weights, segments) in minibatchs:
 
-            states = np.stack([seg.states for seg in segments], axis=1)    # (burnin_len+unroll_len, batch_size, obs_dim)
+            states = np.stack([np.vstack(seg.states) for seg in segments], axis=1)    # (burnin_len+unroll_len, batch_size, obs_dim)
             actions = np.stack([seg.actions for seg in segments], axis=1)  # (unroll_len, batch_size)
             rewards = np.stack([seg.rewards for seg in segments], axis=1)  # (unroll_len, batch_size)
             dones = np.stack([seg.dones for seg in segments], axis=1)      # (unroll_len, batch_size)
-            last_state = np.stack([seg.last_state for seg in segments])    # (batch_size, obs_dim)
+            last_state = np.vstack([seg.last_state for seg in segments])    # (batch_size, obs_dim)
             last_state = tf.expand_dims(last_state, axis=0)                # (1, batch_size, obs_dim)
 
             states_burnin = states[:self.burnin_len]  # (burnin_len, batch_size, obs_dim)
@@ -260,16 +269,22 @@ class Learner:
 @ray.remote
 class Tester:
 
-    def __init__(self, env_name):
+    def __init__(self, env_name, n_frames):
 
         self.env_name = env_name
+        self.frame_process_func = util.get_preprocess_func(env_name)
+        self.n_frames = n_frames
         self.action_space = gym.make(self.env_name).action_space.n
-        self.q_network = RecurrentQNetwork(self.action_space)
+        self.q_network = RecurrentDuelingQNetwork(self.action_space)
         self.define_network()
 
     def define_network(self):
         env = gym.make(self.env_name)
-        state = env.reset()
+
+        frame = self.frame_process_func(env.reset())
+        frames = [frame] * self.n_frames
+        state = np.stack(frames, axis=2)[np.newaxis, ...]
+
         c, h = self.q_network.lstm.get_initial_state(batch_size=1, dtype=tf.float32)
         self.q_network(np.atleast_2d(state), states=[c, h])
 
@@ -278,17 +293,23 @@ class Tester:
         self.q_network.set_weights(current_weights)
 
         env = gym.make(self.env_name)
-        state = env.reset()
+
+        frame = self.frame_process_func(env.reset())
+        frames = collections.deque(
+            [frame] * self.n_frames, maxlen=self.n_frames)
+
         episode_rewards = 0
 
         c, h = self.q_network.lstm.get_initial_state(
             batch_size=1, dtype=tf.float32)
         done = False
         while not done:
+            state = np.stack(frames, axis=2)[np.newaxis, ...]
             action, (next_c, next_h) = self.q_network.sample_action(state, c, h, epsilon)
-            next_state, reward, done, _ = env.step(action)
+            next_frame, reward, done, _ = env.step(action)
+            frames.append(self.frame_process_func(next_frame))
             episode_rewards += reward
-            state, c, h = next_state, next_c, next_h
+            c, h = next_c, next_h
 
         return episode_rewards
 
@@ -334,7 +355,7 @@ def main(num_actors,
     current_weights = ray.get(learner.define_network.remote())
     current_weights = ray.put(current_weights)
 
-    tester = Tester.remote(env_name=env_name)
+    tester = Tester.remote(env_name=env_name, n_frames=n_frames)
 
     wip_actors = [actor.sync_weights_and_rollout.remote(current_weights)
                   for actor in actors]
@@ -410,4 +431,4 @@ def main(num_actors,
 if __name__ == '__main__':
     env_name = "BreakoutDeterministic-v4"
     #env_name = "MsPacmanDeterministic-v4"
-    main(env_name=env_name, num_actors=1)
+    main(env_name=env_name, num_actors=21)
