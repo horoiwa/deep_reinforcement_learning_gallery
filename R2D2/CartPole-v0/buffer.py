@@ -22,7 +22,7 @@ class EpisodeBuffer:
     def __len__(self):
         return len(self.transitions)
 
-    def put(self, transition):
+    def add(self, transition):
         """
             Optional:
                 reward-clipping や n-step-return はここで計算しておくとよい
@@ -73,7 +73,7 @@ class SegmentReplayBuffer:
     def __len__(self):
         return len(self.segment_buffer) if self.full else self.count
 
-    def put(self, priorities: list, segments: list):
+    def add(self, priorities: list, segments: list):
         assert len(priorities) == len(segments)
 
         for priority, segment in zip(priorities, segments):

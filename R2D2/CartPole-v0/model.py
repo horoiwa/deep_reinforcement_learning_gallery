@@ -13,8 +13,8 @@ class RecurrentQNetwork(tf.keras.Model):
         self.action_space = action_space
 
         self.input_layer = kl.Dense(
-            64, activation="relu", kernel_initializer="he_normal")
-        self.lstm = kl.LSTMCell(32)
+            128, activation="relu", kernel_initializer="he_normal")
+        self.lstm = kl.LSTMCell(128)
         self.output_layer = kl.Dense(
             action_space, kernel_initializer="he_normal")
 
@@ -24,7 +24,7 @@ class RecurrentQNetwork(tf.keras.Model):
         out = self.output_layer(x)
         return out, states
 
-    def sample_action(self, x, c, h, epsilon=0.):
+    def sample_action(self, x, c, h, epsilon):
 
         x = np.atleast_2d(x).astype(np.float32)
         qvalues, state = self(x, states=[c, h])

@@ -49,13 +49,13 @@ class Actor:
         priorities, segments = [], []
 
         while len(segments) < 10:
-            _priorities, _segments = self.rollout()
+            _priorities, _segments = self._rollout()
             priorities += _priorities
             segments += _segments
 
         return priorities, segments, self.pid
 
-    def rollout(self) -> (list, list):
+    def _rollout(self) -> (list, list):
 
         env = gym.make(self.env_name)
         episode_buffer = EpisodeBuffer(burnin_length=self.burnin_len,
@@ -72,11 +72,11 @@ class Actor:
             episode_rewards += reward
 
             transition = (state, action, reward, next_state, done, c, h)
-            episode_buffer.put(transition)
+            episode_buffer.add(transition)
 
             state, c, h = next_state, next_c, next_h
 
-        print(episode_rewards)
+        #print(episode_rewards)
 
         segments = episode_buffer.pull()
 
@@ -137,7 +137,7 @@ class Learner:
 
         self.q_network = RecurrentQNetwork(self.action_space)
         self.target_q_network = RecurrentQNetwork(self.action_space)
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.0001)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
 
         self.gamma = gamma
         self.eta = eta
@@ -216,9 +216,10 @@ class Learner:
                 Q = tf.reduce_sum(qvalues * actions_onehot, axis=2, keepdims=False)  # (unroll_len, batch_size)
 
                 td_errors = TQ - Q
-                loss = tf.reduce_mean(tf.square(td_errors) * weights)
+                loss = tf.reduce_mean(tf.square(td_errors), axis=0)
+                loss_weighted = tf.reduce_mean(loss * weights)
 
-            grads = tape.gradient(loss, self.q_network.trainable_variables)
+            grads = tape.gradient(loss_weighted, self.q_network.trainable_variables)
             grads, _ = tf.clip_by_global_norm(grads, 40.0)
             self.optimizer.apply_gradients(
                 zip(grads, self.q_network.trainable_variables))
@@ -232,8 +233,8 @@ class Learner:
             indices_all += indices
             priorities_all += priorities.numpy().tolist()
 
+        self.target_q_network.set_weights(self.q_network.get_weights())
         current_weights = self.q_network.get_weights()
-        self.target_q_network.set_weights(current_weights)
 
         return current_weights, indices_all, priorities_all
 
@@ -254,7 +255,7 @@ class Tester:
         c, h = self.q_network.lstm.get_initial_state(batch_size=1, dtype=tf.float32)
         self.q_network(np.atleast_2d(state), states=[c, h])
 
-    def test_play(self, current_weights, epsilon):
+    def test_play(self, current_weights, epsilon, monitor_dir=None):
 
         self.q_network.set_weights(current_weights)
 
@@ -276,22 +277,23 @@ class Tester:
 
 def main(num_actors,
          env_name="CartPole-v0",
-         gamma=0.997, eta=0.9, alpha=0.9,
+         batch_size=16, update_iter=8,
+         gamma=0.97, eta=0.9, alpha=0.9,
          burnin_length=4, unroll_length=4):
 
     s = time.time()
 
-    ray.init(local_mode=True)
+    ray.init(local_mode=False)
     history = []
 
-    epsilons = np.linspace(0.1, 0.5, num_actors) if num_actors > 1 else [0.3]
+    epsilons = np.linspace(0.1, 0.8, num_actors) if num_actors > 1 else [0.3]
     actors = [Actor.remote(pid=i, env_name=env_name, epsilon=epsilons[i],
                            gamma=gamma, eta=eta, alpha=alpha,
                            burnin_length=burnin_length,
                            unroll_length=unroll_length)
               for i in range(num_actors)]
 
-    replay = SegmentReplayBuffer(buffer_size=2**14)
+    replay = SegmentReplayBuffer(buffer_size=2**12)
 
     learner = Learner.remote(env_name=env_name, gamma=gamma,
                              eta=eta, alpha=alpha,
@@ -309,25 +311,27 @@ def main(num_actors,
     for _ in range(10):
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
         priorities, segments, pid = ray.get(finished[0])
-        replay.put(priorities, segments)
+        replay.add(priorities, segments)
         wip_actors.extend(
             [actors[pid].sync_weights_and_rollout.remote(current_weights)])
 
     # minibatchs: (indices, weights, segments)
-    minibatchs = [replay.sample_minibatch(batch_size=32) for _ in range(16)]
+    minibatchs = [replay.sample_minibatch(batch_size=batch_size)
+                  for _ in range(update_iter)]
     wip_learner = learner.update_network.remote(minibatchs)
 
-    wip_tester = tester.test_play.remote(current_weights, epsilon=0.01)
+    wip_tester = tester.test_play.remote(current_weights, epsilon=0.05)
 
-    minibatchs = [replay.sample_minibatch(batch_size=32) for _ in range(16)]
+    minibatchs = [replay.sample_minibatch(batch_size=batch_size)
+                  for _ in range(update_iter)]
 
     learner_cycles = 1
     actor_cycles = 0
-    while learner_cycles <= 50:
+    while learner_cycles <= 100:
         actor_cycles += 1
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
         priorities, segments, pid = ray.get(finished[0])
-        replay.put(priorities, segments)
+        replay.add(priorities, segments)
         wip_actors.extend(
             [actors[pid].sync_weights_and_rollout.remote(current_weights)])
 
@@ -339,7 +343,8 @@ def main(num_actors,
 
             #: 優先度の更新とminibatchの作成はlearnerよりも十分に速いという前提
             replay.update_priority(indices, priorities)
-            minibatchs = [replay.sample_minibatch(batch_size=32) for _ in range(16)]
+            minibatchs = [replay.sample_minibatch(batch_size=batch_size)
+                          for _ in range(update_iter)]
             print("Actor cycle:", actor_cycles)
             learner_cycles += 1
             actor_cycles = 0
@@ -348,16 +353,16 @@ def main(num_actors,
                 test_score = ray.get(wip_tester)
                 print("Cycle:", learner_cycles, "Score:", test_score)
                 history.append((learner_cycles-5, test_score))
-                wip_tester = tester.test_play.remote(current_weights, epsilon=0.1)
+                wip_tester = tester.test_play.remote(current_weights, epsilon=0.05)
 
     wallclocktime = round(time.time() - s, 2)
     cycles, scores = zip(*history)
     plt.plot(cycles, scores)
     plt.title(f"total time: {wallclocktime} sec")
-    plt.ylabel("test_score(epsilon=0.01)")
+    plt.ylabel("test_score(epsilon=0.1)")
     plt.savefig("log/history.png")
 
 
 
 if __name__ == '__main__':
-    main(num_actors=1)
+    main(num_actors=8)
