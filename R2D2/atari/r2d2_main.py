@@ -8,22 +8,25 @@ import numpy as np
 import tensorflow as tf
 import matplotlib.pyplot as plt
 
-from model import RecurrentQNetwork
+from model import RecurrentDuelingQNetwork
 from buffer import EpisodeBuffer, SegmentReplayBuffer
+import util
 
 
 @ray.remote
 class Actor:
 
-    def __init__(self, pid, env_name,
+    def __init__(self, pid, env_name, n_frames,
                  epsilon, gamma, eta, alpha,
                  burnin_length, unroll_length):
 
         self.pid = pid
         self.env_name = env_name
         self.action_space = gym.make(env_name).action_space.n
+        self.frame_process_func = util.get_preprocess_func(self.env_name)
+        self.n_frames = n_frames
 
-        self.q_network = RecurrentQNetwork(self.action_space)
+        self.q_network = RecurrentDuelingQNetwork(self.action_space)
         self.epsilon = epsilon
         self.gamma = gamma
 
@@ -38,7 +41,10 @@ class Actor:
     def define_network(self):
         tf.config.set_visible_devices([], 'GPU')
         env = gym.make(self.env_name)
-        state = env.reset()
+
+        frame = self.frame_process_func(env.reset())
+        frames = [frame] * self.n_frames
+        state = np.stack(frames, axis=2)[np.newaxis, ...]
 
         c, h = self.q_network.lstm.get_initial_state(batch_size=1, dtype=tf.float32)
         self.q_network(np.atleast_2d(state), states=[c, h])
@@ -132,14 +138,16 @@ class Actor:
 @ray.remote(num_cpus=1, num_gpus=1)
 class Learner:
 
-    def __init__(self, env_name, gamma, eta, alpha,
+    def __init__(self, env_name, n_frames, gamma, eta, alpha,
                  burnin_length, unroll_length):
         self.env_name = env_name
+        self.n_frames = n_frames
         self.action_space = gym.make(self.env_name).action_space.n
+        self.frame_process_func = util.get_preprocess_func(env_name)
 
-        self.q_network = RecurrentQNetwork(self.action_space)
-        self.target_q_network = RecurrentQNetwork(self.action_space)
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
+        self.q_network = RecurrentDuelingQNetwork(self.action_space)
+        self.target_q_network = RecurrentDuelingQNetwork(self.action_space)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0001, epsilon=0.001)
 
         self.gamma = gamma
         self.eta = eta
@@ -150,13 +158,18 @@ class Learner:
 
     def define_network(self):
         env = gym.make(self.env_name)
-        state = env.reset()
+
+        frame = self.frame_process_func(env.reset())
+        frames = [frame] * self.n_frames
+        state = np.stack(frames, axis=2)[np.newaxis, ...]
+
         c, h = self.q_network.lstm.get_initial_state(batch_size=1, dtype=tf.float32)
 
         self.q_network(np.atleast_2d(state), states=[c, h])
         self.target_q_network(np.atleast_2d(state), states=[c, h])
         self.target_q_network.set_weights(self.q_network.get_weights())
         current_weights = self.q_network.get_weights()
+
         return current_weights
 
     def update_network(self, minibatchs):
@@ -281,10 +294,11 @@ class Tester:
 
 
 def main(num_actors,
-         env_name="CartPole-v0",
-         batch_size=16, update_iter=8,
-         gamma=0.97, eta=0.9, alpha=0.9,
-         burnin_length=4, unroll_length=4):
+         env_name="BreakoutDeterministic-v4",
+         n_frames=4,
+         batch_size=64, update_iter=16,
+         gamma=0.997, eta=0.9, alpha=0.9,
+         burnin_length=40, unroll_length=40):
 
     s = time.time()
 
@@ -297,8 +311,14 @@ def main(num_actors,
 
     history = []
 
-    epsilons = np.linspace(0.1, 0.8, num_actors) if num_actors > 1 else [0.3]
-    actors = [Actor.remote(pid=i, env_name=env_name, epsilon=epsilons[i],
+    if num_actors > 1:
+        epsilons = [0.5 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
+    else:
+        #: for development only
+        epsilons = [0.5]
+
+    actors = [Actor.remote(pid=i, env_name=env_name, n_frames=n_frames,
+                           epsilon=epsilons[i],
                            gamma=gamma, eta=eta, alpha=alpha,
                            burnin_length=burnin_length,
                            unroll_length=unroll_length)
@@ -306,8 +326,8 @@ def main(num_actors,
 
     replay = SegmentReplayBuffer(buffer_size=2**12)
 
-    learner = Learner.remote(env_name=env_name, gamma=gamma,
-                             eta=eta, alpha=alpha,
+    learner = Learner.remote(env_name=env_name, n_frames=n_frames,
+                             gamma=gamma, eta=eta, alpha=alpha,
                              burnin_length=burnin_length,
                              unroll_length=unroll_length)
 
@@ -387,6 +407,7 @@ def main(num_actors,
     plt.savefig("log/history.png")
 
 
-
 if __name__ == '__main__':
-    main(num_actors=8)
+    env_name = "BreakoutDeterministic-v4"
+    #env_name = "MsPacmanDeterministic-v4"
+    main(env_name=env_name, num_actors=1)
