@@ -192,6 +192,9 @@ class Learner:
 
         return current_weights
 
+    def save(self, save_path):
+        self.qnet.save_weights(save_path)
+
     @staticmethod
     def decompress_segments(minibatch):
         inidices, weights, compressed_segments = minibatch
@@ -347,6 +350,38 @@ class Tester:
 
         return episode_rewards
 
+    def test_with_video(self, checkpoint_path, monitor_dir, epsilon):
+
+        monitor_dir = Path(monitor_dir)
+        if monitor_dir.exists():
+            shutil.rmtree(monitor_dir)
+        monitor_dir.mkdir()
+        env = gym.wrappers.Monitor(
+            gym.make(self.env_name), monitor_dir, force=True,
+            video_callable=(lambda ep: True))
+
+        frame = self.frame_process_func(env.reset())
+        frames = collections.deque(
+            [frame] * self.n_frames, maxlen=self.n_frames)
+
+        episode_rewards, steps = 0, 0
+
+        c, h = self.q_network.lstm.get_initial_state(
+            batch_size=1, dtype=tf.float32)
+        done = False
+        while not done:
+            steps += 1
+            state = np.stack(frames, axis=2)[np.newaxis, ...]
+            action, (next_c, next_h) = self.q_network.sample_action(state, c, h, epsilon)
+            next_frame, reward, done, _ = env.step(action)
+            frames.append(self.frame_process_func(next_frame))
+            episode_rewards += reward
+            c, h = next_c, next_h
+            if steps > 500 and episode_rewards < 5:
+                break
+
+        return episode_rewards
+
 
 def main(num_actors,
          env_name="BreakoutDeterministic-v4",
@@ -454,10 +489,24 @@ def main(num_actors,
                     tf.summary.scalar("test_rewards", test_rewards, step=learner_cycles)
                     tf.summary.scalar("buffer_size", len(replay), step=learner_cycles)
 
+            if learner_cycles % 500 == 0:
+                print("Model Saved")
+                learner.save.remote("checkpoints/qnet")
+
     cycles, scores = zip(*history)
     plt.plot(cycles, scores)
     plt.ylabel("test_score(epsilon=0.01)")
     plt.savefig("log/history.png")
+
+
+def test_play(env_name):
+
+    ray.init()
+    tester = Tester.remote(env_name=env_name)
+    res = tester.play_with_video.remote(
+            checkpoint_path="checkpoints/qnet", monitor_dir="mp4", epsilon=0.01)
+    rewards = ray.get(res)
+    print(rewards)
 
 
 if __name__ == '__main__':
