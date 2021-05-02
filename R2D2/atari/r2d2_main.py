@@ -21,7 +21,7 @@ physical_devices = tf.config.experimental.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
-@ray.remote(num_cpus=1, num_gpus=1)
+@ray.remote(num_cpus=2, num_gpus=1)
 class Learner:
 
     def __init__(self, env_name, target_update_period,
@@ -35,7 +35,7 @@ class Learner:
         self.q_network = RecurrentDuelingQNetwork(self.action_space)
         self.target_q_network = RecurrentDuelingQNetwork(self.action_space)
         self.target_update_period = target_update_period
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.0001, epsilon=0.001)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0002, epsilon=0.001)
 
         self.gamma = gamma
         self.eta = eta
@@ -71,6 +71,7 @@ class Learner:
         inidices, weights, compressed_segments = minibatch
         segments = [pickle.loads(zlib.decompress(compressed_seg))
                     for compressed_seg in compressed_segments]
+
         return (inidices, weights, segments)
 
     def update_network(self, minibatchs):
@@ -177,7 +178,12 @@ def main(num_actors,
          n_frames=4, nstep=5,
          batch_size=32, update_iter=16,
          gamma=0.997, eta=0.9, alpha=0.9,
-         burnin_length=40, unroll_length=40):
+         burnin_length=20, unroll_length=20):
+    """
+        Note:
+            In R2D2 paper,
+            batch_size=64, burnin_length=40, unroll_length=40
+    """
 
     ray.init(local_mode=False)
 
@@ -248,7 +254,7 @@ def main(num_actors,
             [actors[pid].sync_weights_and_rollout.remote(current_weights)])
         n_segment_added += len(segments)
 
-        if actor_cycles < 25:
+        if n_segment_added < (batch_size * update_iter) * 1.3:
             finished_learner, _ = ray.wait([wip_learner], timeout=0)
         else:
             finished_learner, _ = ray.wait([wip_learner], num_returns=1)
