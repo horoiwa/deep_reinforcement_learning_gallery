@@ -1,5 +1,6 @@
 import collections
 import random
+import math
 
 import numpy as np
 
@@ -9,10 +10,6 @@ Transition = collections.namedtuple(
 
 Segment = collections.namedtuple(
     "Segment", ["states", "actions", "rewards", "dones", "c_init", "h_init", "last_state"])
-
-
-def reward_clipping(reward):
-    return reward
 
 
 class EpisodeBuffer:
@@ -28,7 +25,8 @@ class EpisodeBuffer:
         self.gamma = gamma
         self.tmp_buffer = collections.deque(maxlen=self.nstep)
 
-        self.reward_clipping_func = reward_clipping
+        self.reward_clipping_func = \
+            (lambda r: math.copysign(1, r) * math.sqrt(abs(r) + 1) + 0.001 * r)
 
     def __len__(self):
         return len(self.transitions)
@@ -42,15 +40,16 @@ class EpisodeBuffer:
         transition = Transition(*transition)
         is_terminal = transition.done
 
-        self.tmp_buffer.append(Transition)
+        self.tmp_buffer.append(transition)
 
         if len(self.tmp_buffer) == self.nstep:
-            import pdb; pdb.set_trace()
             indices = [0] if not is_terminal else range(self.nstep)
             for idx in indices:
                 nstep_return = 0
                 has_done = False
-                for i, transition in enumerate(self.temp_buffer[idx:]):
+
+                for i in range(self.nstep)[idx:]:
+                    transition = self.tmp_buffer[i]
                     reward, done = transition.reward, transition.done
                     reward = self.reward_clipping_func(reward)
                     nstep_return += self.gamma ** i * (1 - done) * reward
@@ -58,15 +57,26 @@ class EpisodeBuffer:
                         has_done = True
                         break
 
-                nstep_transition = Transition(self.temp_buffer[idx].state,
-                                              self.temp_buffer[idx].action,
-                                              nstep_return,
-                                              self.temp_buffer[-1].next_state,
-                                              has_done)
+                nstep_transition = Transition(
+                    state=self.tmp_buffer[idx].state,
+                    action=self.tmp_buffer[idx].action,
+                    reward=nstep_return,
+                    next_state=self.tmp_buffer[-1].next_state,
+                    done=has_done,
+                    c=self.tmp_buffer[idx].c,
+                    h=self.tmp_buffer[idx].h)
 
                 self.transitions.append(nstep_transition)
 
+        if is_terminal:
+            self.tmp_buffer = None
+
     def pull(self):
+
+        # this method shold be called after episode end
+        assert self.tmp_buffer is None
+        assert np.all([t.done for t in self.transitions[-self.nstep:]])
+        assert not self.transitions[-self.nstep-1].done
 
         segments = []
 
