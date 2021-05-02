@@ -351,6 +351,7 @@ class Tester:
 def main(num_actors,
          env_name="BreakoutDeterministic-v4",
          target_update_period=1600,
+         buffer_size=2**19,
          n_frames=4, nstep=5,
          batch_size=64, update_iter=16,
          gamma=0.997, eta=0.9, alpha=0.9,
@@ -376,7 +377,7 @@ def main(num_actors,
                            unroll_length=unroll_length)
               for i in range(num_actors)]
 
-    replay = SegmentReplayBuffer(buffer_size=2**12)
+    replay = SegmentReplayBuffer(buffer_size=buffer_size)
 
     learner = Learner.remote(env_name=env_name,
                              target_update_period=target_update_period,
