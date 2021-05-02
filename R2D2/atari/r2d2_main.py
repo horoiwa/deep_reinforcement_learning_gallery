@@ -17,6 +17,10 @@ from model import RecurrentDuelingQNetwork
 from actor import Actor, Tester
 
 
+physical_devices = tf.config.experimental.list_physical_devices('GPU')
+tf.config.experimental.set_memory_growth(physical_devices[0], True)
+
+
 @ray.remote(num_cpus=1, num_gpus=1)
 class Learner:
 
@@ -43,6 +47,7 @@ class Learner:
         self.num_updated = 0
 
     def define_network(self):
+
         env = gym.make(self.env_name)
 
         frame = self.frame_process_func(env.reset())
@@ -66,7 +71,6 @@ class Learner:
         inidices, weights, compressed_segments = minibatch
         segments = [pickle.loads(zlib.decompress(compressed_seg))
                     for compressed_seg in compressed_segments]
-
         return (inidices, weights, segments)
 
     def update_network(self, minibatchs):
@@ -171,7 +175,7 @@ def main(num_actors,
          target_update_period=1600,
          buffer_size=2**18,
          n_frames=4, nstep=5,
-         batch_size=64, update_iter=16,
+         batch_size=32, update_iter=16,
          gamma=0.997, eta=0.9, alpha=0.9,
          burnin_length=40, unroll_length=40):
 
@@ -235,7 +239,7 @@ def main(num_actors,
     actor_cycles = 0
     n_segment_added = 0
     s = time.time()
-    while learner_cycles <= 5:
+    while learner_cycles <= 5000:
         actor_cycles += 1
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
         priorities, segments, pid = ray.get(finished[0])
@@ -244,7 +248,7 @@ def main(num_actors,
             [actors[pid].sync_weights_and_rollout.remote(current_weights)])
         n_segment_added += len(segments)
 
-        if actor_cycles < 20:
+        if actor_cycles < 25:
             finished_learner, _ = ray.wait([wip_learner], timeout=0)
         else:
             finished_learner, _ = ray.wait([wip_learner], num_returns=1)
@@ -261,7 +265,7 @@ def main(num_actors,
 
             print("Actor cycle:", actor_cycles,
                   "Added segs:", n_segment_added,
-                  "Elapsed time[sec]", time.time() - s)
+                  "Elapsed time[sec]:", time.time() - s)
 
             learner_cycles += 1
             actor_cycles = 0
