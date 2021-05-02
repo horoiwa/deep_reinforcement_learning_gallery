@@ -3,6 +3,7 @@ from pathlib import Path
 import zlib
 import pickle
 from concurrent import futures
+import time
 
 import gym
 import matplotlib.pyplot as plt
@@ -168,13 +169,13 @@ class Learner:
 def main(num_actors,
          env_name="BreakoutDeterministic-v4",
          target_update_period=1600,
-         buffer_size=2**19,
+         buffer_size=2**18,
          n_frames=4, nstep=5,
          batch_size=64, update_iter=16,
          gamma=0.997, eta=0.9, alpha=0.9,
          burnin_length=40, unroll_length=40):
 
-    ray.init(local_mode=True)
+    ray.init(local_mode=False)
 
     logdir = Path(__file__).parent / "log"
     if logdir.exists():
@@ -211,12 +212,14 @@ def main(num_actors,
     wip_actors = [actor.sync_weights_and_rollout.remote(current_weights)
                   for actor in actors]
 
-    for _ in range(100):
+    for _ in range(50):
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
         priorities, segments, pid = ray.get(finished[0])
         replay.add(priorities, segments)
         wip_actors.extend(
             [actors[pid].sync_weights_and_rollout.remote(current_weights)])
+
+    print("===="*5)
 
     # minibatchs: (indices, weights, segments)
     minibatchs = [replay.sample_minibatch(batch_size=batch_size)
@@ -231,6 +234,7 @@ def main(num_actors,
     learner_cycles = 1
     actor_cycles = 0
     n_segment_added = 0
+    s = time.time()
     while learner_cycles <= 5:
         actor_cycles += 1
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
@@ -240,7 +244,11 @@ def main(num_actors,
             [actors[pid].sync_weights_and_rollout.remote(current_weights)])
         n_segment_added += len(segments)
 
-        finished_learner, _ = ray.wait([wip_learner], timeout=0)
+        if actor_cycles < 20:
+            finished_learner, _ = ray.wait([wip_learner], timeout=0)
+        else:
+            finished_learner, _ = ray.wait([wip_learner], num_returns=1)
+
         if finished_learner:
             current_weights, indices, priorities, loss = ray.get(finished_learner[0])
             wip_learner = learner.update_network.remote(minibatchs)
@@ -251,11 +259,14 @@ def main(num_actors,
             minibatchs = [replay.sample_minibatch(batch_size=batch_size)
                           for _ in range(update_iter)]
 
-            print("Actor cycle:", actor_cycles, "Added segs:", n_segment_added)
+            print("Actor cycle:", actor_cycles,
+                  "Added segs:", n_segment_added,
+                  "Elapsed time[sec]", time.time() - s)
 
             learner_cycles += 1
             actor_cycles = 0
             n_segment_added = 0
+            s = time.time()
 
             with summary_writer.as_default():
                 tf.summary.scalar("learner_loss", loss, step=learner_cycles)
@@ -275,6 +286,8 @@ def main(num_actors,
                 print("Model Saved")
                 learner.save.remote("checkpoints/qnet")
 
+    ray.shutdown()
+
     cycles, scores = zip(*history)
     plt.plot(cycles, scores)
     plt.ylabel("test_score(epsilon=0.01)")
@@ -284,8 +297,8 @@ def main(num_actors,
 def test_play(env_name):
 
     ray.init()
-    tester = Tester.remote(env_name=env_name)
-    res = tester.play_with_video.remote(
+    tester = Tester.remote(env_name=env_name, n_frames=4)
+    res = tester.test_with_video.remote(
             checkpoint_path="checkpoints/qnet", monitor_dir="mp4", epsilon=0.01)
     rewards = ray.get(res)
     print(rewards)
@@ -294,5 +307,5 @@ def test_play(env_name):
 if __name__ == '__main__':
     env_name = "BreakoutDeterministic-v4"
     #env_name = "MsPacmanDeterministic-v4"
-    main(env_name=env_name, num_actors=21)
+    main(env_name=env_name, num_actors=20)
     test_play(env_name)

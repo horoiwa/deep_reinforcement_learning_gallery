@@ -42,6 +42,9 @@ class Actor:
 
     def define_network(self):
 
+        #: hide GPU from remote actor
+        tf.config.set_visible_devices([], 'GPU')
+
         env = gym.make(self.env_name)
 
         frame = self.frame_process_func(env.reset())
@@ -160,6 +163,10 @@ class Tester:
         self.define_network()
 
     def define_network(self):
+
+        #: hide GPU from remote actor
+        tf.config.set_visible_devices([], 'GPU')
+
         env = gym.make(self.env_name)
 
         frame = self.frame_process_func(env.reset())
