@@ -1,7 +1,9 @@
 import collections
 import shutil
-import time
 from pathlib import Path
+import zlib
+import pickle
+from concurrent import futures
 
 import gym
 import matplotlib.pyplot as plt
@@ -42,7 +44,7 @@ class Actor:
 
     def define_network(self):
 
-        #tf.config.set_visible_devices([], 'GPU')
+        tf.config.set_visible_devices([], 'GPU')
 
         env = gym.make(self.env_name)
 
@@ -143,13 +145,17 @@ class Actor:
             + (1 - self.eta) * tf.reduce_mean(td_errors_abs, axis=0)
         priorities = (priorities + 0.001) ** self.alpha
 
-        return priorities.numpy().tolist(), segments
+        #: RAM節約のためにデータ圧縮
+        compressed_segments = [zlib.compress(pickle.dumps(seg)) for seg in segments]
+
+        return priorities.numpy().tolist(), compressed_segments
 
 
 @ray.remote(num_cpus=1, num_gpus=1)
 class Learner:
 
-    def __init__(self, env_name, n_frames, gamma, eta, alpha,
+    def __init__(self, env_name, target_update_period,
+                 n_frames, gamma, eta, alpha,
                  burnin_length, unroll_length):
         self.env_name = env_name
         self.n_frames = n_frames
@@ -158,6 +164,7 @@ class Learner:
 
         self.q_network = RecurrentDuelingQNetwork(self.action_space)
         self.target_q_network = RecurrentDuelingQNetwork(self.action_space)
+        self.target_update_period = target_update_period
         self.optimizer = tf.keras.optimizers.Adam(lr=0.0001, epsilon=0.001)
 
         self.gamma = gamma
@@ -166,6 +173,8 @@ class Learner:
 
         self.burnin_len = burnin_length
         self.unroll_len = unroll_length
+
+        self.num_updated = 0
 
     def define_network(self):
         env = gym.make(self.env_name)
@@ -183,13 +192,21 @@ class Learner:
 
         return current_weights
 
+    @staticmethod
+    def decompress_segments(minibatch):
+        inidices, weights, compressed_segments = minibatch
+        segments = [pickle.loads(zlib.decompress(compressed_seg))
+                    for compressed_seg in compressed_segments]
+
+        return (inidices, weights, segments)
+
     def update_network(self, minibatchs):
         """
         Args:
-            minibatchs (List[Tuple(indices, weights, segments)])
+            minibatchs (List[Tuple(indices, weights, compressed_segments)])
               indices (List[float]): indices of replay buffer
               weights (List[float]): Importance sampling weights
-              segments (List[Segment]):
+              compressed_segments (List[Segment]): list of segments compressed by zlib
                 Segment: sequence of transitions
         """
 
@@ -197,71 +214,83 @@ class Learner:
         priorities_all = []
         losses = []
 
-        for (indices, weights, segments) in minibatchs:
+        with futures.ThreadPoolExecutor(max_workers=4) as executor:
+            """ segmentsをdecompressする作業がわりと重いのでthreading
+            """
+            work_in_progresses = [
+                executor.submit(self.decompress_segments, mb)
+                for mb in minibatchs]
 
-            states = np.stack([np.vstack(seg.states) for seg in segments], axis=1)    # (burnin_len+unroll_len, batch_size, obs_dim)
-            actions = np.stack([seg.actions for seg in segments], axis=1)  # (unroll_len, batch_size)
-            rewards = np.stack([seg.rewards for seg in segments], axis=1)  # (unroll_len, batch_size)
-            dones = np.stack([seg.dones for seg in segments], axis=1)      # (unroll_len, batch_size)
-            last_state = np.vstack([seg.last_state for seg in segments])    # (batch_size, obs_dim)
-            last_state = tf.expand_dims(last_state, axis=0)                # (1, batch_size, obs_dim)
+            for ready_minibatch in futures.as_completed(work_in_progresses):
 
-            states_burnin = states[:self.burnin_len]  # (burnin_len, batch_size, obs_dim)
-            states_unroll = states[self.burnin_len:]  # (unroll_len, batch_size, obs_dim)
-            next_states_unroll = tf.concat(
-                [states[self.burnin_len+1:], last_state], axis=0)
+                (indices, weights, segments) = ready_minibatch.result()
 
-            c0 = tf.convert_to_tensor(
-                np.vstack([seg.c_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
-            h0 = tf.convert_to_tensor(
-                np.vstack([seg.h_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
+                states = np.stack([np.vstack(seg.states) for seg in segments], axis=1)    # (burnin_len+unroll_len, batch_size, obs_dim)
+                actions = np.stack([seg.actions for seg in segments], axis=1)  # (unroll_len, batch_size)
+                rewards = np.stack([seg.rewards for seg in segments], axis=1)  # (unroll_len, batch_size)
+                dones = np.stack([seg.dones for seg in segments], axis=1)      # (unroll_len, batch_size)
+                last_state = np.vstack([seg.last_state for seg in segments])    # (batch_size, obs_dim)
+                last_state = tf.expand_dims(last_state, axis=0)                # (1, batch_size, obs_dim)
 
-            #: burn-in with stored-state
-            for t in range(self.burnin_len):
-                _, (c0, h0) = self.q_network(states_burnin[t], states=[c0, h0])
+                states_burnin = states[:self.burnin_len]  # (burnin_len, batch_size, obs_dim)
+                states_unroll = states[self.burnin_len:]  # (unroll_len, batch_size, obs_dim)
+                next_states_unroll = tf.concat(
+                    [states[self.burnin_len+1:], last_state], axis=0)
 
-            #: Compute TQ
-            next_qvalues, c, h = [], c0, h0
-            for t in range(self.unroll_len):
-                q, (c, h) = self.target_q_network(next_states_unroll[t], states=[c, h])
-                next_qvalues.append(q)
+                c0 = tf.convert_to_tensor(
+                    np.vstack([seg.c_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
+                h0 = tf.convert_to_tensor(
+                    np.vstack([seg.h_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
 
-            next_qvalues = tf.stack(next_qvalues)                              # (unroll_len, batch_size, action_space)
-            next_actions = tf.argmax(next_qvalues, axis=2)                     # (unroll_len, batch_size)
-            next_actions_onehot = tf.one_hot(next_actions, self.action_space)  # (unroll_len, batch_size, action_space)
-            next_maxQ = tf.reduce_sum(
-                next_qvalues * next_actions_onehot, axis=2, keepdims=False)    # (unroll_len, batch_size)
-            TQ = rewards + self.gamma * (1 - dones) * next_maxQ                # (unroll_len, batch_size)
+                #: burn-in with stored-state
+                for t in range(self.burnin_len):
+                    _, (c0, h0) = self.q_network(states_burnin[t], states=[c0, h0])
 
-            with tf.GradientTape() as tape:
-                qvalues, c, h = [], c0, h0
+                #: Compute TQ
+                next_qvalues, c, h = [], c0, h0
                 for t in range(self.unroll_len):
-                    q, (c, h) = self.q_network(states_unroll[t], states=[c, h])
-                    qvalues.append(q)
-                qvalues = tf.stack(qvalues)                                          # (unroll_len, batch_size, action_space)
-                actions_onehot = tf.one_hot(actions, self.action_space)
-                Q = tf.reduce_sum(qvalues * actions_onehot, axis=2, keepdims=False)  # (unroll_len, batch_size)
+                    q, (c, h) = self.target_q_network(next_states_unroll[t], states=[c, h])
+                    next_qvalues.append(q)
 
-                td_errors = TQ - Q
-                loss = tf.reduce_mean(tf.square(td_errors), axis=0)
-                loss_weighted = tf.reduce_mean(loss * weights)
+                next_qvalues = tf.stack(next_qvalues)                              # (unroll_len, batch_size, action_space)
+                next_actions = tf.argmax(next_qvalues, axis=2)                     # (unroll_len, batch_size)
+                next_actions_onehot = tf.one_hot(next_actions, self.action_space)  # (unroll_len, batch_size, action_space)
+                next_maxQ = tf.reduce_sum(
+                    next_qvalues * next_actions_onehot, axis=2, keepdims=False)    # (unroll_len, batch_size)
+                TQ = rewards + self.gamma * (1 - dones) * next_maxQ                # (unroll_len, batch_size)
 
-            grads = tape.gradient(loss_weighted, self.q_network.trainable_variables)
-            grads, _ = tf.clip_by_global_norm(grads, 40.0)
-            self.optimizer.apply_gradients(
-                zip(grads, self.q_network.trainable_variables))
+                with tf.GradientTape() as tape:
+                    qvalues, c, h = [], c0, h0
+                    for t in range(self.unroll_len):
+                        q, (c, h) = self.q_network(states_unroll[t], states=[c, h])
+                        qvalues.append(q)
+                    qvalues = tf.stack(qvalues)                                          # (unroll_len, batch_size, action_space)
+                    actions_onehot = tf.one_hot(actions, self.action_space)
+                    Q = tf.reduce_sum(qvalues * actions_onehot, axis=2, keepdims=False)  # (unroll_len, batch_size)
 
-            #: Compute priority
-            td_errors_abs = tf.abs(td_errors)
-            priorities = self.eta * tf.reduce_max(td_errors_abs, axis=0) \
-                + (1 - self.eta) * tf.reduce_mean(td_errors_abs, axis=0)
-            priorities = (priorities + 0.001) ** self.alpha
+                    td_errors = TQ - Q
+                    loss = tf.reduce_mean(tf.square(td_errors), axis=0)
+                    loss_weighted = tf.reduce_mean(loss * weights)
 
-            indices_all += indices
-            priorities_all += priorities.numpy().tolist()
-            losses.append(loss_weighted)
+                grads = tape.gradient(loss_weighted, self.q_network.trainable_variables)
+                grads, _ = tf.clip_by_global_norm(grads, 40.0)
+                self.optimizer.apply_gradients(
+                    zip(grads, self.q_network.trainable_variables))
 
-        self.target_q_network.set_weights(self.q_network.get_weights())
+                #: Compute priority
+                td_errors_abs = tf.abs(td_errors)
+                priorities = self.eta * tf.reduce_max(td_errors_abs, axis=0) \
+                    + (1 - self.eta) * tf.reduce_mean(td_errors_abs, axis=0)
+                priorities = (priorities + 0.001) ** self.alpha
+
+                indices_all += indices
+                priorities_all += priorities.numpy().tolist()
+                losses.append(loss_weighted)
+
+                self.num_updated += 1
+                if self.num_updated % self.target_update_period == 0:
+                    self.target_q_network.set_weights(self.q_network.get_weights())
+
         current_weights = self.q_network.get_weights()
         loss_mean = np.array(losses).mean()
 
@@ -321,6 +350,7 @@ class Tester:
 
 def main(num_actors,
          env_name="BreakoutDeterministic-v4",
+         target_update_period=1600,
          n_frames=4, nstep=5,
          batch_size=64, update_iter=16,
          gamma=0.997, eta=0.9, alpha=0.9,
@@ -335,11 +365,8 @@ def main(num_actors,
 
     history = []
 
-    if num_actors > 1:
-        epsilons = [0.5 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
-    else:
-        #: for development only
-        epsilons = [0.5]
+    epsilons = [0.5 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
+    epsilons = [max(0.01, eps) for eps in epsilons]
 
     actors = [Actor.remote(pid=i, env_name=env_name, n_frames=n_frames,
                            epsilon=epsilons[i],
@@ -351,7 +378,9 @@ def main(num_actors,
 
     replay = SegmentReplayBuffer(buffer_size=2**12)
 
-    learner = Learner.remote(env_name=env_name, n_frames=n_frames,
+    learner = Learner.remote(env_name=env_name,
+                             target_update_period=target_update_period,
+                             n_frames=n_frames,
                              gamma=gamma, eta=eta, alpha=alpha,
                              burnin_length=burnin_length,
                              unroll_length=unroll_length)
@@ -364,7 +393,7 @@ def main(num_actors,
     wip_actors = [actor.sync_weights_and_rollout.remote(current_weights)
                   for actor in actors]
 
-    for _ in range(10):
+    for _ in range(100):
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
         priorities, segments, pid = ray.get(finished[0])
         replay.add(priorities, segments)
@@ -384,7 +413,7 @@ def main(num_actors,
     learner_cycles = 1
     actor_cycles = 0
     n_segment_added = 0
-    while learner_cycles <= 100:
+    while learner_cycles <= 5000:
         actor_cycles += 1
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
         priorities, segments, pid = ray.get(finished[0])
@@ -404,7 +433,7 @@ def main(num_actors,
             minibatchs = [replay.sample_minibatch(batch_size=batch_size)
                           for _ in range(update_iter)]
 
-            print("Actor cycle:", actor_cycles, "Added:", n_segment_added)
+            print("Actor cycle:", actor_cycles, "Added segs:", n_segment_added)
 
             learner_cycles += 1
             actor_cycles = 0
@@ -433,4 +462,4 @@ def main(num_actors,
 if __name__ == '__main__':
     env_name = "BreakoutDeterministic-v4"
     #env_name = "MsPacmanDeterministic-v4"
-    main(env_name=env_name, num_actors=1)
+    main(env_name=env_name, num_actors=21)

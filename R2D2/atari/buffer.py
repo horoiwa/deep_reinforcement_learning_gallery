@@ -26,7 +26,7 @@ class EpisodeBuffer:
         self.tmp_buffer = collections.deque(maxlen=self.nstep)
 
         self.reward_clipping_func = \
-            (lambda r: math.copysign(1, r) * math.sqrt(abs(r) + 1) + 0.001 * r)
+            (lambda r: math.copysign(1, r) * (math.sqrt(abs(r) + 1) - 1) + 0.001 * r)
 
     def __len__(self):
         return len(self.transitions)
