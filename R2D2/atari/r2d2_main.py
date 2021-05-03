@@ -174,7 +174,7 @@ class Learner:
 def main(num_actors,
          env_name="BreakoutDeterministic-v4",
          target_update_period=1600,
-         buffer_size=2**18,
+         buffer_size=2**19,
          n_frames=4, nstep=5,
          batch_size=32, update_iter=16,
          gamma=0.997, eta=0.9, alpha=0.9,
