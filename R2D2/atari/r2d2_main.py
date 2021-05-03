@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import ray
 import tensorflow as tf
+import lz4.frame
 
 import util
 from buffer import SegmentReplayBuffer
@@ -69,7 +70,7 @@ class Learner:
     @staticmethod
     def decompress_segments(minibatch):
         inidices, weights, compressed_segments = minibatch
-        segments = [pickle.loads(zlib.decompress(compressed_seg))
+        segments = [pickle.loads(lz4.frame.decompress(compressed_seg))
                     for compressed_seg in compressed_segments]
 
         return (inidices, weights, segments)
@@ -88,7 +89,7 @@ class Learner:
         priorities_all = []
         losses = []
 
-        with futures.ThreadPoolExecutor(max_workers=4) as executor:
+        with futures.ThreadPoolExecutor(max_workers=3) as executor:
             """ segmentsをdecompressする作業がわりと重いのでthreading
             """
             work_in_progresses = [
