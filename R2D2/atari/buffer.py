@@ -48,8 +48,8 @@ class EpisodeBuffer:
                 nstep_return = 0
                 has_done = False
 
-                for i in range(self.nstep)[idx:]:
-                    transition = self.tmp_buffer[i]
+                for i, target_idx in enumerate(range(self.nstep)[idx:]):
+                    transition = self.tmp_buffer[target_idx]
                     reward, done = transition.reward, transition.done
                     reward = self.reward_clipping_func(reward)
                     nstep_return += self.gamma ** i * (1 - done) * reward
