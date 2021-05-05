@@ -65,7 +65,7 @@ class Learner:
         return current_weights
 
     def save(self, save_path):
-        self.qnet.save_weights(save_path)
+        self.q_network.save_weights(save_path)
 
     @staticmethod
     def decompress_segments(minibatch):
@@ -255,7 +255,7 @@ def main(num_actors,
             [actors[pid].sync_weights_and_rollout.remote(current_weights)])
         n_segment_added += len(segments)
 
-        if n_segment_added < (batch_size * update_iter) * 1.5:
+        if n_segment_added < (batch_size * update_iter) * 1.0:
             finished_learner, _ = ray.wait([wip_learner], timeout=0)
         else:
             finished_learner, _ = ray.wait([wip_learner], num_returns=1)
