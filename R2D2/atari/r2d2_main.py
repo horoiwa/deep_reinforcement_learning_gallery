@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import ray
 import tensorflow as tf
-import lz4.frame
+import lz4.frame as lz4f
 
 import util
 from buffer import SegmentReplayBuffer
@@ -36,7 +36,7 @@ class Learner:
         self.q_network = RecurrentDuelingQNetwork(self.action_space)
         self.target_q_network = RecurrentDuelingQNetwork(self.action_space)
         self.target_update_period = target_update_period
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.0002, epsilon=0.001)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00025, epsilon=0.001)
 
         self.gamma = gamma
         self.eta = eta
@@ -70,7 +70,7 @@ class Learner:
     @staticmethod
     def decompress_segments(minibatch):
         inidices, weights, compressed_segments = minibatch
-        segments = [pickle.loads(lz4.frame.decompress(compressed_seg))
+        segments = [pickle.loads(lz4f.decompress(compressed_seg))
                     for compressed_seg in compressed_segments]
 
         return (inidices, weights, segments)
@@ -89,7 +89,7 @@ class Learner:
         priorities_all = []
         losses = []
 
-        with futures.ThreadPoolExecutor(max_workers=3) as executor:
+        with futures.ThreadPoolExecutor(max_workers=6) as executor:
             """ segmentsをdecompressする作業がわりと重いのでthreading
             """
             work_in_progresses = [
@@ -179,7 +179,7 @@ def main(num_actors,
          n_frames=4, nstep=5,
          batch_size=32, update_iter=16,
          gamma=0.997, eta=0.9, alpha=0.9,
-         burnin_length=20, unroll_length=20):
+         burnin_length=30, unroll_length=30):
     """
         Note:
             In R2D2 paper,
@@ -196,7 +196,7 @@ def main(num_actors,
     history = []
 
     epsilons = [0.5 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
-    epsilons = [max(0.01, eps) for eps in epsilons]
+    epsilons = [max(0.02, eps) for eps in epsilons]
 
     actors = [Actor.remote(pid=i, env_name=env_name, n_frames=n_frames,
                            epsilon=epsilons[i],
@@ -223,7 +223,7 @@ def main(num_actors,
     wip_actors = [actor.sync_weights_and_rollout.remote(current_weights)
                   for actor in actors]
 
-    for _ in range(50):
+    for _ in range(100):
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
         priorities, segments, pid = ray.get(finished[0])
         replay.add(priorities, segments)
@@ -237,7 +237,7 @@ def main(num_actors,
                   for _ in range(update_iter)]
     wip_learner = learner.update_network.remote(minibatchs)
 
-    wip_tester = tester.test_play.remote(current_weights, epsilon=0.01)
+    wip_tester = tester.test_play.remote(current_weights, epsilon=0.02)
 
     minibatchs = [replay.sample_minibatch(batch_size=batch_size)
                   for _ in range(update_iter)]
@@ -255,7 +255,7 @@ def main(num_actors,
             [actors[pid].sync_weights_and_rollout.remote(current_weights)])
         n_segment_added += len(segments)
 
-        if n_segment_added < (batch_size * update_iter) * 1.3:
+        if n_segment_added < (batch_size * update_iter) * 1.5:
             finished_learner, _ = ray.wait([wip_learner], timeout=0)
         else:
             finished_learner, _ = ray.wait([wip_learner], num_returns=1)
@@ -286,7 +286,7 @@ def main(num_actors,
 
                 test_rewards = ray.get(wip_tester)
                 history.append((learner_cycles-5, test_rewards))
-                wip_tester = tester.test_play.remote(current_weights, epsilon=0.01)
+                wip_tester = tester.test_play.remote(current_weights, epsilon=0.02)
                 print("Cycle:", learner_cycles, "Score:", test_rewards)
 
                 with summary_writer.as_default():

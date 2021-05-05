@@ -7,7 +7,7 @@ tmp/
 
 ref/
 mp4/
-
+*.out
 # C extensions
 *.so
 checkpoints/

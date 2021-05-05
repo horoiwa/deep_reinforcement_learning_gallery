@@ -8,7 +8,7 @@ import gym
 import numpy as np
 import ray
 import tensorflow as tf
-import lz4.frame
+import lz4.frame as lz4f
 
 import util
 from buffer import EpisodeBuffer
@@ -146,7 +146,7 @@ class Actor:
         priorities = (priorities + 0.001) ** self.alpha
 
         #: RAM節約のためにデータ圧縮
-        compressed_segments = [lz4.frame.compress(pickle.dumps(seg))
+        compressed_segments = [lz4f.compress(pickle.dumps(seg))
                                for seg in segments]
 
         return priorities.numpy().tolist(), compressed_segments
