@@ -149,7 +149,7 @@ class Learner:
 
         self.q_network = RecurrentQNetwork(self.action_space)
         self.target_q_network = RecurrentQNetwork(self.action_space)
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.001)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
         self.gamma = gamma
         self.eta = eta
@@ -313,7 +313,7 @@ class Tester:
 
 def main(num_actors,
          env_name="CartPole-v0",
-         batch_size=32, update_iter=8,
+         batch_size=16, update_iter=16,
          gamma=0.97, eta=0.9, alpha=0.9,
          burnin_length=4, unroll_length=4):
 
