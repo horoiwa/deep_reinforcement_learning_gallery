@@ -5,10 +5,10 @@ import numpy as np
 
 
 Transition = collections.namedtuple(
-    "Transition", ["state", "action", "reward", "next_state", "done", "c", "h"])
+    "Transition", ["state", "action", "reward", "next_state", "done", "c", "h", "prev_action"])
 
 Segment = collections.namedtuple(
-    "Segment", ["states", "actions", "rewards", "dones", "c_init", "h_init", "last_state"])
+    "Segment", ["states", "actions", "rewards", "dones", "c_init", "h_init", "a_init", "last_state"])
 
 
 class EpisodeBuffer:
@@ -45,11 +45,12 @@ class EpisodeBuffer:
 
             segment = Segment(
                 states=[t.state for t in timesteps],
-                actions=[t.action for t in timesteps][self.burnin_len:],
+                actions=[t.action for t in timesteps],
                 rewards=[t.reward for t in timesteps][self.burnin_len:],
                 dones=[t.done for t in timesteps][self.burnin_len:],
                 c_init=timesteps[0].c,
                 h_init=timesteps[0].h,
+                a_init=timesteps[0].prev_action,
                 last_state=timesteps[-1].next_state
                 )
             segments.append(segment)

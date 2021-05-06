@@ -18,16 +18,19 @@ class RecurrentQNetwork(tf.keras.Model):
         self.output_layer = kl.Dense(
             action_space, kernel_initializer="he_normal")
 
-    def call(self, x, states):
+    def call(self, x, states, prev_action):
         x = self.input_layer(x)
+        prev_action_onehot = tf.one_hot(prev_action, self.action_space)
+        x = tf.concat([x, prev_action_onehot], axis=1)
         x, states = self.lstm(x, states=states)
         out = self.output_layer(x)
         return out, states
 
-    def sample_action(self, x, c, h, epsilon):
+    def sample_action(self, x, c, h, prev_action, epsilon):
 
         x = np.atleast_2d(x).astype(np.float32)
-        qvalues, state = self(x, states=[c, h])
+        qvalues, state = self(x, states=[c, h],
+                              prev_action=[prev_action])
 
         if random.random() > epsilon:
             action = np.argmax(qvalues)
