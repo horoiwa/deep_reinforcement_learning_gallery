@@ -1,6 +1,4 @@
 import shutil
-from pathlib import Path
-import zlib
 import pickle
 from concurrent import futures
 import time
@@ -89,7 +87,8 @@ class Learner:
         priorities_all = []
         losses = []
 
-        with futures.ThreadPoolExecutor(max_workers=6) as executor:
+        s = time.time()
+        with futures.ThreadPoolExecutor(max_workers=3) as executor:
             """ segmentsをdecompressする作業がわりと重いのでthreading
             """
             work_in_progresses = [
@@ -101,30 +100,38 @@ class Learner:
                 (indices, weights, segments) = ready_minibatch.result()
 
                 states = np.stack([np.vstack(seg.states) for seg in segments], axis=1)    # (burnin_len+unroll_len, batch_size, obs_dim)
-                actions = np.stack([seg.actions for seg in segments], axis=1)  # (unroll_len, batch_size)
+                actions = np.stack([seg.actions for seg in segments], axis=1)  # (burnin+unroll_len, batch_size)
                 rewards = np.stack([seg.rewards for seg in segments], axis=1)  # (unroll_len, batch_size)
                 dones = np.stack([seg.dones for seg in segments], axis=1)      # (unroll_len, batch_size)
-                last_state = np.vstack([seg.last_state for seg in segments])    # (batch_size, obs_dim)
-                last_state = tf.expand_dims(last_state, axis=0)                # (1, batch_size, obs_dim)
 
-                states_burnin = states[:self.burnin_len]  # (burnin_len, batch_size, obs_dim)
-                states_unroll = states[self.burnin_len:]  # (unroll_len, batch_size, obs_dim)
-                next_states_unroll = tf.concat(
-                    [states[self.burnin_len+1:], last_state], axis=0)
+                last_state = np.vstack([seg.last_state for seg in segments])   # (batch_size, obs_dim)
+                last_state = tf.expand_dims(last_state, axis=0)                # (1, batch_size, obs_dim)
+                next_states = tf.concat([states, last_state], axis=0)[1:]      # (burnin+unroll_len, batch_size, obs_dim)
+
+                assert next_states.shape == states.shape
 
                 c0 = tf.convert_to_tensor(
                     np.vstack([seg.c_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
                 h0 = tf.convert_to_tensor(
                     np.vstack([seg.h_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
 
-                #: burn-in with stored-state
+                a0 = np.atleast_2d([seg.prev_action_init for seg in segments])      # (batch_size, 1)
+                prev_actions = np.vstack([a0, actions])[:-1]
+                assert prev_actions.shape == actions.shape
+
+                """ Compute Target Q values """
+                #: Burn-in of lstem-state for target network
+                _, (c, h) = self.target_q_network(
+                     states[0], states=[c0, h0], prev_action=prev_actions[0])
                 for t in range(self.burnin_len):
-                    _, (c0, h0) = self.q_network(states_burnin[t], states=[c0, h0])
+                    _, (c, h) = self.target_q_network(
+                        next_states[t], states=[c, h], prev_action=actions[t])
 
                 #: Compute TQ
-                next_qvalues, c, h = [], c0, h0
-                for t in range(self.unroll_len):
-                    q, (c, h) = self.target_q_network(next_states_unroll[t], states=[c, h])
+                next_qvalues = []
+                for t in range(self.burnin_len, self.burnin_len + self.unroll_len):
+                    q, (c, h) = self.target_q_network(
+                        next_states[t], states=[c, h], prev_action=actions[t])
                     next_qvalues.append(q)
 
                 next_qvalues = tf.stack(next_qvalues)                              # (unroll_len, batch_size, action_space)
@@ -134,20 +141,33 @@ class Learner:
                     next_qvalues * next_actions_onehot, axis=2, keepdims=False)    # (unroll_len, batch_size)
                 TQ = rewards + self.gamma * (1 - dones) * next_maxQ                # (unroll_len, batch_size)
 
+                """ Compute Q values and TD error """
+                #: Burn-in of lstem-state for online network
+                c, h = c0, h0
+                for t in range(self.burnin_len):
+                    _, (c, h) = self.q_network(
+                        states[t], states=[c, h],
+                        prev_action=prev_actions[t])
+
                 with tf.GradientTape() as tape:
-                    qvalues, c, h = [], c0, h0
-                    for t in range(self.unroll_len):
-                        q, (c, h) = self.q_network(states_unroll[t], states=[c, h])
+                    qvalues = []
+                    for t in range(self.burnin_len, self.burnin_len + self.unroll_len):
+                        q, (c, h) = self.q_network(
+                            states[t], states=[c, h],
+                            prev_action=prev_actions[t])
                         qvalues.append(q)
                     qvalues = tf.stack(qvalues)                                          # (unroll_len, batch_size, action_space)
-                    actions_onehot = tf.one_hot(actions, self.action_space)
-                    Q = tf.reduce_sum(qvalues * actions_onehot, axis=2, keepdims=False)  # (unroll_len, batch_size)
+                    actions_onehot = tf.one_hot(
+                        actions[self.burnin_len:], self.action_space)
+                    Q = tf.reduce_sum(
+                        qvalues * actions_onehot, axis=2, keepdims=False)  # (unroll_len, batch_size)
 
                     td_errors = TQ - Q
                     loss = tf.reduce_mean(tf.square(td_errors), axis=0)
                     loss_weighted = tf.reduce_mean(loss * weights)
 
-                grads = tape.gradient(loss_weighted, self.q_network.trainable_variables)
+                grads = tape.gradient(
+                    loss_weighted, self.q_network.trainable_variables)
                 grads, _ = tf.clip_by_global_norm(grads, 40.0)
                 self.optimizer.apply_gradients(
                     zip(grads, self.q_network.trainable_variables))
@@ -168,6 +188,9 @@ class Learner:
 
         current_weights = self.q_network.get_weights()
         loss_mean = np.array(losses).mean()
+
+        elapsed = time.time() - s
+        print(f"===== Elapsed: {elapsed}")
 
         return current_weights, indices_all, priorities_all, loss_mean
 
