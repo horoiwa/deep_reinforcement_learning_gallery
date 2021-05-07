@@ -2,6 +2,7 @@ import shutil
 import pickle
 from concurrent import futures
 import time
+from pathlib import Path
 
 import gym
 import matplotlib.pyplot as plt
@@ -334,7 +335,7 @@ def test_play(env_name):
     ray.init()
     tester = Tester.remote(env_name=env_name, n_frames=4)
     res = tester.test_with_video.remote(
-            checkpoint_path="checkpoints/qnet", monitor_dir="mp4", epsilon=0.01)
+            checkpoint_path="checkpoints/qnet", monitor_dir="mp4", epsilon=0.02)
     rewards = ray.get(res)
     print(rewards)
 

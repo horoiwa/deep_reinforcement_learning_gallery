@@ -28,6 +28,7 @@ class RecurrentDuelingQNetwork(tf.keras.Model):
         self.advantages = kl.Dense(self.action_space,
                                    kernel_initializer="he_normal")
 
+    @tf.function
     def call(self, x, states, prev_action):
 
         x = self.conv1(x)
