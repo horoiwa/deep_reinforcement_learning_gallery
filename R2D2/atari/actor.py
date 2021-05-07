@@ -44,7 +44,7 @@ class Actor:
     def define_network(self):
 
         #: hide GPU from remote actor
-        tf.config.set_visible_devices([], 'GPU')
+        #tf.config.set_visible_devices([], 'GPU')
 
         env = gym.make(self.env_name)
 
@@ -53,7 +53,7 @@ class Actor:
         state = np.stack(frames, axis=2)[np.newaxis, ...]
 
         c, h = self.q_network.lstm.get_initial_state(batch_size=1, dtype=tf.float32)
-        self.q_network(np.atleast_2d(state), states=[c, h])
+        self.q_network(np.atleast_2d(state), states=[c, h], prev_action=[0])
 
     def sync_weights_and_rollout(self, current_weights):
 
@@ -83,51 +83,62 @@ class Actor:
         c, h = self.q_network.lstm.get_initial_state(
             batch_size=1, dtype=tf.float32)
         done = False
+        prev_action = 0
         episode_rewards = 0
         while not done:
 
             state = np.stack(frames, axis=2)[np.newaxis, ...]
 
-            action, (next_c, next_h) = self.q_network.sample_action(state, c, h, self.epsilon)
+            action, (next_c, next_h) = self.q_network.sample_action(
+                state, c, h, prev_action, self.epsilon)
             next_frame, reward, done, _ = env.step(action)
             frames.append(self.frame_process_func(next_frame))
             next_state = np.stack(frames, axis=2)[np.newaxis, ...]
 
-            transition = (state, action, reward, next_state, done, c, h)
+            transition = (state, action, reward, next_state, done, c, h, prev_action)
             episode_buffer.add(transition)
 
             episode_rewards += reward
-            c, h = next_c, next_h
+            c, h, prev_action = next_c, next_h, action
 
-        segments = episode_buffer.pull()
+        segments = episode_buffer.pull_segments()
 
         """ Compute initial priority
         """
-        states = np.stack([np.vstack(seg.states) for seg in segments], axis=1)  # (burnin_len+unroll_len, batch_size, obs_dim)
-        actions = np.stack([seg.actions for seg in segments], axis=1)  # (unroll_len, batch_size)
+        states = np.stack([np.vstack(seg.states) for seg in segments], axis=1)  # (burnin+unroll_len, batch_size, obs_dim)
+        actions = np.stack([seg.actions for seg in segments], axis=1)  # (burnin+unroll_len, batch_size)
         rewards = np.stack([seg.rewards for seg in segments], axis=1)  # (unroll_len, batch_size)
         dones = np.stack([seg.dones for seg in segments], axis=1)      # (unroll_len, batch_size)
         last_state = np.vstack([seg.last_state for seg in segments])   # (batch_size, obs_dim)
 
-        c = tf.convert_to_tensor(
-            np.vstack([seg.c_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
-        h = tf.convert_to_tensor(
-            np.vstack([seg.h_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
+        c0 = tf.convert_to_tensor(
+             np.vstack([seg.c_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
+        h0 = tf.convert_to_tensor(
+             np.vstack([seg.h_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
+
+        a0 = np.atleast_2d([seg.prev_action_init for seg in segments])  # (1, bacth_size)
+        prev_actions = np.vstack([a0, actions])[:-1]          # (burnin+unroll_len, batch_size)
+        assert prev_actions.shape == actions.shape
 
         #: burn-in with stored-state
+        c, h = c0, h0
         for t in range(self.burnin_len):
-            _, (c, h) = self.q_network(states[t], states=[c, h])
+            _, (c, h) = self.q_network(
+                states[t], states=[c, h], prev_action=prev_actions[t])
 
         qvalues = []
         for t in range(self.burnin_len, self.burnin_len+self.unroll_len):
-            q, (c, h) = self.q_network(states[t], states=[c, h])
+            q, (c, h) = self.q_network(
+                states[t], states=[c, h], prev_action=prev_actions[t])
             qvalues.append(q)
         qvalues = tf.stack(qvalues)                                          # (unroll_len, batch_size, action_space)
-        actions_onehot = tf.one_hot(actions, self.action_space)
+        actions_onehot = tf.one_hot(
+            actions[self.burnin_len:], self.action_space)
         Q = tf.reduce_sum(qvalues * actions_onehot, axis=2, keepdims=False)  # (unroll_len, batch_size)
 
         #: compute qvlalue of last next-state in segment
-        remaining_qvalue, _ = self.q_network(last_state, states=[c, h])
+        remaining_qvalue, _ = self.q_network(
+            last_state, states=[c, h], prev_action=actions[-1])
         remaining_qvalue = tf.expand_dims(remaining_qvalue, axis=0)          # (1, batch_size, action_space)
 
         next_qvalues = tf.concat([qvalues[1:], remaining_qvalue], axis=0)    # (unroll_len, batch_size, action_space)
@@ -167,7 +178,7 @@ class Tester:
     def define_network(self):
 
         #: hide GPU from remote actor
-        tf.config.set_visible_devices([], 'GPU')
+        #tf.config.set_visible_devices([], 'GPU')
 
         env = gym.make(self.env_name)
 
@@ -176,7 +187,7 @@ class Tester:
         state = np.stack(frames, axis=2)[np.newaxis, ...]
 
         c, h = self.q_network.lstm.get_initial_state(batch_size=1, dtype=tf.float32)
-        self.q_network(np.atleast_2d(state), states=[c, h])
+        self.q_network(np.atleast_2d(state), states=[c, h], prev_action=[0])
 
     def test_play(self, current_weights, epsilon):
 
@@ -192,15 +203,16 @@ class Tester:
 
         c, h = self.q_network.lstm.get_initial_state(
             batch_size=1, dtype=tf.float32)
+        prev_action = 0
         done = False
         while not done:
             steps += 1
             state = np.stack(frames, axis=2)[np.newaxis, ...]
-            action, (next_c, next_h) = self.q_network.sample_action(state, c, h, epsilon)
+            action, (next_c, next_h) = self.q_network.sample_action(state, c, h, prev_action, epsilon)
             next_frame, reward, done, _ = env.step(action)
             frames.append(self.frame_process_func(next_frame))
             episode_rewards += reward
-            c, h = next_c, next_h
+            c, h, prev_action = next_c, next_h, action
             if steps > 500 and episode_rewards < 5:
                 break
 
@@ -224,15 +236,16 @@ class Tester:
 
         c, h = self.q_network.lstm.get_initial_state(
             batch_size=1, dtype=tf.float32)
+        prev_action = 0
         done = False
         while not done:
             steps += 1
             state = np.stack(frames, axis=2)[np.newaxis, ...]
-            action, (next_c, next_h) = self.q_network.sample_action(state, c, h, epsilon)
+            action, (next_c, next_h) = self.q_network.sample_action(state, c, h, prev_action, epsilon)
             next_frame, reward, done, _ = env.step(action)
             frames.append(self.frame_process_func(next_frame))
             episode_rewards += reward
-            c, h = next_c, next_h
+            c, h, prev_action = next_c, next_h, action
             if steps > 500 and episode_rewards < 5:
                 break
 

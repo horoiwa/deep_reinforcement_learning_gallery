@@ -6,10 +6,12 @@ import numpy as np
 
 
 Transition = collections.namedtuple(
-    "Transition", ["state", "action", "reward", "next_state", "done", "c", "h"])
+    "Transition", ["state", "action", "reward", "next_state", "done",
+                   "c", "h", "prev_action"])
 
 Segment = collections.namedtuple(
-    "Segment", ["states", "actions", "rewards", "dones", "c_init", "h_init", "last_state"])
+    "Segment", ["states", "actions", "rewards", "dones",
+                "c_init", "h_init", "prev_action_init", "last_state"])
 
 
 class EpisodeBuffer:
@@ -64,14 +66,15 @@ class EpisodeBuffer:
                     next_state=self.tmp_buffer[-1].next_state,
                     done=has_done,
                     c=self.tmp_buffer[idx].c,
-                    h=self.tmp_buffer[idx].h)
+                    h=self.tmp_buffer[idx].h,
+                    prev_action=self.tmp_buffer[idx].prev_action)
 
                 self.transitions.append(nstep_transition)
 
         if is_terminal:
             self.tmp_buffer = None
 
-    def pull(self):
+    def pull_segments(self):
 
         # this method shold be called after episode end
         assert self.tmp_buffer is None
@@ -91,11 +94,12 @@ class EpisodeBuffer:
 
             segment = Segment(
                 states=[t.state for t in timesteps],
-                actions=[t.action for t in timesteps][self.burnin_len:],
+                actions=[t.action for t in timesteps],
                 rewards=[t.reward for t in timesteps][self.burnin_len:],
                 dones=[t.done for t in timesteps][self.burnin_len:],
                 c_init=timesteps[0].c,
                 h_init=timesteps[0].h,
+                prev_action_init=timesteps[0].prev_action,
                 last_state=timesteps[-1].next_state
                 )
             segments.append(segment)

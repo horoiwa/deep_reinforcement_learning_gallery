@@ -28,12 +28,15 @@ class RecurrentDuelingQNetwork(tf.keras.Model):
         self.advantages = kl.Dense(self.action_space,
                                    kernel_initializer="he_normal")
 
-    def call(self, x, states):
+    def call(self, x, states, prev_action):
+
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.conv3(x)
-
         x = self.flatten1(x)
+
+        prev_action_onehot = tf.one_hot(prev_action, self.action_space)
+        x = tf.concat([x, prev_action_onehot], axis=1)
         x, states = self.lstm(x, states=states)
 
         value = self.value(x)
@@ -45,9 +48,9 @@ class RecurrentDuelingQNetwork(tf.keras.Model):
 
         return qvalues, states
 
-    def sample_action(self, x, c, h, epsilon):
+    def sample_action(self, x, c, h, prev_action, epsilon):
 
-        qvalues, state = self(x, states=[c, h])
+        qvalues, state = self(x, states=[c, h], prev_action=[prev_action])
 
         if random.random() > epsilon:
             action = np.argmax(qvalues)

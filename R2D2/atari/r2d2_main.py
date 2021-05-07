@@ -57,8 +57,8 @@ class Learner:
 
         c, h = self.q_network.lstm.get_initial_state(batch_size=1, dtype=tf.float32)
 
-        self.q_network(np.atleast_2d(state), states=[c, h])
-        self.target_q_network(np.atleast_2d(state), states=[c, h])
+        self.q_network(np.atleast_2d(state), states=[c, h], prev_action=[0])
+        self.target_q_network(np.atleast_2d(state), states=[c, h], prev_action=[0])
         self.target_q_network.set_weights(self.q_network.get_weights())
         current_weights = self.q_network.get_weights()
 
@@ -186,7 +186,7 @@ def main(num_actors,
             batch_size=64, burnin_length=40, unroll_length=40
     """
 
-    ray.init(local_mode=False)
+    ray.init(local_mode=True)
 
     logdir = Path(__file__).parent / "log"
     if logdir.exists():
@@ -223,7 +223,8 @@ def main(num_actors,
     wip_actors = [actor.sync_weights_and_rollout.remote(current_weights)
                   for actor in actors]
 
-    for _ in range(100):
+    #for _ in range(100):
+    for _ in range(3):
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
         priorities, segments, pid = ray.get(finished[0])
         replay.add(priorities, segments)
@@ -318,5 +319,5 @@ def test_play(env_name):
 if __name__ == '__main__':
     env_name = "BreakoutDeterministic-v4"
     #env_name = "MsPacmanDeterministic-v4"
-    main(env_name=env_name, num_actors=20)
+    main(env_name=env_name, num_actors=2)
     test_play(env_name)
