@@ -71,10 +71,9 @@ class Learner:
         inidices, weights, compressed_segments = minibatch
         segments = [pickle.loads(lz4f.decompress(compressed_seg))
                     for compressed_seg in compressed_segments]
-
         return (inidices, weights, segments)
 
-    def update_network(self, minibatchs):
+    def update_network(self, minibatchs, preprocess="concurrent"):
         """
         Args:
             minibatchs (List[Tuple(indices, weights, compressed_segments)])
@@ -88,7 +87,6 @@ class Learner:
         priorities_all = []
         losses = []
 
-        s = time.time()
         with futures.ThreadPoolExecutor(max_workers=3) as executor:
             """ segmentsをdecompressする作業がわりと重いのでthreading
             """
@@ -97,103 +95,104 @@ class Learner:
                 for mb in minibatchs]
 
             for ready_minibatch in futures.as_completed(work_in_progresses):
-
                 (indices, weights, segments) = ready_minibatch.result()
-
-                states = np.stack([np.vstack(seg.states) for seg in segments], axis=1)    # (burnin_len+unroll_len, batch_size, obs_dim)
-                actions = np.stack([seg.actions for seg in segments], axis=1)  # (burnin+unroll_len, batch_size)
-                rewards = np.stack([seg.rewards for seg in segments], axis=1)  # (unroll_len, batch_size)
-                dones = np.stack([seg.dones for seg in segments], axis=1)      # (unroll_len, batch_size)
-
-                last_state = np.vstack([seg.last_state for seg in segments])   # (batch_size, obs_dim)
-                last_state = tf.expand_dims(last_state, axis=0)                # (1, batch_size, obs_dim)
-                next_states = tf.concat([states, last_state], axis=0)[1:]      # (burnin+unroll_len, batch_size, obs_dim)
-
-                assert next_states.shape == states.shape
-
-                c0 = tf.convert_to_tensor(
-                    np.vstack([seg.c_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
-                h0 = tf.convert_to_tensor(
-                    np.vstack([seg.h_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
-
-                a0 = np.atleast_2d([seg.prev_action_init for seg in segments])      # (batch_size, 1)
-                prev_actions = np.vstack([a0, actions])[:-1]
-                assert prev_actions.shape == actions.shape
-
-                """ Compute Target Q values """
-                #: Burn-in of lstem-state for target network
-                _, (c, h) = self.target_q_network(
-                     states[0], states=[c0, h0], prev_action=prev_actions[0])
-                for t in range(self.burnin_len):
-                    _, (c, h) = self.target_q_network(
-                        next_states[t], states=[c, h], prev_action=actions[t])
-
-                #: Compute TQ
-                next_qvalues = []
-                for t in range(self.burnin_len, self.burnin_len + self.unroll_len):
-                    q, (c, h) = self.target_q_network(
-                        next_states[t], states=[c, h], prev_action=actions[t])
-                    next_qvalues.append(q)
-
-                next_qvalues = tf.stack(next_qvalues)                              # (unroll_len, batch_size, action_space)
-                next_actions = tf.argmax(next_qvalues, axis=2)                     # (unroll_len, batch_size)
-                next_actions_onehot = tf.one_hot(next_actions, self.action_space)  # (unroll_len, batch_size, action_space)
-                next_maxQ = tf.reduce_sum(
-                    next_qvalues * next_actions_onehot, axis=2, keepdims=False)    # (unroll_len, batch_size)
-                TQ = rewards + self.gamma * (1 - dones) * next_maxQ                # (unroll_len, batch_size)
-
-                """ Compute Q values and TD error """
-                #: Burn-in of lstem-state for online network
-                c, h = c0, h0
-                for t in range(self.burnin_len):
-                    _, (c, h) = self.q_network(
-                        states[t], states=[c, h],
-                        prev_action=prev_actions[t])
-
-                with tf.GradientTape() as tape:
-                    qvalues = []
-                    for t in range(self.burnin_len, self.burnin_len + self.unroll_len):
-                        q, (c, h) = self.q_network(
-                            states[t], states=[c, h],
-                            prev_action=prev_actions[t])
-                        qvalues.append(q)
-                    qvalues = tf.stack(qvalues)                                          # (unroll_len, batch_size, action_space)
-                    actions_onehot = tf.one_hot(
-                        actions[self.burnin_len:], self.action_space)
-                    Q = tf.reduce_sum(
-                        qvalues * actions_onehot, axis=2, keepdims=False)  # (unroll_len, batch_size)
-
-                    td_errors = TQ - Q
-                    loss = tf.reduce_mean(tf.square(td_errors), axis=0)
-                    loss_weighted = tf.reduce_mean(loss * weights)
-
-                grads = tape.gradient(
-                    loss_weighted, self.q_network.trainable_variables)
-                grads, _ = tf.clip_by_global_norm(grads, 40.0)
-                self.optimizer.apply_gradients(
-                    zip(grads, self.q_network.trainable_variables))
-
-                #: Compute priority
-                td_errors_abs = tf.abs(td_errors)
-                priorities = self.eta * tf.reduce_max(td_errors_abs, axis=0) \
-                    + (1 - self.eta) * tf.reduce_mean(td_errors_abs, axis=0)
-                priorities = (priorities + 0.001) ** self.alpha
+                indices, priorities, loss = self._update(indices, weights, segments)
 
                 indices_all += indices
-                priorities_all += priorities.numpy().tolist()
-                losses.append(loss_weighted)
-
-                self.num_updated += 1
-                if self.num_updated % self.target_update_period == 0:
-                    self.target_q_network.set_weights(self.q_network.get_weights())
+                priorities_all += priorities
+                losses.append(loss)
 
         current_weights = self.q_network.get_weights()
         loss_mean = np.array(losses).mean()
 
-        elapsed = time.time() - s
-        print(f"===== Elapsed: {elapsed}")
-
         return current_weights, indices_all, priorities_all, loss_mean
+
+    def _update(self, indices, weights, segments):
+
+        states = np.stack([np.vstack(seg.states) for seg in segments], axis=1)    # (burnin_len+unroll_len, batch_size, obs_dim)
+        actions = np.stack([seg.actions for seg in segments], axis=1)  # (burnin+unroll_len, batch_size)
+        rewards = np.stack([seg.rewards for seg in segments], axis=1)  # (unroll_len, batch_size)
+        dones = np.stack([seg.dones for seg in segments], axis=1)      # (unroll_len, batch_size)
+
+        last_state = np.vstack([seg.last_state for seg in segments])   # (batch_size, obs_dim)
+        last_state = tf.expand_dims(last_state, axis=0)                # (1, batch_size, obs_dim)
+        next_states = tf.concat([states, last_state], axis=0)[1:]      # (burnin+unroll_len, batch_size, obs_dim)
+
+        assert next_states.shape == states.shape
+
+        c0 = tf.convert_to_tensor(
+            np.vstack([seg.c_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
+        h0 = tf.convert_to_tensor(
+            np.vstack([seg.h_init for seg in segments]), dtype=tf.float32)  # (batch_size, lstm_out_dim)
+
+        a0 = np.atleast_2d([seg.prev_action_init for seg in segments])      # (batch_size, 1)
+        prev_actions = np.vstack([a0, actions])[:-1]
+        assert prev_actions.shape == actions.shape
+
+        """ Compute Target Q values """
+        #: Burn-in of lstem-state for target network
+        _, (c, h) = self.target_q_network(
+             states[0], states=[c0, h0], prev_action=prev_actions[0])
+        for t in range(self.burnin_len):
+            _, (c, h) = self.target_q_network(
+                next_states[t], states=[c, h], prev_action=actions[t])
+
+        #: Compute TQ
+        next_qvalues = []
+        for t in range(self.burnin_len, self.burnin_len + self.unroll_len):
+            q, (c, h) = self.target_q_network(
+                next_states[t], states=[c, h], prev_action=actions[t])
+            next_qvalues.append(q)
+
+        next_qvalues = tf.stack(next_qvalues)                              # (unroll_len, batch_size, action_space)
+        next_actions = tf.argmax(next_qvalues, axis=2)                     # (unroll_len, batch_size)
+        next_actions_onehot = tf.one_hot(next_actions, self.action_space)  # (unroll_len, batch_size, action_space)
+        next_maxQ = tf.reduce_sum(
+            next_qvalues * next_actions_onehot, axis=2, keepdims=False)    # (unroll_len, batch_size)
+        TQ = rewards + self.gamma * (1 - dones) * next_maxQ                # (unroll_len, batch_size)
+
+        """ Compute Q values and TD error """
+        #: Burn-in of lstem-state for online network
+        c, h = c0, h0
+        for t in range(self.burnin_len):
+            _, (c, h) = self.q_network(
+                states[t], states=[c, h],
+                prev_action=prev_actions[t])
+
+        with tf.GradientTape() as tape:
+            qvalues = []
+            for t in range(self.burnin_len, self.burnin_len + self.unroll_len):
+                q, (c, h) = self.q_network(
+                    states[t], states=[c, h],
+                    prev_action=prev_actions[t])
+                qvalues.append(q)
+            qvalues = tf.stack(qvalues)                                          # (unroll_len, batch_size, action_space)
+            actions_onehot = tf.one_hot(
+                actions[self.burnin_len:], self.action_space)
+            Q = tf.reduce_sum(
+                qvalues * actions_onehot, axis=2, keepdims=False)  # (unroll_len, batch_size)
+
+            td_errors = TQ - Q
+            loss = tf.reduce_mean(tf.square(td_errors), axis=0)
+            loss_weighted = tf.reduce_mean(loss * weights)
+
+        grads = tape.gradient(
+            loss_weighted, self.q_network.trainable_variables)
+        grads, _ = tf.clip_by_global_norm(grads, 40.0)
+        self.optimizer.apply_gradients(
+            zip(grads, self.q_network.trainable_variables))
+
+        #: Compute priority
+        td_errors_abs = tf.abs(td_errors)
+        priorities = self.eta * tf.reduce_max(td_errors_abs, axis=0) \
+            + (1 - self.eta) * tf.reduce_mean(td_errors_abs, axis=0)
+        priorities = (priorities + 0.001) ** self.alpha
+
+        self.num_updated += 1
+        if self.num_updated % self.target_update_period == 0:
+            self.target_q_network.set_weights(self.q_network.get_weights())
+
+        return indices, priorities.numpy().tolist(), loss_weighted
 
 
 def main(num_actors,
