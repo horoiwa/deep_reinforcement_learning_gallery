@@ -66,7 +66,8 @@ class EpisodeBuffer:
                     done=has_done,
                     c=self.tmp_buffer[idx].c,
                     h=self.tmp_buffer[idx].h,
-                    prev_action=self.tmp_buffer[idx].prev_action)
+                    prev_action=self.tmp_buffer[idx].prev_action,
+                    is_terminal=None)
 
                 self.transitions.append(nstep_transition)
 

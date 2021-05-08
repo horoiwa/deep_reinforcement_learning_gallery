@@ -342,5 +342,5 @@ def test_play(env_name):
 if __name__ == '__main__':
     env_name = "BreakoutDeterministic-v4"
     #env_name = "MsPacmanDeterministic-v4"
-    main(env_name=env_name, num_actors=20)
+    main(env_name=env_name, num_actors=2)
     test_play(env_name)
