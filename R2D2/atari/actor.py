@@ -102,7 +102,7 @@ class Actor:
                               c, h, prev_action, True)
             elif lives != info["ale.lives"]:
                 #: Life loss (roll)
-                lives == info["ale.lives"]
+                lives = info["ale.lives"]
                 transition = (state, action, reward, next_state, True,
                               c, h, prev_action, False)
             else:
