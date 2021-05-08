@@ -21,7 +21,7 @@ physical_devices = tf.config.experimental.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
-@ray.remote(num_cpus=2, num_gpus=1)
+@ray.remote(num_cpus=1, num_gpus=1)
 class Learner:
 
     def __init__(self, env_name, target_update_period,
@@ -87,8 +87,9 @@ class Learner:
         priorities_all = []
         losses = []
 
-        with futures.ThreadPoolExecutor(max_workers=3) as executor:
-            """ segmentsをdecompressする作業がわりと重いのでthreading
+        t = time.time()
+        with futures.ThreadPoolExecutor(max_workers=2) as executor:
+            """ segmentsをdecompressする作業がやや重い(0.2sec程度)のでthreading
             """
             work_in_progresses = [
                 executor.submit(self.decompress_segments, mb)
@@ -104,6 +105,7 @@ class Learner:
 
         current_weights = self.q_network.get_weights()
         loss_mean = np.array(losses).mean()
+        print(time.time() - t)
 
         return current_weights, indices_all, priorities_all, loss_mean
 
@@ -128,6 +130,12 @@ class Learner:
         a0 = np.atleast_2d([seg.prev_action_init for seg in segments])      # (batch_size, 1)
         prev_actions = np.vstack([a0, actions])[:-1]
         assert prev_actions.shape == actions.shape
+
+        #: convert to tensor for performance reason
+        states = tf.convert_to_tensor(states, dtype=tf.float32)
+        next_states = tf.convert_to_tensor(next_states, dtype=tf.float32)
+        actions = tf.convert_to_tensor(actions, dtype=tf.int32)
+        prev_actions = tf.convert_to_tensor(prev_actions, dtype=tf.int32)
 
         """ Compute Target Q values """
         #: Burn-in of lstem-state for target network
@@ -246,8 +254,7 @@ def main(num_actors,
     wip_actors = [actor.sync_weights_and_rollout.remote(current_weights)
                   for actor in actors]
 
-    #for _ in range(100):
-    for _ in range(3):
+    for _ in range(100):
         finished, wip_actors = ray.wait(wip_actors, num_returns=1)
         priorities, segments, pid = ray.get(finished[0])
         replay.add(priorities, segments)
@@ -279,7 +286,9 @@ def main(num_actors,
             [actors[pid].sync_weights_and_rollout.remote(current_weights)])
         n_segment_added += len(segments)
 
-        if n_segment_added < (batch_size * update_iter) * 1.0:
+        #if n_segment_added < (batch_size * update_iter) * 1.2:
+        #: The appropriate seconds depend on your machine power
+        if time.time() - s < 9.0:
             finished_learner, _ = ray.wait([wip_learner], timeout=0)
         else:
             finished_learner, _ = ray.wait([wip_learner], num_returns=1)
@@ -288,7 +297,6 @@ def main(num_actors,
             current_weights, indices, priorities, loss = ray.get(finished_learner[0])
             wip_learner = learner.update_network.remote(minibatchs)
             current_weights = ray.put(current_weights)
-
             #: 優先度の更新とminibatchの作成はlearnerよりも十分に速いという前提
             replay.update_priority(indices, priorities)
             minibatchs = [replay.sample_minibatch(batch_size=batch_size)

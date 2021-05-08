@@ -124,6 +124,7 @@ class SegmentReplayBuffer:
         return len(self.segment_buffer) if self.full else self.count
 
     def add(self, priorities: list, segments: list):
+
         assert len(priorities) == len(segments)
 
         for priority, segment in zip(priorities, segments):

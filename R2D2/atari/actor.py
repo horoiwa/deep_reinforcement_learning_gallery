@@ -103,7 +103,6 @@ class Actor:
             elif lives != info["ale.lives"]:
                 #: Life loss (roll)
                 lives = info["ale.lives"]
-                print(lives)
                 transition = (state, action, reward, next_state, True,
                               c, h, prev_action, False)
             else:
