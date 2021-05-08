@@ -26,6 +26,16 @@ def _preprocess_mspackman(frame):
     return image_scaled.astype(np.float32)
 
 
+def get_lives(env_name):
+    if "Breakout" in env_name:
+        return 5
+    elif "Pacman" in env_name:
+        return 3
+    else:
+        raise NotImplementedError(
+           f"Frame processor not implemeted for {env_name}")
+
+
 if __name__ == "__main__":
     import gym
 

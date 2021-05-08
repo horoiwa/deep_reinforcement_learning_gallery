@@ -7,7 +7,7 @@ import numpy as np
 
 Transition = collections.namedtuple(
     "Transition", ["state", "action", "reward", "next_state", "done",
-                   "c", "h", "prev_action"])
+                   "c", "h", "prev_action", "is_terminal"])
 
 Segment = collections.namedtuple(
     "Segment", ["states", "actions", "rewards", "dones",
@@ -40,8 +40,7 @@ class EpisodeBuffer:
         """
 
         transition = Transition(*transition)
-        is_terminal = transition.done
-
+        is_terminal = transition.is_terminal
         self.tmp_buffer.append(transition)
 
         if len(self.tmp_buffer) == self.nstep:

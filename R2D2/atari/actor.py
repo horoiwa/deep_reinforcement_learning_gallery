@@ -44,7 +44,7 @@ class Actor:
     def define_network(self):
 
         #: hide GPU from remote actor
-        #tf.config.set_visible_devices([], 'GPU')
+        tf.config.set_visible_devices([], 'GPU')
 
         env = gym.make(self.env_name)
 
@@ -84,6 +84,7 @@ class Actor:
             batch_size=1, dtype=tf.float32)
         done = False
         prev_action = 0
+        lives = util.get_lives(self.env_name)
         episode_rewards = 0
         while not done:
 
@@ -91,11 +92,22 @@ class Actor:
 
             action, (next_c, next_h) = self.q_network.sample_action(
                 state, c, h, prev_action, self.epsilon)
-            next_frame, reward, done, _ = env.step(action)
+            next_frame, reward, done, info = env.step(action)
             frames.append(self.frame_process_func(next_frame))
             next_state = np.stack(frames, axis=2)[np.newaxis, ...]
 
-            transition = (state, action, reward, next_state, done, c, h, prev_action)
+            if done:
+                #: Episode terminal
+                transition = (state, action, reward, next_state, done,
+                              c, h, prev_action, True)
+            elif lives != info["ale.lives"]:
+                #: Life loss (roll)
+                lives == info["ale.lives"]
+                transition = (state, action, reward, next_state, True,
+                              c, h, prev_action, False)
+            else:
+                transition = (state, action, reward, next_state, done,
+                              c, h, prev_action, False)
             episode_buffer.add(transition)
 
             episode_rewards += reward
@@ -178,7 +190,7 @@ class Tester:
     def define_network(self):
 
         #: hide GPU from remote actor
-        #tf.config.set_visible_devices([], 'GPU')
+        tf.config.set_visible_devices([], 'GPU')
 
         env = gym.make(self.env_name)
 
