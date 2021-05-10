@@ -21,6 +21,23 @@ physical_devices = tf.config.experimental.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
+def value_function_rescaling(x):
+    """https://github.com/google-research/seed_rl/blob/f53c5be4ea083783fb10bdf26f11c3a80974fa03/agents/r2d2/learner.py#L180
+    """
+    eps = 0.001
+    return tf.math.sign(x) * (tf.math.sqrt(tf.math.abs(x) + 1.) - 1.) + eps * x
+
+
+def inverse_value_function_rescaling(x):
+    """https://github.com/google-research/seed_rl/blob/f53c5be4ea083783fb10bdf26f11c3a80974fa03/agents/r2d2/learner.py#L186
+    """
+    eps = 0.001
+    return tf.math.sign(x) * (
+        tf.math.square(
+            ((tf.math.sqrt(1. + 4. * eps * (tf.math.abs(x) + 1. + eps))) - 1.) / (2. * eps)
+            ) - 1.)
+
+
 @ray.remote(num_cpus=1, num_gpus=1)
 class Learner:
 
@@ -79,7 +96,7 @@ class Learner:
             minibatchs (List[Tuple(indices, weights, compressed_segments)])
               indices (List[float]): indices of replay buffer
               weights (List[float]): Importance sampling weights
-              compressed_segments (List[Segment]): list of segments compressed by zlib
+              compressed_segments (List[Segment]): list of lz4-compressed segments
                 Segment: sequence of transitions
         """
 
@@ -157,7 +174,10 @@ class Learner:
         next_actions_onehot = tf.one_hot(next_actions, self.action_space)  # (unroll_len, batch_size, action_space)
         next_maxQ = tf.reduce_sum(
             next_qvalues * next_actions_onehot, axis=2, keepdims=False)    # (unroll_len, batch_size)
+        next_maxQ = inverse_value_function_rescaling(next_maxQ)
+
         TQ = rewards + self.gamma * (1 - dones) * next_maxQ                # (unroll_len, batch_size)
+        TQ = value_function_rescaling(TQ)
 
         """ Compute Q values and TD error """
         #: Burn-in of lstem-state for online network
@@ -174,14 +194,15 @@ class Learner:
                     states[t], states=[c, h],
                     prev_action=prev_actions[t])
                 qvalues.append(q)
-            qvalues = tf.stack(qvalues)                                          # (unroll_len, batch_size, action_space)
+            qvalues = tf.stack(qvalues)                            # (unroll_len, batch_size, action_space)
             actions_onehot = tf.one_hot(
                 actions[self.burnin_len:], self.action_space)
             Q = tf.reduce_sum(
                 qvalues * actions_onehot, axis=2, keepdims=False)  # (unroll_len, batch_size)
 
             td_errors = TQ - Q
-            loss = tf.reduce_mean(tf.square(td_errors), axis=0)
+
+            loss = tf.reduce_sum(tf.square(td_errors), axis=0)
             loss_weighted = tf.reduce_mean(loss * weights)
 
         grads = tape.gradient(
@@ -205,17 +226,12 @@ class Learner:
 
 def main(num_actors,
          env_name="BreakoutDeterministic-v4",
-         target_update_period=1600,
-         buffer_size=2**19,
+         target_update_period=2400,
+         buffer_size=2**16,
          n_frames=4, nstep=5,
          batch_size=32, update_iter=16,
          gamma=0.997, eta=0.9, alpha=0.9,
          burnin_length=30, unroll_length=30):
-    """
-        Note:
-            In R2D2 paper,
-            batch_size=64, burnin_length=40, unroll_length=40
-    """
 
     ray.init(local_mode=False)
 

@@ -26,7 +26,7 @@ def _preprocess_mspackman(frame):
     return image_scaled.astype(np.float32)
 
 
-def get_lives(env_name):
+def get_initial_lives(env_name):
     if "Breakout" in env_name:
         return 5
     elif "Pacman" in env_name:

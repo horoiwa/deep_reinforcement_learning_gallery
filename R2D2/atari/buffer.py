@@ -27,16 +27,13 @@ class EpisodeBuffer:
         self.gamma = gamma
         self.tmp_buffer = collections.deque(maxlen=self.nstep)
 
-        self.reward_clipping_func = \
-            (lambda r: math.copysign(1, r) * (math.sqrt(abs(r) + 1) - 1) + 0.001 * r)
-
     def __len__(self):
         return len(self.transitions)
 
     def add(self, transition):
         """
         Args:
-            transition (Tuple): (s, a, r, s2, done, c, h)
+            transition (Tuple): (s, a, r, s2, done, c, h, is_terminal)
         """
 
         transition = Transition(*transition)
@@ -52,7 +49,6 @@ class EpisodeBuffer:
                 for i, target_idx in enumerate(range(self.nstep)[idx:]):
                     transition = self.tmp_buffer[target_idx]
                     reward, done = transition.reward, transition.done
-                    reward = self.reward_clipping_func(reward)
                     nstep_return += self.gamma ** i * (1 - done) * reward
                     if done:
                         has_done = True

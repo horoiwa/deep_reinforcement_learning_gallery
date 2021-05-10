@@ -1,7 +1,6 @@
 import collections
 import shutil
 from pathlib import Path
-import zlib
 import pickle
 
 import gym
@@ -84,7 +83,7 @@ class Actor:
             batch_size=1, dtype=tf.float32)
         done = False
         prev_action = 0
-        lives = util.get_lives(self.env_name)
+        lives = util.get_initial_lives(self.env_name)
         episode_rewards = 0
         while not done:
 
