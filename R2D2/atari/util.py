@@ -1,5 +1,23 @@
 import numpy as np
+import tensorflow as tf
 from PIL import Image
+
+
+def value_function_rescaling(x):
+    """https://github.com/google-research/seed_rl/blob/f53c5be4ea083783fb10bdf26f11c3a80974fa03/agents/r2d2/learner.py#L180
+    """
+    eps = 0.001
+    return tf.math.sign(x) * (tf.math.sqrt(tf.math.abs(x) + 1.) - 1.) + eps * x
+
+
+def inverse_value_function_rescaling(x):
+    """https://github.com/google-research/seed_rl/blob/f53c5be4ea083783fb10bdf26f11c3a80974fa03/agents/r2d2/learner.py#L186
+    """
+    eps = 0.001
+    return tf.math.sign(x) * (
+        tf.math.square(
+            ((tf.math.sqrt(1. + 4. * eps * (tf.math.abs(x) + 1. + eps))) - 1.) / (2. * eps)
+            ) - 1.)
 
 
 def get_preprocess_func(env_name):

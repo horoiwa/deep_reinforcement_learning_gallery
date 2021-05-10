@@ -10,6 +10,7 @@ import tensorflow as tf
 import lz4.frame as lz4f
 
 import util
+from util import inverse_value_function_rescaling, value_function_rescaling
 from buffer import EpisodeBuffer
 from model import RecurrentDuelingQNetwork
 
@@ -157,8 +158,10 @@ class Actor:
         next_actions_onehot = tf.one_hot(next_actions, self.action_space)    # (unroll_len, batch_size, action_space)
         next_maxQ = tf.reduce_sum(
             next_qvalues * next_actions_onehot, axis=2, keepdims=False)      # (unroll_len, batch_size)
+        next_maxQ = inverse_value_function_rescaling(next_maxQ)
 
         TQ = rewards + self.gamma * (1 - dones) * next_maxQ  # (unroll_len, batch_size)
+        TQ = value_function_rescaling(TQ)
 
         td_errors = TQ - Q
         td_errors_abs = tf.abs(td_errors)

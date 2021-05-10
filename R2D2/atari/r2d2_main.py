@@ -12,6 +12,7 @@ import tensorflow as tf
 import lz4.frame as lz4f
 
 import util
+from util import inverse_value_function_rescaling, value_function_rescaling
 from buffer import SegmentReplayBuffer
 from model import RecurrentDuelingQNetwork
 from actor import Actor, Tester
@@ -21,21 +22,6 @@ physical_devices = tf.config.experimental.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
-def value_function_rescaling(x):
-    """https://github.com/google-research/seed_rl/blob/f53c5be4ea083783fb10bdf26f11c3a80974fa03/agents/r2d2/learner.py#L180
-    """
-    eps = 0.001
-    return tf.math.sign(x) * (tf.math.sqrt(tf.math.abs(x) + 1.) - 1.) + eps * x
-
-
-def inverse_value_function_rescaling(x):
-    """https://github.com/google-research/seed_rl/blob/f53c5be4ea083783fb10bdf26f11c3a80974fa03/agents/r2d2/learner.py#L186
-    """
-    eps = 0.001
-    return tf.math.sign(x) * (
-        tf.math.square(
-            ((tf.math.sqrt(1. + 4. * eps * (tf.math.abs(x) + 1. + eps))) - 1.) / (2. * eps)
-            ) - 1.)
 
 
 @ray.remote(num_cpus=1, num_gpus=1)
@@ -104,7 +90,6 @@ class Learner:
         priorities_all = []
         losses = []
 
-        t = time.time()
         with futures.ThreadPoolExecutor(max_workers=2) as executor:
             """ segmentsをdecompressする作業がやや重い(0.2sec程度)のでthreading
             """
@@ -122,7 +107,6 @@ class Learner:
 
         current_weights = self.q_network.get_weights()
         loss_mean = np.array(losses).mean()
-        print(time.time() - t)
 
         return current_weights, indices_all, priorities_all, loss_mean
 
