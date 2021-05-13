@@ -45,7 +45,7 @@ class DuelingQNetwork(tf.keras.Model):
         x2 = self.dense2(x)
         advantages = self.advantages(x2)
 
-        advantages_scaled = advantages - tf.math.reduce_mean(advantages)
+        advantages_scaled = advantages - tf.reduce_mean(advantages, axis=1, keepdims=True)
         q_values = value + advantages_scaled
 
         return q_values
