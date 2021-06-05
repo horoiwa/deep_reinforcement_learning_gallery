@@ -31,6 +31,7 @@ class Othello(tk.Frame):
 
         self.npc_type = npc_type
         self.model_path = model_path
+        self.epsilon = 0.5
         if self.npc_type == "alphazero":
             self.setup()
 
@@ -106,17 +107,21 @@ class Othello(tk.Frame):
             action = random.choice(valid_actions)
             self.state = othello.get_next_state(self.state, action, self.npc)
 
-        elif self.npc_type == "greedy":
-            best_action = None
-            best_score = 0
-            for action in valid_actions:
-                next_state = othello.get_next_state(self.state, action, self.npc)
-                _, score = othello.count_stone(next_state)
-                if score > best_score:
-                    best_score = score
-                    best_action = action
+        elif self.npc_type == "eps-greedy":
+            if random.random() > self.epsilon:
+                best_action = None
+                best_score = 0
+                for action in valid_actions:
+                    next_state = othello.get_next_state(self.state, action, self.npc)
+                    _, score = othello.count_stone(next_state)
+                    if score > best_score:
+                        best_score = score
+                        best_action = action
 
-            self.state = othello.get_next_state(self.state, best_action, self.npc)
+                self.state = othello.get_next_state(self.state, best_action, self.npc)
+            else:
+                action = random.choice(valid_actions)
+                self.state = othello.get_next_state(self.state, action, self.npc)
 
         elif self.npc_type == "alphazero":
             raise NotImplementedError()
@@ -157,6 +162,6 @@ class Othello(tk.Frame):
 
 
 if __name__ == "__main__":
-    app = Othello(npc_type="greedy")
+    app = Othello(npc_type="eps-greedy")
     app.pack()
     app.mainloop()

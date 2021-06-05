@@ -2,7 +2,7 @@ import functools
 import copy
 
 
-N_COLS = N_ROWS = 6
+N_COLS = N_ROWS = 8
 
 
 def xy_to_idx(row, col):
