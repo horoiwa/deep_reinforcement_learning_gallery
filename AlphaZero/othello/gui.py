@@ -1,4 +1,5 @@
 import tkinter as tk
+import random
 import time
 
 import numpy as np
@@ -9,7 +10,11 @@ import othello
 class Othello(tk.Frame):
 
     def __init__(self, npc_type="random", model_path=None):
-
+        """
+            どちらかがパス（合法手なし）時点でゲーム終了,
+            その時点で石の多い方が勝ち
+            人間が先手で固定
+        """
         tk.Frame.__init__(self, master=None)
 
         self.master.title("app")
@@ -26,9 +31,20 @@ class Othello(tk.Frame):
 
         self.npc_type = npc_type
         self.model_path = model_path
+        if self.npc_type == "alphazero":
+            self.setup()
+
+        self.human = 1
+        self.npc = -1
+
+        self.is_gameend = False
         self.reset()
 
+    def setup(self):
+        pass
+
     def reset(self):
+        self.is_gameend = False
         self.state = othello.get_initial_state()
         self.refresh()
         self.is_player_turn = True
@@ -36,39 +52,76 @@ class Othello(tk.Frame):
 
     def player_action(self, event):
 
-        if not self.is_player_turn:
+        if not self.is_player_turn or self.is_gameend:
             return
         else:
             self.is_player_turn = False
 
         print("Player action")
 
-        col = event.x // 100
         row = event.y // 100
-        action = row * othello.N_ROWS + col
+        col = event.x // 100
 
-        valid_actions = othello.get_valid_actions(self.state, 1)
+        action = othello.xy_to_idx(row, col)
+
+        valid_actions = othello.get_valid_actions(self.state, self.human)
         print(valid_actions, action)
 
         if action in valid_actions:
-            self.state = othello.step(self.state, action, 1)
+
+            self.state = othello.get_next_state(self.state, action, self.human)
+            self.refresh()
+            time.sleep(0.3)
+
+            self.update_label()
+            self.npc_action()
+            if self.is_gameend:
+                return
             self.refresh()
             self.update_label()
-            time.sleep(0.5)
 
-            self.npc_action()
+            valid_actions = othello.get_valid_actions(self.state, self.human)
+            if not valid_actions:
+                self.update_label(game_end=True)
+                self. is_gameend = True
+                return
+
         else:
             print("Invalid action")
 
         self.is_player_turn = True
+
         return
 
     def npc_action(self):
-
         print("NPC action")
 
-        self.refresh()
-        self.update_label()
+        valid_actions = othello.get_valid_actions(self.state, self.npc)
+        if not valid_actions:
+            self.update_label(game_end=True)
+            self.is_gameend = True
+            return
+
+        if self.npc_type == "random":
+            action = random.choice(valid_actions)
+            self.state = othello.get_next_state(self.state, action, self.npc)
+
+        elif self.npc_type == "greedy":
+            best_action = None
+            best_score = 0
+            for action in valid_actions:
+                next_state = othello.get_next_state(self.state, action, self.npc)
+                _, score = othello.count_stone(next_state)
+                if score > best_score:
+                    best_score = score
+                    best_action = action
+
+            self.state = othello.get_next_state(self.state, best_action, self.npc)
+
+        elif self.npc_type == "alphazero":
+            raise NotImplementedError()
+        else:
+            raise NotImplementedError()
 
     def refresh(self):
 
@@ -86,18 +139,24 @@ class Othello(tk.Frame):
         for i in range(othello.N_ROWS * othello.N_COLS):
             v = self.state[i]
             row, col = i // othello.N_ROWS, i % othello.N_COLS
-            cx, cy = (100 * row + 10, 100 * col + 10)
+            cy, cx = (100 * row + 10, 100 * col + 10)
             if v == 1:
                 self.cv.create_oval(cx, cy, cx+80, cy+80, fill="black")
             elif v == -1:
                 self.cv.create_oval(cx, cy, cx+80, cy+80, fill="white")
 
-    def update_label(self):
+    def update_label(self, game_end=False):
         first, second = othello.count_stone(self.state)
-        self.label.configure(text=f"[You]  {first} - {second} [NPC]")
+        if not game_end:
+            self.label.configure(text=f"[You]  {first} - {second} [NPC]")
+        else:
+            message = "Human win" if first > second else "NPC win"
+            self.label.configure(
+                text=f"[You]  {first} - {second} [NPC] {message}")
+            self.is_player_turn = False
 
 
 if __name__ == "__main__":
-    app = Othello()
+    app = Othello(npc_type="greedy")
     app.pack()
     app.mainloop()
