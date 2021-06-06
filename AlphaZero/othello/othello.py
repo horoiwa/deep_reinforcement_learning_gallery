@@ -1,8 +1,10 @@
 import functools
 import copy
+import json
+import numpy as np
 
 
-N_COLS = N_ROWS = 8
+N_COLS = N_ROWS = 6
 
 
 def xy_to_idx(row, col):
@@ -12,6 +14,27 @@ def xy_to_idx(row, col):
 def idx_to_xy(i):
     x, y = i // N_ROWS, i % N_ROWS
     return x, y
+
+
+def state_to_str(state: list) -> str:
+    state_str = state
+    return state_str
+
+
+def str_to_state(state_str: str) -> list:
+    state = state_str
+    return state
+
+
+def encode_state(state: list, current_player: int):
+    """ NN入力用の整形処理
+    """
+    state = np.array(state).reshape(N_ROWS, N_COLS)
+    player = (state == current_player)
+    opponent = (state == -current_player)
+    x = np.stack([player, opponent], axis=2).astype(np.float32)
+
+    return x
 
 
 def get_initial_state():
@@ -97,4 +120,3 @@ def count_stone(state: list):
     first = sum([1 for i in state if i == 1])
     second = sum([1 for i in state if i == -1])
     return (first, second)
-
