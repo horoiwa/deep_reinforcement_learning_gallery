@@ -28,5 +28,5 @@ class MCTS:
     def expand(self, state):
         pass
 
-    def policy(self, state):
+    def mcts_policy(self, temperature):
         pass

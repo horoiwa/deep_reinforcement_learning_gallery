@@ -1,3 +1,8 @@
+"""
+    先手(黒): 1, 後手（白）: -1
+    どちらかが合法手無くなると終了。その時点で石の多い方が勝利
+    よって合法手の無い側が勝つこともある
+"""
 import functools
 import copy
 import json
@@ -5,6 +10,8 @@ import numpy as np
 
 
 N_COLS = N_ROWS = 6
+
+ACTION_SPACE = N_ROWS * N_COLS
 
 
 def xy_to_idx(row, col):
@@ -114,6 +121,21 @@ def get_next_state(state: list, action: int, player: int):
     next_state[action] = player
 
     return next_state
+
+
+def get_result(state: list):
+
+    black_stones = sum([1 for i in state if i == 1])
+    white_stones = sum([1 for i in state if i == -1])
+
+    if black_stones > white_stones:
+        return 1, -1
+    elif white_stones > black_stones:
+        return -1, 1
+    elif black_stones == white_stones:
+        return 0, 0
+    else:
+        raise Exception("Unexpected error")
 
 
 def count_stone(state: list):

@@ -6,10 +6,10 @@ from tensorflow.keras.activations import relu
 
 class AlphaZeroNetwork(tf.keras.Model):
 
-    def __init__(self, action_space, n_blocks=20, filters=256):
+    def __init__(self, action_space, n_blocks=10, filters=64):
         """
             Note:
-            In AlphaZero Go paper, n_blocks = 20/40 and filters = 256
+            In AlphaZero Go paper, n_blocks = 20 (or 40) and filters = 256
         """
         super(AlphaZeroNetwork, self).__init__()
 
