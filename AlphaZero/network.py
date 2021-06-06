@@ -71,6 +71,14 @@ class AlphaZeroNetwork(tf.keras.Model):
 
         return policy, value
 
+    def predict(self, state):
+        if len(state.shape) == 3:
+            state = state[np.newaxis, ...]
+
+        policy, value = self(state)
+
+        return policy, value
+
 
 class ResBlock(tf.keras.layers.Layer):
 

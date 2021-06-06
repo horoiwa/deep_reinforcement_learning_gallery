@@ -1,16 +1,15 @@
-from AlphaZero.othello.network import AlphaZeroNetwork
 import collections
 
 import tensorflow as tf
 import numpy as np
 
-from network import AlaphaZeroNetwork
+from network import AlphaZeroNetwork
 from mcts import MCTS
 from buffer import ReplayBuffer
 import othello
 
 
-def selfplay(network, num_mcts_search, dirichlet_alpha):
+def selfplay(network, num_mcts_simulations, dirichlet_alpha):
 
     record = []
 
@@ -25,13 +24,14 @@ def selfplay(network, num_mcts_search, dirichlet_alpha):
 
     while True:
 
-        mcts = MCTS(network=network, root=state)
+        mcts = MCTS(network=network, alpha=dirichlet_alpha)
 
-        mcts.search(num_search=num_mcts_search)
+        mcts.search(root_state=state, current_player=current_player,
+                    num_simulations=num_mcts_simulations)
 
         # For the first 30 moves of each game, the temperature is set to τ = 1
         if i <= 30:
-            mcts_policy = mcts.get_policy(tau=1.0, alpha=dirichlet_alpha)
+            mcts_policy = mcts.get_policy(tau=1.0)
         else:
             mcts_policy = mcts.get_policy(tau=0)
 
@@ -62,14 +62,14 @@ def selfplay(network, num_mcts_search, dirichlet_alpha):
 
 def train(n_episodes=1000000, buffer_size=30000,
           batch_size=32, n_minibatchs=64,
-          num_mcts_search=800,
+          num_mcts_simulations=800,
           update_period=25000,
           n_play_for_network_evaluation=400,
           win_ratio_margin=0.55,
           dirichlet_alpha=0.15,
-          c=1e-4, lr=0.05):
+          lr=0.05):
 
-    network = AlaphaZeroNetwork(action_space=othello.ACTION_SPACE)
+    network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
 
     optimizer = tf.keras.optimizers.SGD(lr=lr, momentum=0.9)
 
@@ -81,7 +81,7 @@ def train(n_episodes=1000000, buffer_size=30000,
 
         #: collect samples by selfplay
         for _ in range(update_period):
-            game_record = selfplay(network, num_mcts_search, dirichlet_alpha)
+            game_record = selfplay(network, num_mcts_simulations, dirichlet_alpha)
             replay.add_record(game_record)
             n += 1
 

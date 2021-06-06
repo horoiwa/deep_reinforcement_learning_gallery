@@ -23,16 +23,6 @@ def idx_to_xy(i):
     return x, y
 
 
-def state_to_str(state: list) -> str:
-    state_str = state
-    return state_str
-
-
-def str_to_state(state_str: str) -> list:
-    state = state_str
-    return state
-
-
 def encode_state(state: list, current_player: int):
     """ NN入力用の整形処理
     """
