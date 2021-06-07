@@ -9,13 +9,15 @@ import othello
 
 class Othello(tk.Frame):
 
-    def __init__(self, npc_type="random", model_path=None):
+    def __init__(self, npc_type="random", weights_path=None):
         """
             どちらかがパス（合法手なし）時点でゲーム終了,
             その時点で石の多い方が勝ち
             人間が先手で固定
         """
         tk.Frame.__init__(self, master=None)
+
+        assert npc_type in ["random", "eps-greedy", "alphazero"]
 
         self.master.title("app")
 
@@ -30,7 +32,7 @@ class Othello(tk.Frame):
         self.label.pack(fill="both")
 
         self.npc_type = npc_type
-        self.model_path = model_path
+        self.weights_path = weights_path
         self.epsilon = 0.5
         if self.npc_type == "alphazero":
             self.setup()
@@ -70,21 +72,17 @@ class Othello(tk.Frame):
 
         if action in valid_actions:
 
-            self.state = othello.get_next_state(self.state, action, self.human)
+            self.state, done = othello.step(self.state, action, self.human)
             self.refresh()
+            self.update_label()
+            if done:
+                self.update_label(game_end=True)
+                return
+
             time.sleep(0.3)
 
-            self.update_label()
             self.npc_action()
             if self.is_gameend:
-                return
-            self.refresh()
-            self.update_label()
-
-            valid_actions = othello.get_valid_actions(self.state, self.human)
-            if not valid_actions:
-                self.update_label(game_end=True)
-                self. is_gameend = True
                 return
 
         else:
@@ -98,30 +96,39 @@ class Othello(tk.Frame):
         print("NPC action")
 
         valid_actions = othello.get_valid_actions(self.state, self.npc)
-        if not valid_actions:
-            self.update_label(game_end=True)
-            self.is_gameend = True
-            return
 
         if self.npc_type == "random":
             action = random.choice(valid_actions)
-            self.state = othello.get_next_state(self.state, action, self.npc)
+            self.state, done = othello.step(self.state, action, self.npc)
+
+            self.refresh()
+            self.update_label()
+            if done:
+                self.update_label(game_end=True)
+                return
 
         elif self.npc_type == "eps-greedy":
+
             if random.random() > self.epsilon:
                 best_action = None
                 best_score = 0
                 for action in valid_actions:
-                    next_state = othello.get_next_state(self.state, action, self.npc)
+                    next_state, done = othello.step(self.state, action, self.npc)
                     _, score = othello.count_stone(next_state)
                     if score > best_score:
                         best_score = score
                         best_action = action
 
-                self.state = othello.get_next_state(self.state, best_action, self.npc)
+                self.state, done = othello.step(self.state, best_action, self.npc)
             else:
                 action = random.choice(valid_actions)
-                self.state = othello.get_next_state(self.state, action, self.npc)
+                self.state, done = othello.step(self.state, action, self.npc)
+
+            self.refresh()
+            self.update_label()
+            if done:
+                self.update_label(game_end=True)
+                return
 
         elif self.npc_type == "alphazero":
             raise NotImplementedError()
@@ -159,6 +166,7 @@ class Othello(tk.Frame):
             self.label.configure(
                 text=f"[You]  {first} - {second} [NPC] {message}")
             self.is_player_turn = False
+            self.is_gameend = True
 
 
 if __name__ == "__main__":

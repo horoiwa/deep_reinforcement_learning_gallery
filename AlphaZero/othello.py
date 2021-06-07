@@ -46,7 +46,7 @@ def get_initial_state():
     return state
 
 
-@functools.lru_cache(maxsize=128)
+@functools.lru_cache(maxsize=2048)
 def get_directions(i):
 
     _, col = idx_to_xy(i)
@@ -84,7 +84,10 @@ def is_valid_action(state: list, action: int, player: int):
     return False
 
 
-def get_valid_actions(state: list, player: int):
+@functools.lru_cache(maxsize=2048)
+def _get_valid_actions(state_str: list, player: int):
+
+    state = json.loads(state_str)
 
     valid_actions = [action for action in range(N_ROWS * N_COLS)
                      if is_valid_action(state, action, player)]
@@ -92,9 +95,15 @@ def get_valid_actions(state: list, player: int):
     return valid_actions
 
 
-def get_next_state(state: list, action: int, player: int):
+def get_valid_actions(state: list, player: int):
+    state_str = json.dumps(state)
+    return _get_valid_actions(state_str, player)
 
-    assert is_valid_action(state, action, player)
+
+def step(state: list, action: int, player: int):
+
+    #assert is_valid_action(state, action, player)
+
     next_state = copy.deepcopy(state)
 
     directions = get_directions(action)
@@ -110,7 +119,12 @@ def get_next_state(state: list, action: int, player: int):
 
     next_state[action] = player
 
-    return next_state
+    #: 相手に合法手なしで終了
+    valid_actions = get_valid_actions(next_state, -player)
+
+    done = False if valid_actions else True
+
+    return next_state, done
 
 
 def get_result(state: list):

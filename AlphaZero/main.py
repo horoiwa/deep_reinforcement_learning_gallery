@@ -21,8 +21,8 @@ def selfplay(network, num_mcts_simulations, dirichlet_alpha):
     current_player = 1
 
     i = 0
-
-    while True:
+    done = False
+    while not done:
 
         mcts = MCTS(network=network, alpha=dirichlet_alpha)
 
@@ -33,20 +33,18 @@ def selfplay(network, num_mcts_simulations, dirichlet_alpha):
         if i <= 30:
             mcts_policy = mcts.get_policy(tau=1.0)
         else:
-            mcts_policy = mcts.get_policy(tau=0)
+            mcts_policy = mcts.get_policy(tau=0.)
 
-        if mcts_policy is not None:
-            #: select action according to mcts policy(action probability)
-            action = np.random.choice(othello.ACTION_SPACE, p=mcts_policy)
+        #: select action according to mcts policy(action probability)
+        action = np.random.choice(othello.ACTION_SPACE, p=mcts_policy)
 
-            record.append(GameStep(state, mcts_policy, current_player, None))
+        record.append(GameStep(state, mcts_policy, current_player, None))
 
-            state = othello.get_next_state(state, action, current_player)
+        next_state, done = othello.step(state, action, current_player)
 
-            current_player = -current_player
+        state = next_state
 
-        else:
-            break  # game end (合法手なし)
+        current_player = -current_player
 
         i += 1
 
@@ -60,14 +58,14 @@ def selfplay(network, num_mcts_simulations, dirichlet_alpha):
     return record
 
 
-def train(n_episodes=1000000, buffer_size=30000,
-          batch_size=32, n_minibatchs=64,
-          num_mcts_simulations=800,
-          update_period=25000,
-          n_play_for_network_evaluation=400,
-          win_ratio_margin=0.55,
-          dirichlet_alpha=0.15,
-          lr=0.05):
+def main(n_episodes=1000000, buffer_size=30000,
+         batch_size=32, n_minibatchs=64,
+         num_mcts_simulations=800,
+         update_period=25000,
+         n_play_for_network_evaluation=400,
+         win_ratio_margin=0.55,
+         dirichlet_alpha=0.15,
+         lr=0.05):
 
     network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
 
@@ -96,4 +94,4 @@ def train(n_episodes=1000000, buffer_size=30000,
 
 
 if __name__ == "__main__":
-    train()
+    main()
