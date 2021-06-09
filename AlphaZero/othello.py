@@ -6,6 +6,8 @@
 import functools
 import copy
 import json
+import random
+
 import numpy as np
 
 
@@ -149,6 +151,27 @@ def get_result(state: list):
         return 0, 0
     else:
         raise Exception("Unexpected error")
+
+
+def greedy_action(state: list, player: int, epsilon=0.):
+
+    valid_actions = get_valid_actions(state, player)
+
+    if random.random() > epsilon:
+        best_action = None
+        best_score = 0
+        for action in valid_actions:
+            next_state, done = step(state, action, player)
+            _, score = count_stone(next_state)
+            if score > best_score:
+                best_score = score
+                best_action = action
+
+        return best_action
+
+    else:
+        action = random.choice(valid_actions)
+        return action
 
 
 def count_stone(state: list):

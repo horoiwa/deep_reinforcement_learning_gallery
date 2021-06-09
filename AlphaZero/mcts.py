@@ -80,7 +80,7 @@ class MCTS:
         #: gpu -> 0.05sec, cpu _> 0.06 - 0.1
         with tf.device("/cpu:0"):
             nn_policy, nn_value = self.network.predict(
-                othello.encode_state(state, current_player)[np.newaxis, ...])
+                othello.encode_state(state, current_player))
 
         nn_policy, nn_value = nn_policy.numpy().tolist()[0], nn_value.numpy()[0][0]
 
