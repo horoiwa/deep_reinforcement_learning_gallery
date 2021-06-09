@@ -11,6 +11,9 @@ class ReplayBuffer:
 
         self.buffer = collections.deque(maxlen=buffer_size)
 
+    def __len__(self):
+        return len(self.buffer)
+
     def get_minibatch(self, batch_size):
 
         indices = np.random.choice(range(len(self.buffer)), size=batch_size)

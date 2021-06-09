@@ -45,7 +45,7 @@ def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
     i = 0
 
     while not done:
-
+        print(i)
         #: 200 simulations: GTX 1650 -> 4.6sec, 1CPU -> 8.8sec
         mcts_policy = mcts.search(root_state=state,
                                   current_player=current_player,
@@ -77,13 +77,14 @@ def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
     return record
 
 
-def main(num_workers, n_episodes=1000000, buffer_size=30000,
+def main(num_cpus, n_episodes=10000, buffer_size=30000,
          batch_size=32, n_minibatchs=64,
-         num_mcts_simulations=100,
-         update_period=250, dirichlet_alpha=0.15,
+         num_mcts_simulations=150,
+         update_period=100,
+         dirichlet_alpha=0.15,
          lr=0.05, c=1e-4):
 
-    ray.init(num_cpus=num_workers+2, num_gpus=1)
+    ray.init(num_cpus=num_cpus, num_gpus=1)
 
     network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
 
@@ -102,7 +103,7 @@ def main(num_workers, n_episodes=1000000, buffer_size=30000,
     #: 並列Selfplay
     work_in_progresses = [
         selfplay.remote(current_weights, num_mcts_simulations, dirichlet_alpha)
-        for _ in range(num_workers)]
+        for _ in range(num_cpus - 2)]
 
     n = 0
 
@@ -112,9 +113,9 @@ def main(num_workers, n_episodes=1000000, buffer_size=30000,
         for _ in range(3):
             #: selfplayが終わったプロセスを一つ取得
             record, work_in_progresses = ray.wait(work_in_progresses, num_returns=1)
-            replay.add(ray.get(record[0]))
+            replay.add_record(ray.get(record[0]))
             work_in_progresses.extend([
-                selfplay.remote(network, num_mcts_simulations, dirichlet_alpha)
+                selfplay.remote(current_weights, num_mcts_simulations, dirichlet_alpha)
             ])
             n += 1
 
@@ -125,14 +126,16 @@ def main(num_workers, n_episodes=1000000, buffer_size=30000,
         for (states, mcts_policy, rewards) in minibatchs:
 
             with tf.GradientTape() as tape:
-                import pdb; pdb.set_trace()
+
                 p_pred, v_pred = network(states, training=True)
-                value_loss = tf.square(rewards, v_pred)
+                value_loss = tf.square(rewards - v_pred)
+
 
                 policy_loss = -mcts_policy * tf.math.log(p_pred + 0.0001)
                 policy_loss = tf.reduce_sum(
                     policy_loss, axis=1, keepdims=True)
 
+                import pdb; pdb.set_trace()
                 l2_weight = None
 
                 loss = value_loss + policy_loss + c * l2_weight
@@ -146,4 +149,4 @@ def main(num_workers, n_episodes=1000000, buffer_size=30000,
 
 
 if __name__ == "__main__":
-    main(num_workers=3)
+    main(num_cpus=5)

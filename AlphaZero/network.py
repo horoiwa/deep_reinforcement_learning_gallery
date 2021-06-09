@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras.layers as kl
+from tensorflow.keras.regularizers import l2
 from tensorflow.keras.activations import relu
 
 
@@ -18,6 +19,7 @@ class AlphaZeroNetwork(tf.keras.Model):
         self.n_blocks = n_blocks
 
         self.conv1 = kl.Conv2D(filters, kernel_size=3, padding="same",
+                               use_bias=False, kernel_regularizer=l2(0.001),
                                kernel_initializer="he_normal")
         self.bn1 = kl.BatchNormalization()
 
@@ -27,19 +29,25 @@ class AlphaZeroNetwork(tf.keras.Model):
 
         #: policy head
         self.conv_p = kl.Conv2D(2, kernel_size=1,
+                                use_bias=False, kernel_regularizer=l2(0.001),
                                 kernel_initializer="he_normal")
         self.bn_p = kl.BatchNormalization()
         self.flat_p = kl.Flatten()
         self.logits = kl.Dense(action_space,
+                               kernel_regularizer=l2(0.001),
                                kernel_initializer="he_normal")
 
         #: value head
         self.conv_v = kl.Conv2D(1, kernel_size=1,
+                                use_bias=False, kernel_regularizer=l2(0.001),
                                 kernel_initializer="he_normal")
         self.bn_v = kl.BatchNormalization()
         self.flat_v = kl.Flatten()
-        self.dense_v = kl.Dense(64, kernel_initializer="he_normal")  #: units=256 in alphazero Go paper
+        self.dense_v = kl.Dense(64,    #: 256 in alphazero Go paper
+                                kernel_regularizer=l2(0.001),
+                                kernel_initializer="he_normal")
         self.value = kl.Dense(1, activation="tanh",
+                              kernel_regularizer=l2(0.001),
                               kernel_initializer="he_normal")
 
     def call(self, x, training=False):
@@ -86,9 +94,11 @@ class ResBlock(tf.keras.layers.Layer):
         super(ResBlock, self).__init__()
 
         self.conv1 = kl.Conv2D(filters, kernel_size=3, padding="same",
+                               use_bias=False, kernel_regularizer=l2(0.001),
                                kernel_initializer="he_normal")
         self.bn1 = kl.BatchNormalization()
         self.conv2 = kl.Conv2D(filters, kernel_size=3, padding="same",
+                               use_bias=False, kernel_regularizer=l2(0.001),
                                kernel_initializer="he_normal")
         self.bn2 = kl.BatchNormalization()
         self.relu = kl.Activation("relu")
