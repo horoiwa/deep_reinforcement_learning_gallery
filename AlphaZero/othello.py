@@ -127,6 +127,15 @@ def step(state: list, action: int, player: int):
     return next_state, done
 
 
+def is_done(state, player):
+
+    valid_actions = get_valid_actions(state, player)
+
+    done = False if valid_actions else True
+
+    return done
+
+
 def get_result(state: list):
 
     black_stones = sum([1 for i in state if i == 1])

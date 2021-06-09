@@ -16,6 +16,8 @@ def selfplay(network, num_mcts_simulations, dirichlet_alpha):
     GameStep = collections.namedtuple(
         'GameStep', ['state', 'action', 'player', 'result'])
 
+    mcts = MCTS(network=network, alpha=dirichlet_alpha)
+
     state = othello.get_initial_state()
 
     current_player = 1
@@ -24,16 +26,13 @@ def selfplay(network, num_mcts_simulations, dirichlet_alpha):
     done = False
     while not done:
 
-        mcts = MCTS(network=network, alpha=dirichlet_alpha)
-
-        mcts.search(root_state=state, current_player=current_player,
-                    num_simulations=num_mcts_simulations)
-
         # For the first 30 moves of each game, the temperature is set to τ = 1
-        if i <= 30:
-            mcts_policy = mcts.get_policy(tau=1.0)
-        else:
-            mcts_policy = mcts.get_policy(tau=0.)
+        tau = 1.0 if i <= 30 else 0.
+
+        mcts_policy = mcts.search(root_state=state,
+                                  current_player=current_player,
+                                  num_simulations=num_mcts_simulations,
+                                  tau=tau)
 
         #: select action according to mcts policy(action probability)
         action = np.random.choice(othello.ACTION_SPACE, p=mcts_policy)
@@ -68,10 +67,13 @@ def main(n_episodes=1000000, buffer_size=30000,
          lr=0.05):
 
     network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
-
-    optimizer = tf.keras.optimizers.SGD(lr=lr, momentum=0.9)
+    #: initialize network parameters
+    dummy_state = othello.encode_state(othello.get_initial_state(), 1)[np.newaxis, ...]
+    network.call(dummy_state)
 
     replay = ReplayBuffer(buffer_size=buffer_size)
+
+    optimizer = tf.keras.optimizers.SGD(lr=lr, momentum=0.9)
 
     n = 0
 
@@ -79,18 +81,28 @@ def main(n_episodes=1000000, buffer_size=30000,
 
         #: collect samples by selfplay
         for _ in range(update_period):
-            game_record = selfplay(network, num_mcts_simulations, dirichlet_alpha)
-            replay.add_record(game_record)
+            #: 自己対戦でデータ収集
+            record = selfplay(network, num_mcts_simulations, dirichlet_alpha)
+            replay.add_record(record)
             n += 1
 
         #: update network
-        current_weights = network.get_weights()
+        old_weights = network.get_weights()
         minibatchs = [replay.get_minibatch(batch_size=batch_size)
                       for _ in range(n_minibatchs)]
 
+        for minibacth in minibatchs:
+            pass
+
         new_weights = network.get_weights()
 
-        #: current network vs. new network
+        #: old network vs. updated network
+        win_ratio = None
+        if win_ratio < win_ratio_margin:
+            print("old parameter win")
+            network.set_weights(old_weights)
+        else:
+            print("new paramter win")
 
 
 if __name__ == "__main__":

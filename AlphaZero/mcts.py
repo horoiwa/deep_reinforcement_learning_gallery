@@ -1,5 +1,5 @@
-from AlphaZero.othello import ACTION_SPACE
 import math
+import random
 import json
 
 import numpy as np
@@ -24,16 +24,15 @@ class MCTS:
         #: visit count
         self.N = {}
 
-        #: cumsum of each evaluation of Q(s, a)
-        self.Q_sum = {}
+        #: W is total action-value and Q is mean action-value
+        self.W = {}
 
-        #: cache valid actions and next states to save computation
-        self.valid_actions = {}
+        #: cache next states to save computation
         self.next_states = {}
 
-    def search(self, root_state, current_player, num_simulations):
+    def search(self, root_state, current_player, num_simulations, tau):
 
-        #: str is hashable
+        #: json string is hashable
         s = json.dumps(root_state)
 
         if s not in self.P:
@@ -44,21 +43,28 @@ class MCTS:
         self.P[s] = [(1 - self.eps) * prob + self.eps * noise
                      for prob, noise in zip(self.P[s], dirichlet_noise)]
 
-        valid_actions = self.valid_actions[s]
+        valid_actions = othello.get_valid_actions(root_state, current_player)
 
-        for _ in num_simulations:
+        #: MCTS simulation
+        for _ in range(num_simulations):
 
             U = [self.c_puct * self.P[s][a] * math.sqrt(sum(self.N[s])) / (1 + self.N[s][a])
                  for a in range(othello.ACTION_SPACE)]
-            Q = [q / n if n != 0 else q for q, n in zip(self.Q_sum[s], self.N[s])]
+            Q = [w / n if n != 0 else 0 for w, n in zip(self.W[s], self.N[s])]
 
-            score = [score if (action in valid_actions) else -np.inf
-                     for action, score in enumerate(U + Q)]
-            selected_action = np.argmax(np.array(score))
+            score = np.array([score if (action in valid_actions) else -np.inf
+                              for action, score in enumerate(U + Q)])
 
-            next_state = self.next_states[s][selected_action]
+            #: np.argmaxでは同値maxで偏るため
+            best_action = random.choice(np.where(score == score.max())[0])
 
-            self.Q_sum[s][selected_action] += -self._evaluate(next_state, -current_player)
+            next_state = self.next_states[s][best_action]
+
+            v = -self._evaluate(next_state, -current_player)
+
+            self.W[s][best_action] += v
+
+            self.N[s][best_action] += 1
 
         mcts_policy = None
 
@@ -69,20 +75,21 @@ class MCTS:
         s = json.dumps(state)
 
         nn_policy, nn_value = self.network.predict(
-            othello.encode_state(state, current_player)).numpy()[0].tolist()
+            othello.encode_state(state, current_player))
+
+        nn_policy, nn_value = nn_policy.numpy().tolist()[0], nn_value.numpy()[0][0]
 
         self.P[s] = nn_policy
         self.N[s] = [0] * othello.ACTION_SPACE
-        self.Q_sum[s] = [0] * othello.ACTION_SPACE
+        self.W[s] = [0] * othello.ACTION_SPACE
 
         valid_actions = othello.get_valid_actions(state, current_player)
 
         #: cache valid actions and next state to save computation
-        self.valid_actions[s] = valid_actions
-        self.next_states[s] = {
-            a: othello.get_next_state(state, a, current_player)
-            if (a in valid_actions) else None
-            for a in range(othello.ACTION_SPACE)}
+        self.next_states[s] = [
+            othello.step(state, action, current_player)[0]
+            if action in valid_actions else None
+            for action in range(othello.ACTION_SPACE)]
 
         return nn_value
 
@@ -90,10 +97,36 @@ class MCTS:
 
         s = json.dumps(state)
 
-        #: ゲーム終了判定
+        if othello.is_done(state, current_player):
+            print("finish")
+            #: ゲーム終了
+            v_first, v_second = othello.get_result(state)
+            v = v_first if current_player == 1 else v_second
+            return v
 
-        if s not in self.P:
-            #: leaf node
+        elif s not in self.P:
+            #: ゲーム終了していないリーフノードの場合は展開
+            print("expand")
             nn_value = self._expand(state, current_player)
             return nn_value
 
+        else:
+            #: 子ノードをevaluate
+            U = [self.c_puct * self.P[s][a] * math.sqrt(sum(self.N[s])) / (1 + self.N[s][a])
+                 for a in range(othello.ACTION_SPACE)]
+            Q = [q / n if n != 0 else q for q, n in zip(self.W[s], self.N[s])]
+
+            valid_actions = othello.get_valid_actions(state, current_player)
+            score = np.array([score if (action in valid_actions) else -np.inf
+                              for action, score in enumerate(U + Q)])
+
+            best_action = random.choice(np.where(score == score.max())[0])
+
+            next_state = self.next_states[s][best_action]
+
+            v = -self._evaluate(next_state, -current_player)
+
+            self.W[s][best_action] += v
+            self.N[s][best_action] += 1
+
+            return v
