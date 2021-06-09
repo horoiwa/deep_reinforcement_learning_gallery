@@ -1,4 +1,7 @@
 import collections
+from dataclasses import dataclass
+import time
+import random
 
 import tensorflow as tf
 import numpy as np
@@ -9,12 +12,18 @@ from buffer import ReplayBuffer
 import othello
 
 
+@dataclass
+class Sample:
+
+    state: list
+    mcts_policy: list
+    player: int
+    result: int
+
+
 def selfplay(network, num_mcts_simulations, dirichlet_alpha):
 
     record = []
-
-    GameStep = collections.namedtuple(
-        'GameStep', ['state', 'action', 'player', 'result'])
 
     mcts = MCTS(network=network, alpha=dirichlet_alpha)
 
@@ -26,18 +35,19 @@ def selfplay(network, num_mcts_simulations, dirichlet_alpha):
     done = False
     while not done:
 
-        # For the first 30 moves of each game, the temperature is set to τ = 1
-        tau = 1.0 if i <= 30 else 0.
-
+        #: 200 simulations: GTX 1650 -> 4.6sec, 1CPU -> sec
         mcts_policy = mcts.search(root_state=state,
                                   current_player=current_player,
-                                  num_simulations=num_mcts_simulations,
-                                  tau=tau)
+                                  num_simulations=num_mcts_simulations)
 
-        #: select action according to mcts policy(action probability)
-        action = np.random.choice(othello.ACTION_SPACE, p=mcts_policy)
+        if i <= 30:
+            # For the first 30 moves of each game, the temperature is set to τ = 1;
+            # this selects moves proportionally to their visit count in MCTS
+            action = np.random.choice(range(othello.ACTION_SPACE), p=mcts_policy)
+        else:
+            action = np.argmax(mcts_policy)
 
-        record.append(GameStep(state, mcts_policy, current_player, None))
+        record.append(Sample(state, mcts_policy, current_player, None))
 
         next_state, done = othello.step(state, action, current_player)
 
@@ -47,19 +57,21 @@ def selfplay(network, num_mcts_simulations, dirichlet_alpha):
 
         i += 1
 
+        print(i, action, mcts_policy)
+
     #: win: 1, lose: -1, draw: 0
-    result_first, result_second = othello.get_results(state)
+    result_first, result_second = othello.get_result(state)
 
     #: backup
-    for step in reversed(record):
-        step.result = result_first if step.player == 1 else result_second
+    for sample in reversed(record):
+        sample.result = result_first if sample.player == 1 else result_second
 
     return record
 
 
 def main(n_episodes=1000000, buffer_size=30000,
          batch_size=32, n_minibatchs=64,
-         num_mcts_simulations=800,
+         num_mcts_simulations=200,
          update_period=25000,
          n_play_for_network_evaluation=400,
          win_ratio_margin=0.55,

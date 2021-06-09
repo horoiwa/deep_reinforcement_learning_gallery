@@ -30,7 +30,7 @@ class MCTS:
         #: cache next states to save computation
         self.next_states = {}
 
-    def search(self, root_state, current_player, num_simulations, tau):
+    def search(self, root_state, current_player, num_simulations):
 
         #: json string is hashable
         s = json.dumps(root_state)
@@ -66,7 +66,7 @@ class MCTS:
 
             self.N[s][best_action] += 1
 
-        mcts_policy = None
+        mcts_policy = [n / sum(self.N[s]) for n in self.N[s]]
 
         return mcts_policy
 
@@ -98,7 +98,6 @@ class MCTS:
         s = json.dumps(state)
 
         if othello.is_done(state, current_player):
-            print("finish")
             #: ゲーム終了
             v_first, v_second = othello.get_result(state)
             v = v_first if current_player == 1 else v_second
@@ -106,7 +105,6 @@ class MCTS:
 
         elif s not in self.P:
             #: ゲーム終了していないリーフノードの場合は展開
-            print("expand")
             nn_value = self._expand(state, current_player)
             return nn_value
 
