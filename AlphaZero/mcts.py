@@ -99,9 +99,9 @@ class MCTS:
 
         if othello.is_done(state, current_player):
             #: ゲーム終了
-            v_first, v_second = othello.get_result(state)
-            v = v_first if current_player == 1 else v_second
-            return v
+            reward_first, reward_second = othello.get_result(state)
+            reward = reward_first if current_player == 1 else reward_second
+            return reward
 
         elif s not in self.P:
             #: ゲーム終了していないリーフノードの場合は展開

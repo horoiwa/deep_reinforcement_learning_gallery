@@ -1,5 +1,9 @@
 import collections
 
+import numpy as np
+
+import othello
+
 
 class ReplayBuffer:
 
@@ -8,8 +12,18 @@ class ReplayBuffer:
         self.buffer = collections.deque(maxlen=buffer_size)
 
     def get_minibatch(self, batch_size):
+
+        indices = np.random.choice(range(len(self.buffer)), size=batch_size)
+
+        samples = [self.buffer[idx] for idx in indices]
+
+        states = [othello.encode_state(s.state, s.player) for s in samples]
+
+        rewards = [s.reward for s in samples]
+
+
         return None
 
     def add_record(self, record):
-        for game_step in record:
-            self.buffer.append(game_step)
+        for sample in record:
+            self.buffer.append(sample)

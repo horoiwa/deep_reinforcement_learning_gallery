@@ -18,7 +18,7 @@ class Sample:
     state: list
     mcts_policy: list
     player: int
-    result: int
+    reward: int
 
 
 def selfplay(network, num_mcts_simulations, dirichlet_alpha):
@@ -31,8 +31,10 @@ def selfplay(network, num_mcts_simulations, dirichlet_alpha):
 
     current_player = 1
 
-    i = 0
     done = False
+
+    i = 0
+
     while not done:
 
         #: 200 simulations: GTX 1650 -> 4.6sec, 1CPU -> sec
@@ -60,11 +62,10 @@ def selfplay(network, num_mcts_simulations, dirichlet_alpha):
         print(i, action, mcts_policy)
 
     #: win: 1, lose: -1, draw: 0
-    result_first, result_second = othello.get_result(state)
+    reward_first, reward_second = othello.get_result(state)
 
-    #: backup
     for sample in reversed(record):
-        sample.result = result_first if sample.player == 1 else result_second
+        sample.reward = reward_first if sample.player == 1 else reward_second
 
     return record
 
