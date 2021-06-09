@@ -5,6 +5,8 @@ import random
 
 import tensorflow as tf
 import numpy as np
+import ray
+from tensorflow.python.eager.context import num_gpus
 
 from network import AlphaZeroNetwork
 from mcts import MCTS
@@ -21,13 +23,20 @@ class Sample:
     reward: int
 
 
-def selfplay(network, num_mcts_simulations, dirichlet_alpha):
+@ray.remote(num_cpus=1, num_gpus=0)
+def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
 
     record = []
 
-    mcts = MCTS(network=network, alpha=dirichlet_alpha)
-
     state = othello.get_initial_state()
+
+    network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
+
+    network.call(othello.encode_state(state, 1)[np.newaxis, ...])
+
+    network.set_weights(weights)
+
+    mcts = MCTS(network=network, alpha=dirichlet_alpha)
 
     current_player = 1
 
@@ -37,7 +46,7 @@ def selfplay(network, num_mcts_simulations, dirichlet_alpha):
 
     while not done:
 
-        #: 200 simulations: GTX 1650 -> 4.6sec, 1CPU -> sec
+        #: 200 simulations: GTX 1650 -> 4.6sec, 1CPU -> 8.8sec
         mcts_policy = mcts.search(root_state=state,
                                   current_player=current_player,
                                   num_simulations=num_mcts_simulations)
@@ -59,8 +68,6 @@ def selfplay(network, num_mcts_simulations, dirichlet_alpha):
 
         i += 1
 
-        print(i, action, mcts_policy)
-
     #: win: 1, lose: -1, draw: 0
     reward_first, reward_second = othello.get_result(state)
 
@@ -70,53 +77,73 @@ def selfplay(network, num_mcts_simulations, dirichlet_alpha):
     return record
 
 
-def main(n_episodes=1000000, buffer_size=30000,
+def main(num_workers, n_episodes=1000000, buffer_size=30000,
          batch_size=32, n_minibatchs=64,
-         num_mcts_simulations=200,
-         update_period=25000,
-         n_play_for_network_evaluation=400,
-         win_ratio_margin=0.55,
-         dirichlet_alpha=0.15,
-         lr=0.05):
+         num_mcts_simulations=100,
+         update_period=250, dirichlet_alpha=0.15,
+         lr=0.05, c=1e-4):
+
+    ray.init(num_cpus=num_workers+2, num_gpus=1)
 
     network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
+
     #: initialize network parameters
     dummy_state = othello.encode_state(othello.get_initial_state(), 1)[np.newaxis, ...]
+
     network.call(dummy_state)
+
+    current_weights = ray.put(network.get_weights())
+
+    #optimizer = tf.keras.optimizers.SGD(lr=lr, momentum=0.9)
+    optimizer = tf.keras.optimizers.Adam(lr=0.00025)
 
     replay = ReplayBuffer(buffer_size=buffer_size)
 
-    optimizer = tf.keras.optimizers.SGD(lr=lr, momentum=0.9)
+    #: 並列Selfplay
+    work_in_progresses = [
+        selfplay.remote(current_weights, num_mcts_simulations, dirichlet_alpha)
+        for _ in range(num_workers)]
 
     n = 0
 
     while n <= n_episodes:
 
-        #: collect samples by selfplay
-        for _ in range(update_period):
-            #: 自己対戦でデータ収集
-            record = selfplay(network, num_mcts_simulations, dirichlet_alpha)
-            replay.add_record(record)
+        #for _ in range(update_period):
+        for _ in range(3):
+            #: selfplayが終わったプロセスを一つ取得
+            record, work_in_progresses = ray.wait(work_in_progresses, num_returns=1)
+            replay.add(ray.get(record[0]))
+            work_in_progresses.extend([
+                selfplay.remote(network, num_mcts_simulations, dirichlet_alpha)
+            ])
             n += 1
 
-        #: update network
-        old_weights = network.get_weights()
         minibatchs = [replay.get_minibatch(batch_size=batch_size)
                       for _ in range(n_minibatchs)]
 
-        for minibacth in minibatchs:
-            pass
+        #: Update network
+        for (states, mcts_policy, rewards) in minibatchs:
 
-        new_weights = network.get_weights()
+            with tf.GradientTape() as tape:
+                import pdb; pdb.set_trace()
+                p_pred, v_pred = network(states, training=True)
+                value_loss = tf.square(rewards, v_pred)
 
-        #: old network vs. updated network
-        win_ratio = None
-        if win_ratio < win_ratio_margin:
-            print("old parameter win")
-            network.set_weights(old_weights)
-        else:
-            print("new paramter win")
+                policy_loss = -mcts_policy * tf.math.log(p_pred + 0.0001)
+                policy_loss = tf.reduce_sum(
+                    policy_loss, axis=1, keepdims=True)
+
+                l2_weight = None
+
+                loss = value_loss + policy_loss + c * l2_weight
+
+            grads = tape.gardient(loss, network.trainable_variables)
+            optimizer.apply_gradients(
+                zip(grads, network.trainable_variables))
+
+        current_weights = ray.put(network.get_weights())
+
 
 
 if __name__ == "__main__":
-    main()
+    main(num_workers=3)

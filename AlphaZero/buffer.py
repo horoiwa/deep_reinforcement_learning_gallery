@@ -17,12 +17,17 @@ class ReplayBuffer:
 
         samples = [self.buffer[idx] for idx in indices]
 
-        states = [othello.encode_state(s.state, s.player) for s in samples]
+        states = np.stack(
+            [othello.encode_state(s.state, s.player) for s in samples],
+            axis=0)
 
-        rewards = [s.reward for s in samples]
+        mcts_policy = np.array(
+            [s.mcts_policy for s in samples], dtype=np.float32)
 
+        rewards = np.array(
+            [s.reward for s in samples], dtype=np.float32).reshape(-1, 1)
 
-        return None
+        return (states, mcts_policy, rewards)
 
     def add_record(self, record):
         for sample in record:
