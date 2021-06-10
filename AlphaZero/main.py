@@ -27,7 +27,6 @@ class Sample:
 
 @ray.remote(num_cpus=1, num_gpus=0)
 def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
-    t = time.time()
 
     record = []
 
@@ -77,12 +76,11 @@ def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
     for sample in reversed(record):
         sample.reward = reward_first if sample.player == 1 else reward_second
 
-    print("FIN", time.time() - t)
     return record
 
 
 @ray.remote(num_cpus=1, num_gpus=0)
-def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=3):
+def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=5):
     """石の数の差がスコア"""
 
     scores = []
@@ -131,13 +129,15 @@ def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=
 
     average_score = sum(scores) / n_testplay
 
-    return average_score
+    win_ratio = sum([1 if score > 0 else 0 for score in scores]) / len(scores)
+
+    return average_score, win_ratio
 
 
-def main(num_cpus, n_episodes=10000, buffer_size=10000,
+def main(num_cpus, n_episodes=10000, buffer_size=30000,
          batch_size=32, n_minibatchs=64,
          num_mcts_simulations=50,
-         update_period=100, test_period=100, save_period=500,
+         update_period=50, test_period=100, save_period=1000,
          dirichlet_alpha=0.15):
 
     ray.init(num_cpus=num_cpus, num_gpus=1)
@@ -227,17 +227,18 @@ def main(num_cpus, n_episodes=10000, buffer_size=10000,
 
         if n % test_period == 0:
             print(f"{n - test_period}: TEST")
-            test_score = ray.get(test_in_progress)
-            print(f"TEST SCORE: {test_score}")
+            test_score, win_ratio = ray.get(test_in_progress)
+            print(f"TEST SCORE: {test_score}, {win_ratio}")
             test_in_progress = testplay.remote(
                 current_weights, num_mcts_simulations, dirichlet_alpha)
 
             with summary_writer.as_default():
                 tf.summary.scalar("test_score", test_score, step=n-test_period)
+                tf.summary.scalar("test_winratio", win_ratio, step=n-test_period)
 
         if n % save_period == 0:
             network.save_weights("checkpoints/network")
 
 
 if __name__ == "__main__":
-    main(num_cpus=8)
+    main(num_cpus=22)
