@@ -2,6 +2,8 @@ import collections
 from dataclasses import dataclass
 import time
 import random
+from pathlib import Path
+import shutil
 
 import tensorflow as tf
 import numpy as np
@@ -25,6 +27,7 @@ class Sample:
 
 @ray.remote(num_cpus=1, num_gpus=0)
 def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
+    t = time.time()
 
     record = []
 
@@ -74,6 +77,7 @@ def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
     for sample in reversed(record):
         sample.reward = reward_first if sample.player == 1 else reward_second
 
+    print("FIN", time.time() - t)
     return record
 
 
@@ -90,7 +94,6 @@ def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=
     network.predict(othello.encode_state(dummy_state, 1))
 
     network.set_weights(current_weights)
-    t = time.time()
 
     for n in range(n_testplay):
 
@@ -106,7 +109,6 @@ def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=
 
             mcts = MCTS(network=network, alpha=dirichlet_alpha)
 
-
             if current_player == alphazero:
                 mcts_policy = mcts.search(root_state=state,
                                           current_player=current_player,
@@ -115,7 +117,6 @@ def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=
             else:
                 action = othello.greedy_action(state, current_player, epsilon=0.2)
 
-            print(action)
             next_state, done = othello.step(state, action, current_player)
 
             state = next_state
@@ -126,10 +127,8 @@ def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=
 
         stone_diff = stone_first - stone_second
         score = stone_diff if alphazero == 1 else -stone_diff
-        print(score)
         scores.append(score)
 
-    print(time.time() - t)
     average_score = sum(scores) / n_testplay
 
     return average_score
@@ -138,11 +137,15 @@ def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=
 def main(num_cpus, n_episodes=10000, buffer_size=10000,
          batch_size=32, n_minibatchs=64,
          num_mcts_simulations=50,
-         update_period=100, test_period=300,
-         dirichlet_alpha=0.15,
-         lr=0.05, c=1e-4):
+         update_period=100, test_period=100, save_period=500,
+         dirichlet_alpha=0.15):
 
     ray.init(num_cpus=num_cpus, num_gpus=1)
+
+    logdir = Path(__file__).parent / "log"
+    if logdir.exists():
+        shutil.rmtree(logdir)
+    summary_writer = tf.summary.create_file_writer(str(logdir))
 
     network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
 
@@ -166,6 +169,8 @@ def main(num_cpus, n_episodes=10000, buffer_size=10000,
     test_in_progress = testplay.remote(
         current_weights, num_mcts_simulations, dirichlet_alpha)
 
+    t = time.time()
+
     n = 0
 
     while n <= n_episodes:
@@ -183,6 +188,8 @@ def main(num_cpus, n_episodes=10000, buffer_size=10000,
                       for _ in range(n_minibatchs)]
 
         #: Update network
+        stats_vloss = []
+        stats_ploss = []
         for (states, mcts_policy, rewards) in minibatchs:
 
             with tf.GradientTape() as tape:
@@ -200,6 +207,22 @@ def main(num_cpus, n_episodes=10000, buffer_size=10000,
             optimizer.apply_gradients(
                 zip(grads, network.trainable_variables))
 
+            stats_ploss.append(policy_loss.numpy().mean())
+            stats_vloss.append(value_loss.numpy().mean())
+
+        elapsed_time = time.time() - t
+
+        t = time.time()
+
+        vloss_mean = sum(stats_vloss) / len(stats_vloss)
+        ploss_mean = sum(stats_ploss) / len(stats_ploss)
+
+        with summary_writer.as_default():
+            tf.summary.scalar("v_loss", vloss_mean, step=n)
+            tf.summary.scalar("p_loss", ploss_mean, step=n)
+            tf.summary.scalar("buffer_size", len(replay), step=n)
+            tf.summary.scalar("Elapsed time", elapsed_time, step=n)
+
         current_weights = ray.put(network.get_weights())
 
         if n % test_period == 0:
@@ -209,6 +232,12 @@ def main(num_cpus, n_episodes=10000, buffer_size=10000,
             test_in_progress = testplay.remote(
                 current_weights, num_mcts_simulations, dirichlet_alpha)
 
+            with summary_writer.as_default():
+                tf.summary.scalar("test_score", test_score, step=n-test_period)
+
+        if n % save_period == 0:
+            network.save_weights("checkpoints/network")
+
 
 if __name__ == "__main__":
-    main(num_cpus=5)
+    main(num_cpus=8)
