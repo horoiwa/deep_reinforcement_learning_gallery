@@ -134,7 +134,7 @@ def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=
     return average_score, win_ratio
 
 
-def main(num_cpus, n_episodes=10000, buffer_size=30000,
+def main(num_cpus, n_episodes=100000, buffer_size=30000,
          batch_size=32, n_minibatchs=64,
          num_mcts_simulations=50,
          update_period=50, test_period=100, save_period=1000,
