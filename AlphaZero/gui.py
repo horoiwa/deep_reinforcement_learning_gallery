@@ -11,7 +11,7 @@ from mcts import MCTS
 
 class Othello(tk.Frame):
 
-    def __init__(self, npc_type="random", weights_path="checkpoints/network"):
+    def __init__(self, npc_type, weights_path):
         """
             どちらかがパス（合法手なし）時点でゲーム終了,
             その時点で石の多い方が勝ち
