@@ -1,4 +1,3 @@
-import collections
 from dataclasses import dataclass
 import time
 import random
@@ -53,7 +52,7 @@ def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
                                   current_player=current_player,
                                   num_simulations=num_mcts_simulations)
 
-        if i <= 30:
+        if i <= 20:
             # For the first 30 moves of each game, the temperature is set to τ = 1;
             # this selects moves proportionally to their visit count in MCTS
             action = np.random.choice(range(othello.ACTION_SPACE), p=mcts_policy)
@@ -80,7 +79,7 @@ def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
 
 
 @ray.remote(num_cpus=1, num_gpus=0)
-def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=5):
+def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=10):
     """石の数の差がスコア"""
 
     scores = []
@@ -134,10 +133,10 @@ def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=
     return average_score, win_ratio
 
 
-def main(num_cpus, n_episodes=100000, buffer_size=30000,
-         batch_size=32, n_minibatchs=64,
-         num_mcts_simulations=50,
-         update_period=50, test_period=100, save_period=1000,
+def main(num_cpus, n_episodes=30000, buffer_size=500000,
+         batch_size=128, n_minibatchs=32,
+         num_mcts_simulations=30,
+         update_period=100, test_period=200, save_period=1000,
          dirichlet_alpha=0.15):
 
     ray.init(num_cpus=num_cpus, num_gpus=1)
@@ -157,7 +156,7 @@ def main(num_cpus, n_episodes=100000, buffer_size=30000,
     current_weights = ray.put(network.get_weights())
 
     #optimizer = tf.keras.optimizers.SGD(lr=lr, momentum=0.9)
-    optimizer = tf.keras.optimizers.Adam(lr=0.00025)
+    optimizer = tf.keras.optimizers.Adam(lr=0.00015)
 
     replay = ReplayBuffer(buffer_size=buffer_size)
 
@@ -188,6 +187,9 @@ def main(num_cpus, n_episodes=100000, buffer_size=30000,
                       for _ in range(n_minibatchs)]
 
         #: Update network
+        if len(replay) < 20000:
+            continue
+
         stats_vloss = []
         stats_ploss = []
         for (states, mcts_policy, rewards) in minibatchs:
