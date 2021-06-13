@@ -145,6 +145,7 @@ class Othello(tk.Frame):
             mcts_policy = self.mcts.search(root_state=self.state,
                                            current_player=self.npc,
                                            num_simulations=50)
+
             action = np.argmax(mcts_policy)
             self.state, done = othello.step(self.state, action, self.npc)
 
@@ -191,6 +192,6 @@ class Othello(tk.Frame):
 
 
 if __name__ == "__main__":
-    app = Othello(npc_type="alphazero", weights_path="model_weights")
+    app = Othello(npc_type="alphazero", weights_path="checkpoints/network")
     app.pack()
     app.mainloop()
