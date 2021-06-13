@@ -170,6 +170,6 @@ class Othello(tk.Frame):
 
 
 if __name__ == "__main__":
-    app = Othello(npc_type="eps-greedy")
+    app = Othello(npc_type="alphazero", weights_path="model_weights")
     app.pack()
     app.mainloop()
