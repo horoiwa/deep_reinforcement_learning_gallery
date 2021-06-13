@@ -41,12 +41,12 @@ class MCTS:
         if s not in self.P:
             _ = self._expand(root_state, current_player)
 
-        #: Adding Dirichlet noise to the prior probabilities in the root node
-        dirichlet_noise = np.random.dirichlet(alpha=[self.alpha]*othello.ACTION_SPACE)
-        self.P[s] = [(1 - self.eps) * prob + self.eps * noise
-                     for prob, noise in zip(self.P[s], dirichlet_noise)]
-
         valid_actions = othello.get_valid_actions(root_state, current_player)
+
+        #: Adding Dirichlet noise to the prior probabilities in the root node
+        dirichlet_noise = np.random.dirichlet(alpha=[self.alpha]*len(valid_actions))
+        for a, noise in zip(valid_actions, dirichlet_noise):
+            self.P[s][a] = (1 - self.eps) * self.P[s][a] + self.eps * noise
 
         #: MCTS simulation
         for _ in range(num_simulations):
