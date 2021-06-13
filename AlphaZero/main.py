@@ -79,8 +79,10 @@ def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
 
 
 @ray.remote(num_cpus=1, num_gpus=0)
-def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=10):
+def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=16):
     """石の数の差がスコア"""
+
+    t = time.time()
 
     scores = []
 
@@ -130,7 +132,9 @@ def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=
 
     win_ratio = sum([1 if score > 0 else 0 for score in scores]) / len(scores)
 
-    return average_score, win_ratio
+    elapsed = time.time() - t
+
+    return average_score, win_ratio, elapsed
 
 
 def main(num_cpus, n_episodes=30000, buffer_size=500000,
@@ -187,50 +191,49 @@ def main(num_cpus, n_episodes=30000, buffer_size=500000,
                       for _ in range(n_minibatchs)]
 
         #: Update network
-        if len(replay) < 20000:
-            continue
+        if len(replay) >= 20000:
 
-        stats_vloss = []
-        stats_ploss = []
-        for (states, mcts_policy, rewards) in minibatchs:
+            stats_vloss = []
+            stats_ploss = []
+            for (states, mcts_policy, rewards) in minibatchs:
 
-            with tf.GradientTape() as tape:
+                with tf.GradientTape() as tape:
 
-                p_pred, v_pred = network(states, training=True)
-                value_loss = tf.square(rewards - v_pred)
+                    p_pred, v_pred = network(states, training=True)
+                    value_loss = tf.square(rewards - v_pred)
 
-                policy_loss = -mcts_policy * tf.math.log(p_pred + 0.0001)
-                policy_loss = tf.reduce_sum(
-                    policy_loss, axis=1, keepdims=True)
+                    policy_loss = -mcts_policy * tf.math.log(p_pred + 0.0001)
+                    policy_loss = tf.reduce_sum(
+                        policy_loss, axis=1, keepdims=True)
 
-                loss = tf.reduce_mean(value_loss + policy_loss)
+                    loss = tf.reduce_mean(value_loss + policy_loss)
 
-            grads = tape.gradient(loss, network.trainable_variables)
-            optimizer.apply_gradients(
-                zip(grads, network.trainable_variables))
+                grads = tape.gradient(loss, network.trainable_variables)
+                optimizer.apply_gradients(
+                    zip(grads, network.trainable_variables))
 
-            stats_ploss.append(policy_loss.numpy().mean())
-            stats_vloss.append(value_loss.numpy().mean())
+                stats_ploss.append(policy_loss.numpy().mean())
+                stats_vloss.append(value_loss.numpy().mean())
 
-        elapsed_time = time.time() - t
+            elapsed_time = time.time() - t
 
-        t = time.time()
+            t = time.time()
 
-        vloss_mean = sum(stats_vloss) / len(stats_vloss)
-        ploss_mean = sum(stats_ploss) / len(stats_ploss)
+            vloss_mean = sum(stats_vloss) / len(stats_vloss)
+            ploss_mean = sum(stats_ploss) / len(stats_ploss)
 
-        with summary_writer.as_default():
-            tf.summary.scalar("v_loss", vloss_mean, step=n)
-            tf.summary.scalar("p_loss", ploss_mean, step=n)
-            tf.summary.scalar("buffer_size", len(replay), step=n)
-            tf.summary.scalar("Elapsed time", elapsed_time, step=n)
+            with summary_writer.as_default():
+                tf.summary.scalar("v_loss", vloss_mean, step=n)
+                tf.summary.scalar("p_loss", ploss_mean, step=n)
+                tf.summary.scalar("buffer_size", len(replay), step=n)
+                tf.summary.scalar("Elapsed time", elapsed_time, step=n)
 
-        current_weights = ray.put(network.get_weights())
+            current_weights = ray.put(network.get_weights())
 
         if n % test_period == 0:
             print(f"{n - test_period}: TEST")
-            test_score, win_ratio = ray.get(test_in_progress)
-            print(f"TEST SCORE: {test_score}, {win_ratio}")
+            test_score, win_ratio, elapsed_time = ray.get(test_in_progress)
+            print(f"SCORE: {test_score}, {win_ratio}, Elapsed: {elapsed_time}")
             test_in_progress = testplay.remote(
                 current_weights, num_mcts_simulations, dirichlet_alpha)
 
@@ -243,4 +246,4 @@ def main(num_cpus, n_episodes=30000, buffer_size=500000,
 
 
 if __name__ == "__main__":
-    main(num_cpus=22)
+    main(num_cpus=23)
