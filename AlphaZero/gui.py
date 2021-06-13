@@ -5,11 +5,13 @@ import time
 import numpy as np
 
 import othello
+from network import AlphaZeroNetwork
+from mcts import MCTS
 
 
 class Othello(tk.Frame):
 
-    def __init__(self, npc_type="random", weights_path=None):
+    def __init__(self, npc_type="random", weights_path="checkpoints/network"):
         """
             どちらかがパス（合法手なし）時点でゲーム終了,
             その時点で石の多い方が勝ち
@@ -44,7 +46,16 @@ class Othello(tk.Frame):
         self.reset()
 
     def setup(self):
-        pass
+
+        state = othello.get_initial_state()
+
+        self.network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
+
+        self.network.predict(othello.encode_state(state, 1))
+
+        self.network.load_weights(self.weights_path)
+
+        self.mcts = MCTS(network=self.network, alpha=0.15)
 
     def reset(self):
         self.is_gameend = False
@@ -131,7 +142,17 @@ class Othello(tk.Frame):
                 return
 
         elif self.npc_type == "alphazero":
-            raise NotImplementedError()
+            mcts_policy = self.mcts.search(root_state=self.state,
+                                           current_player=self.npc,
+                                           num_simulations=50)
+            action = np.argmax(mcts_policy)
+            self.state, done = othello.step(self.state, action, self.npc)
+
+            self.refresh()
+            self.update_label()
+            if done:
+                self.update_label(game_end=True)
+                return
         else:
             raise NotImplementedError()
 
