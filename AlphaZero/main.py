@@ -79,8 +79,8 @@ def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
 
 
 @ray.remote(num_cpus=1, num_gpus=0)
-def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=16):
-    """石の数の差がスコア"""
+def testplay(current_weights, num_mcts_simulations,
+             dirichlet_alpha=None, n_testplay=24):
 
     t = time.time()
 
@@ -137,10 +137,10 @@ def testplay(current_weights, num_mcts_simulations, dirichlet_alpha, n_testplay=
     return average_score, win_ratio, elapsed
 
 
-def main(num_cpus, n_episodes=50000, buffer_size=300000,
-         batch_size=128, n_minibatchs=32,
+def main(num_cpus, n_episodes=50000, buffer_size=150000,
+         batch_size=64, epochs_per_update=5,
          num_mcts_simulations=30,
-         update_period=100, test_period=200, save_period=1000,
+         update_period=400, test_period=400, save_period=1000,
          dirichlet_alpha=0.15):
 
     ray.init(num_cpus=num_cpus, num_gpus=1)
@@ -160,7 +160,7 @@ def main(num_cpus, n_episodes=50000, buffer_size=300000,
     current_weights = ray.put(network.get_weights())
 
     #optimizer = tf.keras.optimizers.SGD(lr=lr, momentum=0.9)
-    optimizer = tf.keras.optimizers.Adam(lr=0.001)
+    optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
     replay = ReplayBuffer(buffer_size=buffer_size)
 
@@ -170,7 +170,7 @@ def main(num_cpus, n_episodes=50000, buffer_size=300000,
         for _ in range(num_cpus - 2)]
 
     test_in_progress = testplay.remote(
-        current_weights, num_mcts_simulations, dirichlet_alpha)
+        current_weights, num_mcts_simulations)
 
     t = time.time()
 
@@ -180,22 +180,23 @@ def main(num_cpus, n_episodes=50000, buffer_size=300000,
 
         for _ in tqdm(range(update_period)):
             #: selfplayが終わったプロセスを一つ取得
-            record, work_in_progresses = ray.wait(work_in_progresses, num_returns=1)
-            replay.add_record(ray.get(record[0]))
+            finished, work_in_progresses = ray.wait(work_in_progresses, num_returns=1)
+            replay.add_record(ray.get(finished[0]))
             work_in_progresses.extend([
                 selfplay.remote(current_weights, num_mcts_simulations, dirichlet_alpha)
             ])
             n += 1
-
-        minibatchs = [replay.get_minibatch(batch_size=batch_size)
-                      for _ in range(n_minibatchs)]
 
         #: Update network
         if len(replay) >= 20000:
 
             stats_vloss = []
             stats_ploss = []
-            for (states, mcts_policy, rewards) in minibatchs:
+
+            num_iters = epochs_per_update * (len(replay) // batch_size)
+            for _ in range(num_iters):
+
+                states, mcts_policy, rewards = replay.get_minibatch(batch_size=batch_size)
 
                 with tf.GradientTape() as tape:
 
@@ -235,7 +236,7 @@ def main(num_cpus, n_episodes=50000, buffer_size=300000,
             test_score, win_ratio, elapsed_time = ray.get(test_in_progress)
             print(f"SCORE: {test_score}, {win_ratio}, Elapsed: {elapsed_time}")
             test_in_progress = testplay.remote(
-                current_weights, num_mcts_simulations, dirichlet_alpha)
+                current_weights, num_mcts_simulations)
 
             with summary_writer.as_default():
                 tf.summary.scalar("test_score", test_score, step=n-test_period)

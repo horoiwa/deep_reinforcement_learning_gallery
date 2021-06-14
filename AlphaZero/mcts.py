@@ -44,9 +44,10 @@ class MCTS:
         valid_actions = othello.get_valid_actions(root_state, current_player)
 
         #: Adding Dirichlet noise to the prior probabilities in the root node
-        dirichlet_noise = np.random.dirichlet(alpha=[self.alpha]*len(valid_actions))
-        for a, noise in zip(valid_actions, dirichlet_noise):
-            self.P[s][a] = (1 - self.eps) * self.P[s][a] + self.eps * noise
+        if self.alpha is not None:
+            dirichlet_noise = np.random.dirichlet(alpha=[self.alpha]*len(valid_actions))
+            for a, noise in zip(valid_actions, dirichlet_noise):
+                self.P[s][a] = (1 - self.eps) * self.P[s][a] + self.eps * noise
 
         #: MCTS simulation
         for _ in range(num_simulations):
@@ -59,15 +60,15 @@ class MCTS:
                               for action, score in enumerate(U + Q)])
 
             #: np.argmaxでは同値maxで偏るため
-            best_action = random.choice(np.where(score == score.max())[0])
+            action = random.choice(np.where(score == score.max())[0])
 
-            next_state = self.next_states[s][best_action]
+            next_state = self.next_states[s][action]
 
             v = -self._evaluate(next_state, -current_player)
 
-            self.W[s][best_action] += v
+            self.W[s][action] += v
 
-            self.N[s][best_action] += 1
+            self.N[s][action] += 1
 
         mcts_policy = [n / sum(self.N[s]) for n in self.N[s]]
 

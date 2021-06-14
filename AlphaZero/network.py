@@ -7,7 +7,7 @@ from tensorflow.keras.activations import relu
 
 class AlphaZeroNetwork(tf.keras.Model):
 
-    def __init__(self, action_space, n_blocks=2, filters=128):
+    def __init__(self, action_space, n_blocks=3, filters=256):
         """
             Note:
             In AlphaZero Go paper, n_blocks = 20 (or 40) and filters = 256
