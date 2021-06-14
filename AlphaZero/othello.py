@@ -140,17 +140,33 @@ def is_done(state, player):
 
 def get_result(state: list):
 
-    black_stones = sum([1 for i in state if i == 1])
-    white_stones = sum([1 for i in state if i == -1])
+    first = get_valid_actions(state, 1)
+    second = get_valid_actions(state, -1)
 
-    if black_stones > white_stones:
-        return 1, -1
-    elif white_stones > black_stones:
+    if (not first) and (not second):
+        #: どちらも有効手無しで正常にゲーム終了
+        black_stones = sum([1 for i in state if i == 1])
+        white_stones = sum([1 for i in state if i == -1])
+
+        if black_stones > white_stones:
+            return 1, -1
+        elif white_stones > black_stones:
+            return -1, 1
+        elif black_stones == white_stones:
+            return 0, 0
+        else:
+            raise Exception("Unexpected error")
+
+    elif (not first) and second:
+        #: 先手のパスによりゲーム終了
         return -1, 1
-    elif black_stones == white_stones:
-        return 0, 0
+
+    elif first and (not second):
+        #: 後手のパスによりゲーム終了
+        return 1, -1
+
     else:
-        raise Exception("Unexpected error")
+        raise Exception("Unexpected Error")
 
 
 def greedy_action(state: list, player: int, epsilon=0.):

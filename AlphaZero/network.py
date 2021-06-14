@@ -7,7 +7,7 @@ from tensorflow.keras.activations import relu
 
 class AlphaZeroNetwork(tf.keras.Model):
 
-    def __init__(self, action_space, n_blocks=5, filters=64):
+    def __init__(self, action_space, n_blocks=2, filters=128):
         """
             Note:
             In AlphaZero Go paper, n_blocks = 20 (or 40) and filters = 256
@@ -111,8 +111,8 @@ class ResBlock(tf.keras.layers.Layer):
         x = self.bn1(x, training=training)
         x = relu(x)
 
-        x = self.conv1(x)
-        x = self.bn1(x, training=training)
+        x = self.conv2(x)
+        x = self.bn2(x, training=training)
         x = x + inputs  #: skip connection
         x = relu(x)
 

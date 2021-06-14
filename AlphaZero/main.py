@@ -160,7 +160,7 @@ def main(num_cpus, n_episodes=50000, buffer_size=300000,
     current_weights = ray.put(network.get_weights())
 
     #optimizer = tf.keras.optimizers.SGD(lr=lr, momentum=0.9)
-    optimizer = tf.keras.optimizers.Adam(lr=0.00015)
+    optimizer = tf.keras.optimizers.Adam(lr=0.001)
 
     replay = ReplayBuffer(buffer_size=buffer_size)
 
