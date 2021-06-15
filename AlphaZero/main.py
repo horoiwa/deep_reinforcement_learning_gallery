@@ -137,11 +137,11 @@ def testplay(current_weights, num_mcts_simulations,
     return average_score, win_ratio, elapsed
 
 
-def main(num_cpus, n_episodes=50000, buffer_size=150000,
+def main(num_cpus, n_episodes=30000, buffer_size=150000,
          batch_size=64, epochs_per_update=5,
          num_mcts_simulations=30,
-         update_period=400, test_period=400, save_period=1000,
-         dirichlet_alpha=0.15):
+         update_period=300, test_period=300, save_period=3000,
+         dirichlet_alpha=0.35):
 
     ray.init(num_cpus=num_cpus, num_gpus=1)
 
@@ -172,10 +172,8 @@ def main(num_cpus, n_episodes=50000, buffer_size=150000,
     test_in_progress = testplay.remote(
         current_weights, num_mcts_simulations)
 
-    t = time.time()
-
+    n_updates = 0
     n = 0
-
     while n <= n_episodes:
 
         for _ in tqdm(range(update_period)):
@@ -189,12 +187,10 @@ def main(num_cpus, n_episodes=50000, buffer_size=150000,
 
         #: Update network
         if len(replay) >= 20000:
-
-            stats_vloss = []
-            stats_ploss = []
+        #if len(replay) >= 2000:
 
             num_iters = epochs_per_update * (len(replay) // batch_size)
-            for _ in range(num_iters):
+            for i in range(num_iters):
 
                 states, mcts_policy, rewards = replay.get_minibatch(batch_size=batch_size)
 
@@ -213,21 +209,12 @@ def main(num_cpus, n_episodes=50000, buffer_size=150000,
                 optimizer.apply_gradients(
                     zip(grads, network.trainable_variables))
 
-                stats_ploss.append(policy_loss.numpy().mean())
-                stats_vloss.append(value_loss.numpy().mean())
+                n_updates += 1
 
-            elapsed_time = time.time() - t
-
-            t = time.time()
-
-            vloss_mean = sum(stats_vloss) / len(stats_vloss)
-            ploss_mean = sum(stats_ploss) / len(stats_ploss)
-
-            with summary_writer.as_default():
-                tf.summary.scalar("v_loss", vloss_mean, step=n)
-                tf.summary.scalar("p_loss", ploss_mean, step=n)
-                tf.summary.scalar("buffer_size", len(replay), step=n)
-                tf.summary.scalar("Elapsed time", elapsed_time, step=n)
+                if i % 100 == 0:
+                    with summary_writer.as_default():
+                        tf.summary.scalar("v_loss", value_loss.numpy().mean(), step=n_updates)
+                        tf.summary.scalar("p_loss", policy_loss.numpy().mean(), step=n_updates)
 
             current_weights = ray.put(network.get_weights())
 
@@ -241,6 +228,7 @@ def main(num_cpus, n_episodes=50000, buffer_size=150000,
             with summary_writer.as_default():
                 tf.summary.scalar("test_score", test_score, step=n-test_period)
                 tf.summary.scalar("test_winratio", win_ratio, step=n-test_period)
+                tf.summary.scalar("buffer_size", len(replay), step=n)
 
         if n % save_period == 0:
             network.save_weights("checkpoints/network")

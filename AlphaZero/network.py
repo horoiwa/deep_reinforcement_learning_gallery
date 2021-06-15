@@ -7,7 +7,7 @@ from tensorflow.keras.activations import relu
 
 class AlphaZeroNetwork(tf.keras.Model):
 
-    def __init__(self, action_space, n_blocks=3, filters=256):
+    def __init__(self, action_space, n_blocks=5, filters=256):
         """
             Note:
             In AlphaZero Go paper, n_blocks = 20 (or 40) and filters = 256
@@ -43,9 +43,6 @@ class AlphaZeroNetwork(tf.keras.Model):
                                 kernel_initializer="he_normal")
         self.bn_v = kl.BatchNormalization()
         self.flat_v = kl.Flatten()
-        self.dense_v = kl.Dense(64,    #: 256 in alphazero Go paper
-                                kernel_regularizer=l2(0.001),
-                                kernel_initializer="he_normal")
         self.value = kl.Dense(1, activation="tanh",
                               kernel_regularizer=l2(0.001),
                               kernel_initializer="he_normal")
@@ -72,9 +69,6 @@ class AlphaZeroNetwork(tf.keras.Model):
         x2 = self.bn_v(x2)
         x2 = relu(x2)
         x2 = self.flat_v(x2)
-
-        x2 = self.dense_v(x2)
-        x2 = relu(x2)
         value = self.value(x2)
 
         return policy, value
