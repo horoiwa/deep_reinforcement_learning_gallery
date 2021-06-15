@@ -137,8 +137,8 @@ def testplay(current_weights, num_mcts_simulations,
     return average_score, win_ratio, elapsed
 
 
-def main(num_cpus, n_episodes=30000, buffer_size=150000,
-         batch_size=64, epochs_per_update=5,
+def main(num_cpus, n_episodes=30000, buffer_size=30000,
+         batch_size=128, epochs_per_update=10,
          num_mcts_simulations=30,
          update_period=300, test_period=300, save_period=3000,
          dirichlet_alpha=0.35):
