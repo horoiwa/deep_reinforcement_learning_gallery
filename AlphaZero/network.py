@@ -50,15 +50,15 @@ class AlphaZeroNetwork(tf.keras.Model):
     def call(self, x, training=False):
 
         x = self.conv1(x)
-        x = self.bn1(x)
+        x = self.bn1(x, training=training)
         x = relu(x)
 
         for n in range(self.n_blocks):
-            x = getattr(self, f"resblock{n}")(x)
+            x = getattr(self, f"resblock{n}")(x, training=training)
 
         #: policy head
         x1 = self.conv_p(x)
-        x1 = self.bn_p(x1)
+        x1 = self.bn_p(x1, training=training)
         x1 = relu(x1)
         x1 = self.flat_p(x1)
         logits = self.logits(x1)
@@ -66,7 +66,7 @@ class AlphaZeroNetwork(tf.keras.Model):
 
         #: value head
         x2 = self.conv_v(x)
-        x2 = self.bn_v(x2)
+        x2 = self.bn_v(x2, training=training)
         x2 = relu(x2)
         x2 = self.flat_v(x2)
         value = self.value(x2)
