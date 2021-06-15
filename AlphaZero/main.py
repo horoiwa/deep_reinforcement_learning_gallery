@@ -134,10 +134,12 @@ def testplay(current_weights, num_mcts_simulations,
 
         if alphazero == 1:
             stone_az, stone_tester = stone_first, stone_second
+            color = "black"
         else:
             stone_az, stone_tester = stone_second, stone_first
+            color = "white"
 
-        message = f"AlphaZero {result}: {stone_az} vs {stone_tester}"
+        message = f"AlphaZero ({color}) {result}: {stone_az} vs {stone_tester}"
 
         othello.save_img(state, "img", f"test_{n}.png", message)
 
