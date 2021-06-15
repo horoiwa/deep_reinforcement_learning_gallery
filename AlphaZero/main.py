@@ -84,7 +84,7 @@ def testplay(current_weights, num_mcts_simulations,
 
     t = time.time()
 
-    scores = []
+    win_count = 0
 
     network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
 
@@ -98,6 +98,8 @@ def testplay(current_weights, num_mcts_simulations,
 
         alphazero = random.choice([1, -1])
 
+        mcts = MCTS(network=network, alpha=dirichlet_alpha)
+
         state = othello.get_initial_state()
 
         current_player = 1
@@ -105,8 +107,6 @@ def testplay(current_weights, num_mcts_simulations,
         done = False
 
         while not done:
-
-            mcts = MCTS(network=network, alpha=dirichlet_alpha)
 
             if current_player == alphazero:
                 mcts_policy = mcts.search(root_state=state,
@@ -122,19 +122,28 @@ def testplay(current_weights, num_mcts_simulations,
 
             current_player = -1 * current_player
 
+        reward_first, reward_second = othello.get_result(state)
+
+        reward = reward_first if alphazero == 1 else reward_second
+        result = "win" if reward == 1 else "lose" if reward == -1 else "draw"
+
+        if reward > 0:
+            win_count += 1
+
         stone_first, stone_second = othello.count_stone(state)
 
-        stone_diff = stone_first - stone_second
-        score = stone_diff if alphazero == 1 else -stone_diff
-        scores.append(score)
+        if alphazero == 1:
+            stone_az, stone_tester = stone_first, stone_second
+        else:
+            stone_az, stone_tester = stone_second, stone_first
 
-    average_score = sum(scores) / n_testplay
+        message = f"AlphaZero {result}: {stone_az} vs {stone_tester}"
 
-    win_ratio = sum([1 if score > 0 else 0 for score in scores]) / len(scores)
+        othello.save_img(state, "img", f"test_{n}.png", message)
 
     elapsed = time.time() - t
 
-    return average_score, win_ratio, elapsed
+    return win_count, win_count / n_testplay, elapsed
 
 
 def main(num_cpus, n_episodes=30000, buffer_size=30000,
@@ -220,14 +229,14 @@ def main(num_cpus, n_episodes=30000, buffer_size=30000,
 
         if n % test_period == 0:
             print(f"{n - test_period}: TEST")
-            test_score, win_ratio, elapsed_time = ray.get(test_in_progress)
-            print(f"SCORE: {test_score}, {win_ratio}, Elapsed: {elapsed_time}")
+            win_count, win_ratio, elapsed_time = ray.get(test_in_progress)
+            print(f"SCORE: {win_count}, {win_ratio}, Elapsed: {elapsed_time}")
             test_in_progress = testplay.remote(
                 current_weights, num_mcts_simulations)
 
             with summary_writer.as_default():
-                tf.summary.scalar("test_score", test_score, step=n-test_period)
-                tf.summary.scalar("test_winratio", win_ratio, step=n-test_period)
+                tf.summary.scalar("win_count", win_count, step=n-test_period)
+                tf.summary.scalar("win_ratio", win_ratio, step=n-test_period)
                 tf.summary.scalar("buffer_size", len(replay), step=n)
 
         if n % save_period == 0:

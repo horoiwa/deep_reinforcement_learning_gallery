@@ -7,7 +7,9 @@ import functools
 import copy
 import json
 import random
+import os
 
+from PIL import Image, ImageDraw
 import numpy as np
 
 
@@ -122,9 +124,9 @@ def step(state: list, action: int, player: int):
     next_state[action] = player
 
     #: 相手に合法手なしで終了
-    valid_actions = get_valid_actions(next_state, -player)
+    valid_next_actions = get_valid_actions(next_state, -player)
 
-    done = False if valid_actions else True
+    done = False if valid_next_actions else True
 
     return next_state, done
 
@@ -194,3 +196,41 @@ def count_stone(state: list):
     first = sum([1 for i in state if i == 1])
     second = sum([1 for i in state if i == -1])
     return (first, second)
+
+
+def save_img(state, savedir, fname, comment):
+
+    if not os.path.exists(savedir):
+        os.makedirs(savedir)
+
+    height = 50 * N_ROWS
+    width = 50 * N_COLS
+
+    img = Image.new('RGB', (width, height+30), (47, 79, 79))
+
+    draw = ImageDraw.Draw(img)
+
+    draw.rectangle((0, height, width, height+30), fill="black")
+    draw.text((10, height+15), comment)
+
+    for i in range(N_COLS+1):
+        draw.line((0, i*50, width, i*50), fill=(10, 10, 10), width=1)
+    for i in range(N_ROWS+1):
+        draw.line((i*50, 0, i*50, height), fill=(10, 10, 10), width=1)
+
+    for i in range(N_ROWS * N_COLS):
+        v = state[i]
+        row, col = i // N_ROWS, i % N_COLS
+        cy, cx = (50 * row + 5, 50 * col + 5)
+        if v == 1:
+            draw.ellipse((cx, cy, cx+40, cy+40), fill="black")
+        elif v == -1:
+            draw.ellipse((cx, cy, cx+40, cy+40), fill="white")
+
+    save_path = os.path.join(savedir, fname)
+    img.save(save_path, quality=95)
+
+
+if __name__ == '__main__':
+    state = get_initial_state()
+    save_img(state, "img", "test_1.png", "ALphazero 1: 22 vs 12")
