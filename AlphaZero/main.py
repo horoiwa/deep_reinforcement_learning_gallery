@@ -47,7 +47,6 @@ def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
 
     while not done:
 
-        #: 200 simulations: GTX 1650 -> 4.6sec, 1CPU -> 8.8sec
         mcts_policy = mcts.search(root_state=state,
                                   current_player=current_player,
                                   num_simulations=num_mcts_simulations)
@@ -114,7 +113,7 @@ def testplay(current_weights, num_mcts_simulations,
                                           num_simulations=num_mcts_simulations)
                 action = np.argmax(mcts_policy)
             else:
-                action = othello.greedy_action(state, current_player, epsilon=0.5)
+                action = othello.greedy_action(state, current_player, epsilon=0.4)
 
             next_state, done = othello.step(state, action, current_player)
 
@@ -148,8 +147,8 @@ def testplay(current_weights, num_mcts_simulations,
     return win_count, win_count / n_testplay, elapsed
 
 
-def main(num_cpus, n_episodes=30000, buffer_size=30000,
-         batch_size=64, epochs_per_update=10,
+def main(num_cpus, n_episodes=30000, buffer_size=40000,
+         batch_size=64, epochs_per_update=5,
          num_mcts_simulations=30,
          update_period=300, test_period=300,
          n_testplay=20,

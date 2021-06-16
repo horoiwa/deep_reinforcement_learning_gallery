@@ -56,11 +56,13 @@ class MCTS:
                  for a in range(othello.ACTION_SPACE)]
             Q = [w / n if n != 0 else 0 for w, n in zip(self.W[s], self.N[s])]
 
-            score = np.array([score if (action in valid_actions) else -np.inf
-                              for action, score in enumerate(U + Q)])
+            assert len(U) == len(Q) == othello.ACTION_SPACE
+
+            scores = np.array([score if (action in valid_actions) else -np.inf
+                               for action, score in enumerate(U + Q)])
 
             #: np.argmaxでは同値maxで偏るため
-            action = random.choice(np.where(score == score.max())[0])
+            action = random.choice(np.where(scores == scores.max())[0])
 
             next_state = self.next_states[s][action]
 
@@ -94,8 +96,7 @@ class MCTS:
         #: cache valid actions and next state to save computation
         self.next_states[s] = [
             othello.step(state, action, current_player)[0]
-            if action in valid_actions else None
-            for action in range(othello.ACTION_SPACE)]
+            for action in valid_actions]
 
         return nn_value
 
@@ -119,6 +120,8 @@ class MCTS:
             U = [self.c_puct * self.P[s][a] * math.sqrt(sum(self.N[s])) / (1 + self.N[s][a])
                  for a in range(othello.ACTION_SPACE)]
             Q = [q / n if n != 0 else q for q, n in zip(self.W[s], self.N[s])]
+
+            assert len(U) == len(Q) == othello.ACTION_SPACE
 
             valid_actions = othello.get_valid_actions(state, current_player)
             score = np.array([score if (action in valid_actions) else -np.inf

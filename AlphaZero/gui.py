@@ -5,7 +5,7 @@ import time
 import numpy as np
 
 import othello
-from network import AlphaZeroNetwork
+from network import SimpleCNN as AlphaZeroNetwork
 from mcts import MCTS
 
 
@@ -80,6 +80,9 @@ class Othello(tk.Frame):
 
         valid_actions = othello.get_valid_actions(self.state, self.human)
         print(valid_actions, action)
+
+        if valid_actions == [othello.ACTION_NOOP]:
+            action = othello.ACTION_NOOP
 
         if action in valid_actions:
 
@@ -192,6 +195,9 @@ class Othello(tk.Frame):
 
 
 if __name__ == "__main__":
-    app = Othello(npc_type="alphazero", weights_path="checkpoints/network")
+    """ npctype should be one of "random", "eps-greedy", "alphazero"
+    """
+    #app = Othello(npc_type="alphazero", weights_path="checkpoints/network")
+    app = Othello(npc_type="eps-greedy", weights_path="checkpoints/network")
     app.pack()
     app.mainloop()

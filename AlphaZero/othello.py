@@ -170,7 +170,6 @@ def get_result(state: list):
         return 0, 0
 
 
-
 def greedy_action(state: list, player: int, epsilon=0.):
 
     valid_actions = get_valid_actions(state, player)
