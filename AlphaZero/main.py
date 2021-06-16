@@ -9,7 +9,7 @@ import numpy as np
 import ray
 from tqdm import tqdm
 
-from network import AlphaZeroNetwork
+from network import SimpleCNN as AlphaZeroNetwork
 from mcts import MCTS
 from buffer import ReplayBuffer
 import othello
@@ -114,7 +114,7 @@ def testplay(current_weights, num_mcts_simulations,
                                           num_simulations=num_mcts_simulations)
                 action = np.argmax(mcts_policy)
             else:
-                action = othello.greedy_action(state, current_player, epsilon=0.1)
+                action = othello.greedy_action(state, current_player, epsilon=0.5)
 
             next_state, done = othello.step(state, action, current_player)
 
@@ -149,9 +149,11 @@ def testplay(current_weights, num_mcts_simulations,
 
 
 def main(num_cpus, n_episodes=30000, buffer_size=30000,
-         batch_size=128, epochs_per_update=10,
+         batch_size=64, epochs_per_update=10,
          num_mcts_simulations=30,
-         update_period=300, test_period=300, save_period=3000,
+         update_period=300, test_period=300,
+         n_testplay=20,
+         save_period=3000,
          dirichlet_alpha=0.35):
 
     ray.init(num_cpus=num_cpus, num_gpus=1)
@@ -181,7 +183,7 @@ def main(num_cpus, n_episodes=30000, buffer_size=30000,
         for _ in range(num_cpus - 2)]
 
     test_in_progress = testplay.remote(
-        current_weights, num_mcts_simulations)
+        current_weights, num_mcts_simulations, n_testplay=n_testplay)
 
     n_updates = 0
     n = 0
@@ -234,7 +236,7 @@ def main(num_cpus, n_episodes=30000, buffer_size=30000,
             win_count, win_ratio, elapsed_time = ray.get(test_in_progress)
             print(f"SCORE: {win_count}, {win_ratio}, Elapsed: {elapsed_time}")
             test_in_progress = testplay.remote(
-                current_weights, num_mcts_simulations)
+                current_weights, num_mcts_simulations, n_testplay=n_testplay)
 
             with summary_writer.as_default():
                 tf.summary.scalar("win_count", win_count, step=n-test_period)

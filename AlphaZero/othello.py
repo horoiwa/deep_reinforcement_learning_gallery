@@ -15,7 +15,9 @@ import numpy as np
 
 N_COLS = N_ROWS = 6
 
-ACTION_SPACE = N_ROWS * N_COLS
+ACTION_SPACE = N_ROWS * N_COLS + 1
+
+ACTION_NOOP = ACTION_SPACE - 1
 
 
 def xy_to_idx(row, col):
@@ -96,6 +98,10 @@ def _get_valid_actions(state_str: list, player: int):
     valid_actions = [action for action in range(N_ROWS * N_COLS)
                      if is_valid_action(state, action, player)]
 
+    if not valid_actions:
+        #: 有効手無しの場合はパスを許可
+        valid_actions = [ACTION_NOOP]
+
     return valid_actions
 
 
@@ -106,69 +112,63 @@ def get_valid_actions(state: list, player: int):
 
 def step(state: list, action: int, player: int):
 
-    #assert is_valid_action(state, action, player)
+    if action == ACTION_NOOP:
+        next_state = copy.deepcopy(state)
+    else:
+        next_state = copy.deepcopy(state)
 
-    next_state = copy.deepcopy(state)
+        directions = get_directions(action)
 
-    directions = get_directions(action)
+        for direction in directions:
+            stones = [state[i] for i in direction]
+            if player in stones and -player in stones:
+                idx = stones.index(player)
+                stones = stones[:idx]
+                if stones and all(i == -player for i in stones):
+                    for i in direction[:idx]:
+                        next_state[i] = player
 
-    for direction in directions:
-        stones = [state[i] for i in direction]
-        if player in stones and -player in stones:
-            idx = stones.index(player)
-            stones = stones[:idx]
-            if stones and all(i == -player for i in stones):
-                for i in direction[:idx]:
-                    next_state[i] = player
+        next_state[action] = player
 
-    next_state[action] = player
-
-    #: 相手に合法手なしで終了
-    valid_next_actions = get_valid_actions(next_state, -player)
-
-    done = False if valid_next_actions else True
+    done = is_done(next_state, -player)
 
     return next_state, done
 
 
 def is_done(state, player):
 
-    valid_actions = get_valid_actions(state, player)
-
-    done = False if valid_actions else True
-
-    return done
+    if get_valid_actions(state, player) == [ACTION_NOOP]:
+        #: 自分に有効手なし
+        if get_valid_actions(state, -player) == [ACTION_NOOP]:
+            #: 相手に有効手なし
+            return True
+        else:
+            #: 相手に有効手あり
+            return False
+    else:
+        #: 自分に有効手あり
+        return False
 
 
 def get_result(state: list):
 
-    first = get_valid_actions(state, 1)
-    second = get_valid_actions(state, -1)
+    is_done_first = get_valid_actions(state, 1) == [ACTION_NOOP]
+    is_done_second = get_valid_actions(state, -1) == [ACTION_NOOP]
 
-    if (not first) and (not second):
-        #: どちらも有効手無しで正常にゲーム終了
-        black_stones = sum([1 for i in state if i == 1])
-        white_stones = sum([1 for i in state if i == -1])
+    assert is_done_first
+    assert is_done_second
 
-        if black_stones > white_stones:
-            return 1, -1
-        elif white_stones > black_stones:
-            return -1, 1
-        elif black_stones == white_stones:
-            return 0, 0
-        else:
-            raise Exception("Unexpected error")
+    #: どちらも有効手無しで正常にゲーム終了
+    black_stones = sum([1 for i in state if i == 1])
+    white_stones = sum([1 for i in state if i == -1])
 
-    elif (not first) and second:
-        #: 先手のパスによりゲーム終了
-        return -1, 1
-
-    elif first and (not second):
-        #: 後手のパスによりゲーム終了
+    if black_stones > white_stones:
         return 1, -1
+    elif white_stones > black_stones:
+        return -1, 1
+    elif black_stones == white_stones:
+        return 0, 0
 
-    else:
-        raise Exception("Unexpected Error")
 
 
 def greedy_action(state: list, player: int, epsilon=0.):
