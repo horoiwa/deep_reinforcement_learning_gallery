@@ -90,7 +90,7 @@ def is_valid_action(state: list, action: int, player: int):
     return False
 
 
-@functools.lru_cache(maxsize=2048)
+@functools.lru_cache(maxsize=4096)
 def _get_valid_actions(state_str: list, player: int):
 
     state = json.loads(state_str)
@@ -111,6 +111,8 @@ def get_valid_actions(state: list, player: int):
 
 
 def step(state: list, action: int, player: int):
+
+    assert action in get_valid_actions(state, player)
 
     if action == ACTION_NOOP:
         next_state = copy.deepcopy(state)

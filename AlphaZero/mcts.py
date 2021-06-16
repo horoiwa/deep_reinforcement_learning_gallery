@@ -1,4 +1,5 @@
 import math
+from os import stat
 import random
 import json
 import time
@@ -33,10 +34,14 @@ class MCTS:
         #: cache next states to save computation
         self.next_states = {}
 
+        #: string is hashable
+        self.state_to_str = (
+            lambda state, player: json.dumps(state) + str(player)
+            )
+
     def search(self, root_state, current_player, num_simulations):
 
-        #: json string is hashable
-        s = json.dumps(root_state)
+        s = self.state_to_str(root_state, current_player)
 
         if s not in self.P:
             _ = self._expand(root_state, current_player)
@@ -78,9 +83,8 @@ class MCTS:
 
     def _expand(self, state, current_player):
 
-        s = json.dumps(state)
+        s = self.state_to_str(state, current_player)
 
-        #: gpu -> 0.05sec, cpu _> 0.06 - 0.1
         with tf.device("/cpu:0"):
             nn_policy, nn_value = self.network.predict(
                 othello.encode_state(state, current_player))
@@ -96,13 +100,14 @@ class MCTS:
         #: cache valid actions and next state to save computation
         self.next_states[s] = [
             othello.step(state, action, current_player)[0]
-            for action in valid_actions]
+            if (action in valid_actions) else None
+            for action in range(othello.ACTION_SPACE)]
 
         return nn_value
 
     def _evaluate(self, state, current_player):
 
-        s = json.dumps(state)
+        s = self.state_to_str(state, current_player)
 
         if othello.is_done(state, current_player):
             #: ゲーム終了

@@ -155,7 +155,7 @@ def main(num_cpus, n_episodes=30000, buffer_size=40000,
          save_period=3000,
          dirichlet_alpha=0.35):
 
-    ray.init(num_cpus=num_cpus, num_gpus=1)
+    ray.init(num_cpus=num_cpus, num_gpus=1, local_mode=False)
 
     logdir = Path(__file__).parent / "log"
     if logdir.exists():
