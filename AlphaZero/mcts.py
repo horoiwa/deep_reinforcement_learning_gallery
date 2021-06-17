@@ -1,8 +1,6 @@
 import math
-from os import stat
 import random
 import json
-import time
 
 import numpy as np
 import tensorflow as tf
