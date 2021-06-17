@@ -63,8 +63,11 @@ class MCTS:
 
             assert len(U) == len(Q) == othello.ACTION_SPACE
 
-            scores = np.array([score if (action in valid_actions) else -np.inf
-                               for action, score in enumerate(U + Q)])
+            scores = [u + q for u, q in zip(U, Q)]
+
+            #: Mask invalid actions
+            scores = np.array([score if action in valid_actions else -np.inf
+                               for action, score in enumerate(scores)])
 
             #: np.argmaxでは同値maxで偏るため
             action = random.choice(np.where(scores == scores.max())[0])

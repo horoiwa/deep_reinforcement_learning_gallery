@@ -54,9 +54,11 @@ def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
         if i <= 10:
             # For the first 30 moves of each game, the temperature is set to τ = 1;
             # this selects moves proportionally to their visit count in MCTS
-            action = np.random.choice(range(othello.ACTION_SPACE), p=mcts_policy)
+            action = np.random.choice(
+                range(othello.ACTION_SPACE), p=mcts_policy)
         else:
-            action = np.argmax(mcts_policy)
+            action = random.choice(
+                np.where(np.array(mcts_policy) == max(mcts_policy))[0])
 
         record.append(Sample(state, mcts_policy, current_player, None))
 
@@ -113,7 +115,7 @@ def testplay(current_weights, num_mcts_simulations,
                                           num_simulations=num_mcts_simulations)
                 action = np.argmax(mcts_policy)
             else:
-                action = othello.greedy_action(state, current_player, epsilon=0.4)
+                action = othello.greedy_action(state, current_player, epsilon=0.3)
 
             next_state, done = othello.step(state, action, current_player)
 
@@ -149,7 +151,7 @@ def testplay(current_weights, num_mcts_simulations,
 
 def main(num_cpus, n_episodes=30000, buffer_size=40000,
          batch_size=64, epochs_per_update=5,
-         num_mcts_simulations=30,
+         num_mcts_simulations=50,
          update_period=300, test_period=300,
          n_testplay=20,
          save_period=3000,

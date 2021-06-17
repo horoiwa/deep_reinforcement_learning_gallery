@@ -55,7 +55,7 @@ class Othello(tk.Frame):
 
         self.network.load_weights(self.weights_path)
 
-        self.mcts = MCTS(network=self.network, alpha=0.15)
+        self.mcts = MCTS(network=self.network, alpha=None)
 
     def reset(self):
         self.is_gameend = False
@@ -79,7 +79,7 @@ class Othello(tk.Frame):
         action = othello.xy_to_idx(row, col)
 
         valid_actions = othello.get_valid_actions(self.state, self.human)
-        print(valid_actions, action)
+        #print(valid_actions, action)
 
         if valid_actions == [othello.ACTION_NOOP]:
             action = othello.ACTION_NOOP
@@ -149,6 +149,8 @@ class Othello(tk.Frame):
                                            current_player=self.npc,
                                            num_simulations=50)
 
+            print(np.array(mcts_policy[:-1]).reshape(6,6))
+
             action = np.argmax(mcts_policy)
             self.state, done = othello.step(self.state, action, self.npc)
 
@@ -162,7 +164,7 @@ class Othello(tk.Frame):
 
     def refresh(self):
 
-        print(np.array(self.state).reshape(othello.N_ROWS, othello.N_COLS))
+        #print(np.array(self.state).reshape(othello.N_ROWS, othello.N_COLS))
 
         self.cv.delete('all')
         self.cv.create_rectangle(0, 0, self.w, self.h, fill="#2f4f4f")
@@ -197,7 +199,7 @@ class Othello(tk.Frame):
 if __name__ == "__main__":
     """ npctype should be one of "random", "eps-greedy", "alphazero"
     """
-    #app = Othello(npc_type="alphazero", weights_path="checkpoints/network")
-    app = Othello(npc_type="eps-greedy", weights_path="checkpoints/network")
+    app = Othello(npc_type="alphazero", weights_path="checkpoints/network")
+    #app = Othello(npc_type="eps-greedy", weights_path="checkpoints/network")
     app.pack()
     app.mainloop()
