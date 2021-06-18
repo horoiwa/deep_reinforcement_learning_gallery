@@ -5,7 +5,7 @@ import time
 import numpy as np
 
 import othello
-from network import SimpleCNN as AlphaZeroNetwork
+from network import AlphaZeroResNet
 from mcts import MCTS
 
 
@@ -49,7 +49,7 @@ class Othello(tk.Frame):
 
         state = othello.get_initial_state()
 
-        self.network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
+        self.network = AlphaZeroResNet(action_space=othello.ACTION_SPACE)
 
         self.network.predict(othello.encode_state(state, 1))
 

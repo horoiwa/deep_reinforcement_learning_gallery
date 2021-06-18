@@ -7,6 +7,8 @@ from tensorflow.keras.activations import relu
 
 
 class SimpleCNN(tf.keras.Model):
+    """ See https://github.com/suragnair/alpha-zero-general/
+    """
 
     def __init__(self, action_space, filters=512, use_bias=False):
 
@@ -72,7 +74,7 @@ class SimpleCNN(tf.keras.Model):
 
 class AlphaZeroResNet(tf.keras.Model):
 
-    def __init__(self, action_space, n_blocks=2, filters=256, use_bias=False):
+    def __init__(self, action_space, n_blocks=3, filters=256, use_bias=False):
         """
             Note:
             In AlphaZero Go paper, n_blocks = 20 (or 40) and filters = 256
@@ -115,25 +117,19 @@ class AlphaZeroResNet(tf.keras.Model):
 
     def call(self, x, training=False):
 
-        x = self.conv1(x)
-        x = self.bn1(x, training=training)
-        x = relu(x)
+        x = relu(self.bn1(self.conv1(x), training=training))
 
         for n in range(self.n_blocks):
             x = getattr(self, f"resblock{n}")(x, training=training)
 
         #: policy head
-        x1 = self.conv_p(x)
-        x1 = self.bn_p(x1, training=training)
-        x1 = relu(x1)
+        x1 = relu(self.bn_p(self.conv_p(x), training=training))
         x1 = self.flat_p(x1)
         logits = self.logits(x1)
         policy = tf.nn.softmax(logits)
 
         #: value head
-        x2 = self.conv_v(x)
-        x2 = self.bn_v(x2, training=training)
-        x2 = relu(x2)
+        x2 = relu(self.bn_v(self.conv_v(x), training=training))
         x2 = self.flat_v(x2)
         value = self.value(x2)
 
@@ -166,12 +162,9 @@ class ResBlock(tf.keras.layers.Layer):
 
         inputs = x
 
-        x = self.conv1(x)
-        x = self.bn1(x, training=training)
-        x = relu(x)
+        x = relu(self.bn1(self.conv1(x), training=training))
 
-        x = self.conv2(x)
-        x = self.bn2(x, training=training)
+        x = self.bn2(self.conv2(x), training=training)
         x = x + inputs  #: skip connection
         x = relu(x)
 

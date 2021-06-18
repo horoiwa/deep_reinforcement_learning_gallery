@@ -9,7 +9,7 @@ import numpy as np
 import ray
 from tqdm import tqdm
 
-from network import SimpleCNN as AlphaZeroNetwork
+from network import AlphaZeroResNet
 from mcts import MCTS
 from buffer import ReplayBuffer
 import othello
@@ -31,7 +31,7 @@ def selfplay(weights, num_mcts_simulations, dirichlet_alpha):
 
     state = othello.get_initial_state()
 
-    network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
+    network = AlphaZeroResNet(action_space=othello.ACTION_SPACE)
 
     network.predict(othello.encode_state(state, 1))
 
@@ -87,7 +87,7 @@ def testplay(current_weights, num_mcts_simulations,
 
     win_count = 0
 
-    network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
+    network = AlphaZeroResNet(action_space=othello.ACTION_SPACE)
 
     dummy_state = othello.get_initial_state()
 
@@ -149,7 +149,7 @@ def testplay(current_weights, num_mcts_simulations,
     return win_count, win_count / n_testplay, elapsed
 
 
-def main(num_cpus, n_episodes=30000, buffer_size=40000,
+def main(num_cpus, n_episodes=10000, buffer_size=40000,
          batch_size=64, epochs_per_update=5,
          num_mcts_simulations=50,
          update_period=300, test_period=300,
@@ -164,7 +164,7 @@ def main(num_cpus, n_episodes=30000, buffer_size=40000,
         shutil.rmtree(logdir)
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
-    network = AlphaZeroNetwork(action_space=othello.ACTION_SPACE)
+    network = AlphaZeroResNet(action_space=othello.ACTION_SPACE)
 
     #: initialize network parameters
     dummy_state = othello.encode_state(othello.get_initial_state(), 1)
