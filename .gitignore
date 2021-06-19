@@ -61,6 +61,7 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
+*bkup/
 # Translations
 *.mo
 *.pot
@@ -88,6 +89,8 @@ docs/_build/
 # PyBuilder
 target/
 
+img/
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
@@ -95,6 +98,7 @@ target/
 profile_default/
 ipython_config.py
 
+exp/
 # pyenv
 .python-version
 
