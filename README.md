@@ -1,10 +1,10 @@
 # Deep Reinforment Learning gallery
 
-Deep reinforcement learning example codes with tensorflow2.X
+Deep reinforcement learning methods implemented in tensorflow2
 
 ## Requirements
 
-`python==3.7`, `tensorflow>=2.1`, `ray>=1.0`
+`python>=3.7`, `tensorflow>=2.1`, `ray>=1.0`
 
 <br>
 
@@ -98,3 +98,8 @@ Deep reinforcement learning example codes with tensorflow2.X
 [Soft Actor-Critic Algorithms and Applications、Haarnoja et al、2018](https://arxiv.org/abs/1812.05905)
 
 
+### Alpha Go Zero / Alpha Zero
+
+[A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play](https://science.sciencemag.org/content/362/6419/1140.full?ijkey=XGd77kI6W4rSc&keytype=ref&siteid=sci)
+
+[Mastering the game of Go without human knowledge](https://www.nature.com/articles/nature24270)

@@ -11,7 +11,7 @@ from mcts import MCTS
 
 class Othello(tk.Frame):
 
-    def __init__(self, npc_type, weights_path):
+    def __init__(self, npc_type, weights_path=None):
         """
             どちらかがパス（合法手なし）時点でゲーム終了,
             その時点で石の多い方が勝ち
@@ -199,7 +199,7 @@ class Othello(tk.Frame):
 if __name__ == "__main__":
     """ npctype should be one of "random", "eps-greedy", "alphazero"
     """
-    app = Othello(npc_type="alphazero", weights_path="checkpoints/network")
-    #app = Othello(npc_type="eps-greedy", weights_path="checkpoints/network")
+    app = Othello(npc_type="alphazero", weights_path="ckpt/network")
+    #app = Othello(npc_type="eps-greedy")
     app.pack()
     app.mainloop()
