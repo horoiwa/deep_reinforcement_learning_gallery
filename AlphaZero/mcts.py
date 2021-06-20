@@ -130,10 +130,12 @@ class MCTS:
             assert len(U) == len(Q) == othello.ACTION_SPACE
 
             valid_actions = othello.get_valid_actions(state, current_player)
-            score = np.array([score if (action in valid_actions) else -np.inf
-                              for action, score in enumerate(U + Q)])
 
-            best_action = random.choice(np.where(score == score.max())[0])
+            scores = [u + q for u, q in zip(U, Q)]
+            scores = np.array([score if action in valid_actions else -np.inf
+                               for action, score in enumerate(scores)])
+
+            best_action = random.choice(np.where(scores == scores.max())[0])
 
             next_state = self.next_states[s][best_action]
 
