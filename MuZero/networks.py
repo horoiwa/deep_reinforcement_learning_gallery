@@ -65,7 +65,7 @@ class RepresentationNetwork(tf.keras.Model):
 
     def predict(self, frame_history: list, action_history: list):
         """
-        Utility function for encoding single observation to hidden state
+        Utility for encoding K step of frames and actions to hidden state
 
         Args:
             frame_history (list): list of Grayscale image
@@ -83,9 +83,9 @@ class RepresentationNetwork(tf.keras.Model):
         observation = np.concatenate([frames, actions], axis=2)
         observation = observation[np.newaxis, ...]
 
-        state = self(observation)
+        latent_state = self(observation)
 
-        return state
+        return latent_state
 
 
 class PVNetwork(tf.keras.Model):
@@ -129,15 +129,21 @@ class PVNetwork(tf.keras.Model):
 
         return policy, value
 
+    def predict(self, latent_state):
+        policy, value_dist = self(latent_state)
+        return policy, value
+
 
 class DynamicsNetwork(tf.keras.Model):
 
-    def __init__(self, action_space, n_supports):
+    def __init__(self, action_space, n_supports, supports):
         super(DynamicsNetwork, self).__init__()
 
         self.action_space = action_space
 
         self.n_supports = n_supports
+
+        self.supports = tf.convert_to_tensor(supports)
 
         self.conv1 = kl.Conv2D(256, kernel_size=3, strides=1,
                                padding="same", activation="relu",
@@ -185,6 +191,20 @@ class DynamicsNetwork(tf.keras.Model):
 
         return next_states, rewards
 
+    def predict(self, state, action: int):
+
+        assert len(state.shape) == 4 and state.shape[0] == 1
+        assert action in range(self.action_space)
+
+        action_onehot = np.zeros(
+            state.shape[:3]+(self.action_space,), dtype=np.float32)
+        action_onehot[..., action] += 1.0
+
+        state = tf.concat([state, action_onehot], axis=3)
+        next_state, reward_dist = self(state)
+
+        return next_state, reward
+
     def predict_all(self, state):
         """
         Utility function for predicting transition of all actions
@@ -207,7 +227,7 @@ class DynamicsNetwork(tf.keras.Model):
 
         #: create batch
         states = tf.concat(states, axis=0)
-        next_states, rewards = self(states)
+        next_states, rewards_dist = self(states)
 
         return next_states, rewards
 
