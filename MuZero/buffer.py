@@ -6,8 +6,9 @@ import numpy as np
 class Sample:
 
     observation: np.ndarray
-    mcts_policies: list
+    actions: list
     rewards: list
+    mcts_policies: list
     done: bool
 
 
