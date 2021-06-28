@@ -6,7 +6,7 @@ import numpy as np
 import tensorflow as tf
 
 
-class SinglePlayerMCTS:
+class AtariMCTS:
     """ Single player MCTS """
 
     def __init__(self, n_mcts_simulation, action_space,
@@ -55,25 +55,21 @@ class SinglePlayerMCTS:
         if s not in self.P:
             _ = self._expand(root_state)
 
-        import sys
-        sys.exit()
-
         #: Adding Dirichlet noise to the prior probabilities in the root node
         if self.dirichlet_alpha is not None:
             dirichlet_noise = np.random.dirichlet(
-                alpha=[self.dirichlet_alpha]*len(self.action_space))
-
-            for a, noise in zip(valid_actions, dirichlet_noise):
-                self.P[s][a] = (1 - self.eps) * self.P[s][a] + self.eps * noise
+                alpha=[self.dirichlet_alpha]*self.action_space)
+            self.P[s] = [(1 - self.eps) * prob + self.eps * noise
+                         for prob, noise in zip(self.P[s], dirichlet_noise)]
 
         #: MCTS simulation
         for _ in range(num_simulations):
 
             U = [self.c_puct * self.P[s][a] * math.sqrt(sum(self.N[s])) / (1 + self.N[s][a])
-                 for a in range(othello.ACTION_SPACE)]
-            Q = [w / n if n != 0 else 0 for w, n in zip(self.W[s], self.N[s])]
+                 for a in range(self.action_space)]
+            Q = [q if n != 0 else 0 for q, n in zip(self.Q[s], self.N[s])]
 
-            assert len(U) == len(Q) == othello.ACTION_SPACE
+            import pdb; pdb.set_trace()
 
             scores = [u + q for u, q in zip(U, Q)]
 
@@ -104,16 +100,15 @@ class SinglePlayerMCTS:
             nn_policy, nn_value = self.pv_network.predict(state)
             next_states, rewards = self.dynamics_network.predict_all(state)
 
-        nn_policy, nn_value = nn_policy.numpy().tolist()[0], nn_value.numpy()[0][0]
-
-        self.P[s] = nn_policy
+        self.P[s] = nn_policy.tolist()
         self.N[s] = [0] * self.action_space
         self.Q[s] = [0] * self.action_space
-        self.R[s] = [rewards[i] for i in range(self.action_space)]
+        self.R[s] = [r for r in rewards.numpy()]
 
         #: cache valid actions and next state to save computation
+        #: instead of [i, ...], [i:i+1, ...] to keep the dimension
         self.next_states[s] = [
-            next_states[i, ...] for i in range(self.action_space)]
+            next_states[i:i+1, ...] for i in range(self.action_space)]
 
         return nn_value
 

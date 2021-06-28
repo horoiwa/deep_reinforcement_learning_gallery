@@ -90,12 +90,17 @@ class RepresentationNetwork(tf.keras.Model):
 
 class PVNetwork(tf.keras.Model):
 
-    def __init__(self, action_space, n_supports):
+    def __init__(self, action_space: int, V_min: int, V_max: int):
 
         super(PVNetwork, self).__init__()
 
         self.action_space = action_space
-        self.n_supports = n_supports
+
+        self.V_min, self.V_max = V_min, V_max
+
+        self.n_supports = V_max - V_min + 1
+
+        self.supports = tf.range(V_min, V_max+1, dtype=tf.float32)
 
         self.conv_p = kl.Conv2D(2, kernel_size=1, strides=1, padding="valid",
                                 use_bias=False, kernel_regularizer=l2(0.001),
@@ -131,19 +136,26 @@ class PVNetwork(tf.keras.Model):
 
     def predict(self, latent_state):
         policy, value_dist = self(latent_state)
+
+        policy = policy.numpy()[0]
+        value = tf.reduce_sum(value_dist * self.supports).numpy()
+
         return policy, value
 
 
 class DynamicsNetwork(tf.keras.Model):
 
-    def __init__(self, action_space, n_supports, supports):
+    def __init__(self, action_space: int, V_min: int, V_max: int):
+
         super(DynamicsNetwork, self).__init__()
 
         self.action_space = action_space
 
-        self.n_supports = n_supports
+        self.V_min, self.V_max = V_min, V_max
 
-        self.supports = tf.convert_to_tensor(supports)
+        self.n_supports = V_max - V_min + 1
+
+        self.supports = tf.range(V_min, V_max+1, dtype=tf.float32)
 
         self.conv1 = kl.Conv2D(256, kernel_size=3, strides=1,
                                padding="same", activation="relu",
@@ -202,6 +214,7 @@ class DynamicsNetwork(tf.keras.Model):
 
         state = tf.concat([state, action_onehot], axis=3)
         next_state, reward_dist = self(state)
+        reward = tf.reduce_sum(reward_dist * self.supports)
 
         return next_state, reward
 
@@ -228,6 +241,10 @@ class DynamicsNetwork(tf.keras.Model):
         #: create batch
         states = tf.concat(states, axis=0)
         next_states, rewards_dist = self(states)
+
+        supports = tf.tile(
+            tf.reshape(self.supports, shape=(1, -1)), (4, 1))
+        rewards = tf.reduce_sum(rewards_dist * supports, axis=1)
 
         return next_states, rewards
 

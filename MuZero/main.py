@@ -5,7 +5,7 @@ import numpy as np
 
 import util
 from buffer import EpisodeBuffer, PrioritizedReplay
-from mcts import SinglePlayerMCTS
+from mcts import AtariMCTS
 from networks import DynamicsNetwork, PVNetwork, RepresentationNetwork
 
 
@@ -20,8 +20,6 @@ class Learner:
 
         self.V_min, self.V_max = V_min, V_max
 
-        self.n_supprts = V_max - V_min + 1
-
         self.gamma = gamma
 
         self.action_space = gym.make(env_id).action_space.n
@@ -30,10 +28,10 @@ class Learner:
             action_space=self.action_space)
 
         self.pv_network = PVNetwork(action_space=self.action_space,
-                                    n_supports=self.n_supprts)
+                                    V_min=V_min, V_max=V_max)
 
         self.dynamics_network = DynamicsNetwork(action_space=self.action_space,
-                                                n_supports=self.n_supprts)
+                                                V_min=V_min, V_max=V_max)
 
         self.preprocess_func = util.get_preprocess_func(self.env_id)
 
@@ -78,8 +76,6 @@ class Actor:
 
         self.V_min, self.V_max = V_min, V_max
 
-        self.n_supprts = V_max - V_min + 1
-
         self.preprocess_func = util.get_preprocess_func(self.env_id)
 
         self.buffer = EpisodeBuffer()
@@ -88,10 +84,10 @@ class Actor:
             action_space=self.action_space)
 
         self.pv_network = PVNetwork(action_space=self.action_space,
-                                    n_supports=self.n_supprts)
+                                    V_min=V_min, V_max=V_max)
 
         self.dynamics_network = DynamicsNetwork(action_space=self.action_space,
-                                                n_supports=self.n_supprts)
+                                                V_min=V_min, V_max=V_max)
 
         self._build_network()
 
@@ -135,7 +131,7 @@ class Actor:
         action_history = collections.deque(
             [0] * self.n_frames, maxlen=self.n_frames)
 
-        mcts = SinglePlayerMCTS(
+        mcts = AtariMCTS(
             n_mcts_simulation=self.n_mcts_simulation,
             action_space=self.action_space,
             pv_network=self.pv_network,
