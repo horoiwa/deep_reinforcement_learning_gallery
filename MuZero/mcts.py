@@ -11,7 +11,7 @@ class AtariMCTS:
 
     def __init__(self, n_mcts_simulation, action_space,
                  pv_network, dynamics_network,
-                 dirichlet_alpha, c_puct=1.0, epsilon=0.25):
+                 dirichlet_alpha, c_puct=1.25, epsilon=0.25):
 
         self.n_mcts_simulation = n_mcts_simulation
 
@@ -42,6 +42,8 @@ class AtariMCTS:
         #: cache next states to save computation
         self.next_states = {}
 
+        self.q_min, self.q_max = np.inf, -np.inf
+
     def search(self, root_state, num_simulations):
         """
         Args:
@@ -67,26 +69,26 @@ class AtariMCTS:
 
             U = [self.c_puct * self.P[s][a] * math.sqrt(sum(self.N[s])) / (1 + self.N[s][a])
                  for a in range(self.action_space)]
-            Q = [q if n != 0 else 0 for q, n in zip(self.Q[s], self.N[s])]
 
-            import pdb; pdb.set_trace()
+            Q = [(q - self.q_min) / (self.q_max - self.q_min)
+                 if n != 0 else 0.
+                 for q, n in zip(self.Q[s], self.N[s])]
 
-            scores = [u + q for u, q in zip(U, Q)]
-
-            #: Mask invalid actions
-            scores = np.array([score if action in valid_actions else -np.inf
-                               for action, score in enumerate(scores)])
+            scores = np.array([u + q for u, q in zip(U, Q)])
 
             #: np.argmaxでは同値maxで偏るため
-            action = random.choice(np.where(scores == scores.max())[0])
+            a = random.choice(np.where(scores == scores.max())[0])
 
-            next_state = self.next_states[s][action]
+            next_state = self.next_states[s][a]
 
-            v = -self._evaluate(next_state, -current_player)
+            G = self.R[s][a] + self.gamma * self._evaluate(next_state)
 
-            self.W[s][action] += v
+            self.Q[s][a] = (self.N[s][a] * self.Q[s][a] + G) / (self.N[s][a] + 1)
 
-            self.N[s][action] += 1
+            self.N[s][a] = self.N[s][a] + 1
+
+            self.q_min = min(self.q_min, self.Q[s][a])
+            self.q_max = max(self.q_max, self.Q[s][a])
 
         mcts_policy = [n / sum(self.N[s]) for n in self.N[s]]
 
