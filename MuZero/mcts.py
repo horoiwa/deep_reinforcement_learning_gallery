@@ -10,7 +10,7 @@ class AtariMCTS:
     """ Single player MCTS """
 
     def __init__(self, n_mcts_simulation, action_space,
-                 pv_network, dynamics_network,
+                 pv_network, dynamics_network, gamma,
                  dirichlet_alpha, c_puct=1.25, epsilon=0.25):
 
         self.n_mcts_simulation = n_mcts_simulation
@@ -22,6 +22,8 @@ class AtariMCTS:
         self.dynamics_network = dynamics_network
 
         self.dirichlet_alpha = dirichlet_alpha
+
+        self.gamma = gamma
 
         self.c_puct = c_puct
 
@@ -39,19 +41,21 @@ class AtariMCTS:
         #: Immediate reward
         self.R = {}
 
-        #: cache next states to save computation
-        self.next_states = {}
+        #: next states
+        self.S = {}
 
         self.q_min, self.q_max = np.inf, -np.inf
 
-    def search(self, root_state, num_simulations):
-        """
-        Args:
-            root_state (Tensor)
-            num_simulations (int)
-        """
+    def _normalize(self, q):
 
-        #: Tensor.ref() is hashable
+        if self.q_max > self.q_min:
+            return (q - self.q_min) / (self.q_max - self.q_min)
+        else:
+            return q
+
+    def search(self, root_state, num_simulations):
+
+        #: EagerTensor.ref() is hashable
         s = root_state.ref()
 
         if s not in self.P:
@@ -70,21 +74,20 @@ class AtariMCTS:
             U = [self.c_puct * self.P[s][a] * math.sqrt(sum(self.N[s])) / (1 + self.N[s][a])
                  for a in range(self.action_space)]
 
-            Q = [(q - self.q_min) / (self.q_max - self.q_min)
-                 if n != 0 else 0.
+            Q = [self._normalize(q) if n != 0 else 0.
                  for q, n in zip(self.Q[s], self.N[s])]
 
-            scores = np.array([u + q for u, q in zip(U, Q)])
+            ucb_scores = np.array([u + q for u, q in zip(U, Q)])
 
             #: np.argmaxでは同値maxで偏るため
-            a = random.choice(np.where(scores == scores.max())[0])
+            a = random.choice(np.where(ucb_scores == ucb_scores.max())[0])
 
-            next_state = self.next_states[s][a]
+            next_state = self.S[s][a]
 
+            #: cumulative reward with n-step bootstrapping
             G = self.R[s][a] + self.gamma * self._evaluate(next_state)
 
             self.Q[s][a] = (self.N[s][a] * self.Q[s][a] + G) / (self.N[s][a] + 1)
-
             self.N[s][a] = self.N[s][a] + 1
 
             self.q_min = min(self.q_min, self.Q[s][a])
@@ -109,47 +112,40 @@ class AtariMCTS:
 
         #: cache valid actions and next state to save computation
         #: instead of [i, ...], [i:i+1, ...] to keep the dimension
-        self.next_states[s] = [
-            next_states[i:i+1, ...] for i in range(self.action_space)]
+        self.S[s] = [next_states[i:i+1, ...] for i in range(self.action_space)]
 
         return nn_value
 
-    def _evaluate(self, state, current_player):
+    def _evaluate(self, state):
 
-        s = self.state_to_str(state, current_player)
+        s = state.ref()
 
-        if othello.is_done(state, current_player):
-            #: ゲーム終了
-            reward_first, reward_second = othello.get_result(state)
-            reward = reward_first if current_player == 1 else reward_second
-            return reward
-
-        elif s not in self.P:
-            #: ゲーム終了していないリーフノードの場合は展開
-            nn_value = self._expand(state, current_player)
-            return nn_value
+        if s not in self.P:
+            #: 未展開ノードへの到達時
+            value = self._expand(state)
+            return value
 
         else:
-            #: 子ノードをevaluate
+            #: 子ノードをUCBスコアに従って選択
             U = [self.c_puct * self.P[s][a] * math.sqrt(sum(self.N[s])) / (1 + self.N[s][a])
-                 for a in range(othello.ACTION_SPACE)]
-            Q = [q / n if n != 0 else q for q, n in zip(self.W[s], self.N[s])]
+                 for a in range(self.action_space)]
 
-            assert len(U) == len(Q) == othello.ACTION_SPACE
+            Q = [self._normalize(q) if n != 0 else 0.
+                 for q, n in zip(self.Q[s], self.N[s])]
 
-            valid_actions = othello.get_valid_actions(state, current_player)
+            ucb_scores = np.array([u + q for u, q in zip(U, Q)])
 
-            scores = [u + q for u, q in zip(U, Q)]
-            scores = np.array([score if action in valid_actions else -np.inf
-                               for action, score in enumerate(scores)])
+            #: np.argmaxでは同値maxで偏るため
+            a = random.choice(np.where(ucb_scores == ucb_scores.max())[0])
 
-            best_action = random.choice(np.where(scores == scores.max())[0])
+            next_state = self.S[s][a]
 
-            next_state = self.next_states[s][best_action]
+            G = self.R[s][a] + self.gamma * self._evaluate(next_state)
 
-            v = -self._evaluate(next_state, -current_player)
+            self.Q[s][a] = (self.N[s][a] * self.Q[s][a] + G) / (self.N[s][a] + 1)
+            self.N[s][a] = self.N[s][a] + 1
 
-            self.W[s][best_action] += v
-            self.N[s][best_action] += 1
+            self.q_min = min(self.q_min, self.Q[s][a])
+            self.q_max = max(self.q_max, self.Q[s][a])
 
-            return v
+            return G

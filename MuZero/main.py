@@ -136,6 +136,7 @@ class Actor:
             action_space=self.action_space,
             pv_network=self.pv_network,
             dynamics_network=self.dynamics_network,
+            gamma=self.gamma,
             dirichlet_alpha=self.dirichlet_alpha)
 
         done = False

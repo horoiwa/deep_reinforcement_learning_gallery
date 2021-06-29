@@ -138,7 +138,7 @@ class PVNetwork(tf.keras.Model):
         policy, value_dist = self(latent_state)
 
         policy = policy.numpy()[0]
-        value = tf.reduce_sum(value_dist * self.supports).numpy()
+        value = tf.reduce_mean(value_dist * self.supports).numpy()
 
         return policy, value
 
@@ -214,7 +214,7 @@ class DynamicsNetwork(tf.keras.Model):
 
         state = tf.concat([state, action_onehot], axis=3)
         next_state, reward_dist = self(state)
-        reward = tf.reduce_sum(reward_dist * self.supports)
+        reward = tf.reduce_mean(reward_dist * self.supports)
 
         return next_state, reward
 
@@ -244,7 +244,7 @@ class DynamicsNetwork(tf.keras.Model):
 
         supports = tf.tile(
             tf.reshape(self.supports, shape=(1, -1)), (4, 1))
-        rewards = tf.reduce_sum(rewards_dist * supports, axis=1)
+        rewards = tf.reduce_mean(rewards_dist * supports, axis=1)
 
         return next_states, rewards
 
