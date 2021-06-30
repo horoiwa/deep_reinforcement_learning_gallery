@@ -12,13 +12,14 @@ from networks import DynamicsNetwork, PVNetwork, RepresentationNetwork
 
 
 @dataclass
-class Sample:
+class Experience:
 
     observation: np.ndarray
     actions: list
     rewards: list
     mcts_policies: list
     done: bool
+    z: np.ndarray
 
 
 class Learner:
@@ -70,11 +71,13 @@ class Learner:
 class Actor:
 
     def __init__(self, env_id, n_frames,
-                 num_mcts_simulations,
+                 num_mcts_simulations, K,
                  gamma, V_max, V_min,
                  dirichlet_alpha):
 
         self.env_id = env_id
+
+        self.K = K
 
         self.num_mcts_simulations = num_mcts_simulations
 
@@ -121,14 +124,22 @@ class Actor:
         #: 1episodeのrollout
         game_history = self._rollout(T)
 
-        samples = self.create_samples(game_history)
+        experiences, priorities = self.create_experiences(game_history)
 
-        return samples
+        return experiences, priorities
 
-    def create_samples(self, game_history):
-        samples = []
-        import pdb; pdb.set_trace()
-        return samples
+    def create_experiences(self, game_steps):
+
+        Z = sum([step.r for step in game_steps])
+
+        priorities = [abs(Z - step.v_pred) for step in game_steps]
+
+        #:
+        for i in reversed(range(len(game_steps))):
+            import pdb; pdb.set_trace()
+            pass
+
+        return experiences, priorities
 
     def _sync_weights(self, weights):
 
@@ -142,9 +153,9 @@ class Actor:
 
         env = gym.make(self.env_id)
 
-        lives = env.ale.lives  #: 5 for atari
+        game_steps = []
 
-        game_history = []
+        Step = collections.namedtuple("Step", ["o", "a", "r", "done", "v_pred"])
 
         frame = self.preprocess_func(env.reset())
 
@@ -167,6 +178,7 @@ class Actor:
 
             with tf.device("/cpu:0"):
                 latent_state, observation = self.repr_network.predict(frame_history, action_history)
+                _, v_pred = self.pv_network.predict(latent_state)
 
             debug = True
             if not debug:
@@ -182,20 +194,18 @@ class Actor:
 
             frame, reward, done, info = env.step(action)
 
-            if lives != info["ale.lives"]:
-                done = True
-
-            game_history.append((observation, action, reward, done))
+            game_steps.append(
+                Step(o=observation, a=action, r=reward, done=done, v_pred=v_pred))
 
             frame_history.append(self.preprocess_func(frame))
 
             action_history.append(action)
 
-        return game_history
+        return game_steps
 
 
 def main(env_id="BreakoutDeterministic-v4",
-         n_episodes=10000,
+         n_episodes=10000, K=3,
          n_frames=8, gamma=0.997,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**21, num_mcts_simulations=10):
@@ -221,7 +231,7 @@ def main(env_id="BreakoutDeterministic-v4",
 
     buffer = PrioritizedReplay(capacity=buffer_size)
 
-    actor = Actor(env_id=env_id, n_frames=n_frames,
+    actor = Actor(env_id=env_id, n_frames=n_frames, K=K,
                   num_mcts_simulations=num_mcts_simulations,
                   V_min=V_min, V_max=V_max, gamma=gamma,
                   dirichlet_alpha=0.25)
@@ -229,8 +239,8 @@ def main(env_id="BreakoutDeterministic-v4",
     n = 0
 
     for _ in range(20):
-        samples = actor.sync_weights_and_rollout(
-            current_weights, T=1.0)
+        experieces, priorities = actor.sync_weights_and_rollout(current_weights, T=1.0)
+        buffer.add(experieces, priorities)
 
     while n <= n_episodes:
         break
