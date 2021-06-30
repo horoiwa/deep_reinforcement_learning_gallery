@@ -9,11 +9,9 @@ import tensorflow as tf
 class AtariMCTS:
     """ Single player MCTS """
 
-    def __init__(self, n_mcts_simulation, action_space,
+    def __init__(self, action_space,
                  pv_network, dynamics_network, gamma,
                  dirichlet_alpha, c_puct=1.25, epsilon=0.25):
-
-        self.n_mcts_simulation = n_mcts_simulation
 
         self.action_space = action_space
 
@@ -53,7 +51,7 @@ class AtariMCTS:
         else:
             return q
 
-    def search(self, root_state, num_simulations):
+    def search(self, root_state, num_simulations, T):
 
         #: EagerTensor.ref() is hashable
         s = root_state.ref()
@@ -93,7 +91,9 @@ class AtariMCTS:
             self.q_min = min(self.q_min, self.Q[s][a])
             self.q_max = max(self.q_max, self.Q[s][a])
 
-        mcts_policy = [n / sum(self.N[s]) for n in self.N[s]]
+        visit_counts = np.array(self.N[s])
+
+        mcts_policy = visit_counts ** (1 / T) / (visit_counts ** (1 / T)).sum()
 
         return mcts_policy
 

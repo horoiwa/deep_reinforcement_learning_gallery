@@ -63,13 +63,22 @@ class RepresentationNetwork(tf.keras.Model):
 
         return encoded_states
 
-    def predict(self, frame_history: list, action_history: list):
+    def predict(self, frame_history, action_history):
+
+        observation = self.make_observation(frame_history, action_history)
+
+        latent_state = self(observation)
+
+        return latent_state, observation
+
+    def make_observation(self, frame_history, action_history):
         """
         Utility for encoding K step of frames and actions to hidden state
 
         Args:
             frame_history (list): list of Grayscale image
             action_history (list[int]): list of actions
+            action_space(int)
         """
 
         (h, w), L = frame_history[0].shape, len(frame_history)
@@ -81,11 +90,9 @@ class RepresentationNetwork(tf.keras.Model):
         actions = actions * action_history / (self.action_space - 1)
 
         observation = np.concatenate([frames, actions], axis=2)
-        observation = observation[np.newaxis, ...]
+        observation = tf.convert_to_tensor(observation[np.newaxis, ...])
 
-        latent_state = self(observation)
-
-        return latent_state
+        return observation
 
 
 class PVNetwork(tf.keras.Model):

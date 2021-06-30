@@ -1,12 +1,24 @@
 import collections
+from dataclasses import dataclass
 
 import gym
 import numpy as np
+import tensorflow as tf
 
 import util
-from buffer import EpisodeBuffer, PrioritizedReplay
+from buffer import PrioritizedReplay
 from mcts import AtariMCTS
 from networks import DynamicsNetwork, PVNetwork, RepresentationNetwork
+
+
+@dataclass
+class Sample:
+
+    observation: np.ndarray
+    actions: list
+    rewards: list
+    mcts_policies: list
+    done: bool
 
 
 class Learner:
@@ -44,7 +56,7 @@ class Learner:
         frame_history = [frame] * self.n_frames
         action_history = [0] * self.n_frames
 
-        state = self.repr_network.predict(frame_history, action_history)
+        state, obs = self.repr_network.predict(frame_history, action_history)
         policy, value = self.pv_network.predict(state)
         next_state, reward = self.dynamics_network.predict(state, action=0)
 
@@ -58,13 +70,13 @@ class Learner:
 class Actor:
 
     def __init__(self, env_id, n_frames,
-                 n_mcts_simulation,
+                 num_mcts_simulations,
                  gamma, V_max, V_min,
                  dirichlet_alpha):
 
         self.env_id = env_id
 
-        self.n_mcts_simulation = n_mcts_simulation
+        self.num_mcts_simulations = num_mcts_simulations
 
         self.action_space = gym.make(env_id).action_space.n
 
@@ -77,8 +89,6 @@ class Actor:
         self.V_min, self.V_max = V_min, V_max
 
         self.preprocess_func = util.get_preprocess_func(self.env_id)
-
-        self.buffer = EpisodeBuffer()
 
         self.repr_network = RepresentationNetwork(
             action_space=self.action_space)
@@ -99,17 +109,26 @@ class Actor:
         frame_history = [frame] * self.n_frames
         action_history = [0] * self.n_frames
 
-        state = self.repr_network.predict(frame_history, action_history)
+        state, obs = self.repr_network.predict(frame_history, action_history)
         policy, value = self.pv_network(state)
         next_state, reward = self.dynamics_network.predict(state, action=0)
 
-    def sync_weights_and_rollout(self, current_weights, temperature):
+    def sync_weights_and_rollout(self, current_weights, T):
 
         #: 最新のネットワークに同期
         self._sync_weights(current_weights)
 
         #: 1episodeのrollout
-        self._rollout(temperature)
+        game_history = self._rollout(T)
+
+        samples = self.create_samples(game_history)
+
+        return samples
+
+    def create_samples(self, game_history):
+        samples = []
+        import pdb; pdb.set_trace()
+        return samples
 
     def _sync_weights(self, weights):
 
@@ -119,9 +138,13 @@ class Actor:
 
         self.dynamics_network.set_weights(weights[2])
 
-    def _rollout(self, temperature):
+    def _rollout(self, T):
 
         env = gym.make(self.env_id)
+
+        lives = env.ale.lives  #: 5 for atari
+
+        game_history = []
 
         frame = self.preprocess_func(env.reset())
 
@@ -132,7 +155,6 @@ class Actor:
             [0] * self.n_frames, maxlen=self.n_frames)
 
         mcts = AtariMCTS(
-            n_mcts_simulation=self.n_mcts_simulation,
             action_space=self.action_space,
             pv_network=self.pv_network,
             dynamics_network=self.dynamics_network,
@@ -143,24 +165,40 @@ class Actor:
 
         while not done:
 
-            latent_state = self.repr_network.predict(frame_history, action_history)
+            with tf.device("/cpu:0"):
+                latent_state, observation = self.repr_network.predict(frame_history, action_history)
 
-            mcts_policy = mcts.search(latent_state, self.n_mcts_simulation)
+            debug = True
+            if not debug:
 
-            action = np.random.choice(range(self.action_space), p=mcts_policy)
+                mcts_policy = mcts.search(
+                    latent_state, self.num_mcts_simulations, T)
+
+                action = np.random.choice(
+                    range(self.action_space), p=mcts_policy)
+
+            else:
+                action = np.random.choice(range(self.action_space))
 
             frame, reward, done, info = env.step(action)
+
+            if lives != info["ale.lives"]:
+                done = True
+
+            game_history.append((observation, action, reward, done))
 
             frame_history.append(self.preprocess_func(frame))
 
             action_history.append(action)
+
+        return game_history
 
 
 def main(env_id="BreakoutDeterministic-v4",
          n_episodes=10000,
          n_frames=8, gamma=0.997,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
-         buffer_size=2**21, n_mcts_simulation=10):
+         buffer_size=2**21, num_mcts_simulations=10):
     """
 
     Args:
@@ -184,7 +222,7 @@ def main(env_id="BreakoutDeterministic-v4",
     buffer = PrioritizedReplay(capacity=buffer_size)
 
     actor = Actor(env_id=env_id, n_frames=n_frames,
-                  n_mcts_simulation=n_mcts_simulation,
+                  num_mcts_simulations=num_mcts_simulations,
                   V_min=V_min, V_max=V_max, gamma=gamma,
                   dirichlet_alpha=0.25)
 
@@ -192,7 +230,7 @@ def main(env_id="BreakoutDeterministic-v4",
 
     for _ in range(20):
         samples = actor.sync_weights_and_rollout(
-            current_weights, temperature=1.0)
+            current_weights, T=1.0)
 
     while n <= n_episodes:
         break
