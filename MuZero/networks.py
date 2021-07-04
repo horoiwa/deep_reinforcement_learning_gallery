@@ -67,9 +67,9 @@ class RepresentationNetwork(tf.keras.Model):
 
         observation = self.make_observation(frame_history, action_history)
 
-        latent_state = self(observation)
+        hidden_state = self(observation)
 
-        return latent_state, observation
+        return hidden_state, observation
 
     def make_observation(self, frame_history, action_history):
         """
@@ -141,8 +141,8 @@ class PVNetwork(tf.keras.Model):
 
         return policy, value
 
-    def predict(self, latent_state):
-        policy, value_dist = self(latent_state)
+    def predict(self, hidden_state):
+        policy, value_dist = self(hidden_state)
 
         policy = policy.numpy()[0]
         value = tf.reduce_mean(value_dist * self.supports).numpy()

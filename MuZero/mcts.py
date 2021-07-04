@@ -57,7 +57,7 @@ class AtariMCTS:
         s = root_state.ref()
 
         if s not in self.P:
-            _ = self._expand(root_state)
+            root_value = self._expand(root_state)
 
         #: Adding Dirichlet noise to the prior probabilities in the root node
         if self.dirichlet_alpha is not None:
@@ -95,7 +95,7 @@ class AtariMCTS:
 
         mcts_policy = visit_counts ** (1 / T) / (visit_counts ** (1 / T)).sum()
 
-        return mcts_policy
+        return mcts_policy, root_value
 
     def _expand(self, state):
 

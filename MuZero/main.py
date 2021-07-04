@@ -12,14 +12,13 @@ from networks import DynamicsNetwork, PVNetwork, RepresentationNetwork
 
 
 @dataclass
-class Experience:
+class Sample:
 
     observation: np.ndarray
     actions: list
-    rewards: list
     mcts_policies: list
-    done: bool
-    z: np.ndarray
+    rewards: list
+    value: float
 
 
 class Learner:
@@ -71,13 +70,13 @@ class Learner:
 class Actor:
 
     def __init__(self, env_id, n_frames,
-                 num_mcts_simulations, K,
-                 gamma, V_max, V_min,
+                 num_mcts_simulations, unroll_steps,
+                 gamma, V_max, V_min, td_steps,
                  dirichlet_alpha):
 
         self.env_id = env_id
 
-        self.K = K
+        self.unroll_steps = unroll_steps
 
         self.num_mcts_simulations = num_mcts_simulations
 
@@ -90,6 +89,8 @@ class Actor:
         self.dirichlet_alpha = dirichlet_alpha
 
         self.V_min, self.V_max = V_min, V_max
+
+        self.td_steps = td_steps
 
         self.preprocess_func = util.get_preprocess_func(self.env_id)
 
@@ -124,22 +125,53 @@ class Actor:
         #: 1episodeのrollout
         game_history = self._rollout(T)
 
-        experiences, priorities = self.create_experiences(game_history)
+        experiences, priorities = self.make_targets(game_history)
 
         return experiences, priorities
 
-    def create_experiences(self, game_steps):
+    def make_samples(self, game_history):
+        """
+            zは割引が必要であることに注意
+            またbootstrapping return
+            absorbing states.
+        """
 
-        Z = sum([step.r for step in game_steps])
+        samples = []
 
-        priorities = [abs(Z - step.v_pred) for step in game_steps]
+        observations, actions, rewards, mcts_policies, root_values = game_history
 
-        #:
-        for i in reversed(range(len(game_steps))):
-            import pdb; pdb.set_trace()
-            pass
+        episode_len = len(observations)
 
-        return experiences, priorities
+        for idx in range(episode_len):
+
+            bootstrap_idx = idx + self.td_steps
+
+            #: remaining value
+            if bootstrap_idx < episode_len:
+                value = root_values[bootstrap_idx]
+            else:
+                value = 0
+
+            value += sum([r * self.gamma ** i for i, r in
+                          enumerate(rewards[idx:bootstrap_idx])])
+
+            _rewards = None
+            _actions = None
+            _mcts_policies = None
+
+            sample = Sample(
+                observation=observations[idx],
+                actions=_actions,
+                mcts_policies=_mcts_policies,
+                rewards=_rewards,
+                value=value)
+
+            samples.append(sample)
+
+        priorities = [abs(sample.value - value_pred)
+                      for sample, value_pred in zip(samples, root_values)]
+
+        return samples, priorities
 
     def _sync_weights(self, weights):
 
@@ -153,9 +185,8 @@ class Actor:
 
         env = gym.make(self.env_id)
 
-        game_steps = []
-
-        Step = collections.namedtuple("Step", ["o", "a", "r", "done", "v_pred"])
+        #: Game history
+        observations, actions, rewards, mcts_policies, root_values = [], [], [], [], []
 
         frame = self.preprocess_func(env.reset())
 
@@ -177,36 +208,40 @@ class Actor:
         while not done:
 
             with tf.device("/cpu:0"):
-                latent_state, observation = self.repr_network.predict(frame_history, action_history)
-                _, v_pred = self.pv_network.predict(latent_state)
+                hidden_state, obs = self.repr_network.predict(frame_history, action_history)
 
             debug = True
             if not debug:
 
-                mcts_policy = mcts.search(
-                    latent_state, self.num_mcts_simulations, T)
+                mcts_policy, root_value = mcts.search(
+                    hidden_state, self.num_mcts_simulations, T)
 
                 action = np.random.choice(
                     range(self.action_space), p=mcts_policy)
 
             else:
-                action = np.random.choice(range(self.action_space))
+                mcts_policy, root_value = np.array([0.1, 0.1, 0.3, 0.5]), 1.0
+                action = np.random.choice(range(self.action_space), p=mcts_policy)
 
             frame, reward, done, info = env.step(action)
 
-            game_steps.append(
-                Step(o=observation, a=action, r=reward, done=done, v_pred=v_pred))
-
             frame_history.append(self.preprocess_func(frame))
-
             action_history.append(action)
 
-        return game_steps
+            observations.append(obs)
+            actions.append(action)
+            rewards.append(reward)
+            mcts_policies.append(mcts_policy)
+            root_values.append(root_value)
+
+        game_history = (observations, actions, rewards, mcts_policies, root_values)
+
+        return game_history
 
 
 def main(env_id="BreakoutDeterministic-v4",
-         n_episodes=10000, K=3,
-         n_frames=8, gamma=0.997,
+         n_episodes=10000, unroll_steps=5,
+         n_frames=8, gamma=0.997, td_steps=10,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**21, num_mcts_simulations=10):
     """
@@ -231,8 +266,8 @@ def main(env_id="BreakoutDeterministic-v4",
 
     buffer = PrioritizedReplay(capacity=buffer_size)
 
-    actor = Actor(env_id=env_id, n_frames=n_frames, K=K,
-                  num_mcts_simulations=num_mcts_simulations,
+    actor = Actor(env_id=env_id, n_frames=n_frames, unroll_steps=unroll_steps,
+                  num_mcts_simulations=num_mcts_simulations, td_steps=td_steps,
                   V_min=V_min, V_max=V_max, gamma=gamma,
                   dirichlet_alpha=0.25)
 
