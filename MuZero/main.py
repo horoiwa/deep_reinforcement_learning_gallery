@@ -20,7 +20,7 @@ class Sample:
     actions: list
     mcts_policies: list
     rewards: list
-    value: float
+    values: float
 
 
 class Learner:
@@ -67,6 +67,37 @@ class Learner:
                    self.dynamics_network.get_weights())
 
         return weights
+
+    def update_network(self, minibatchs):
+
+        indices_all, priorities_all, losses = [], [], []
+
+        for (indices, weights, samples) in minibatchs:
+
+            samples = [pickle.loads(lz4f.decompress(sample)) for sample in samples]
+
+            priorities, loss = self._update(weights, samples)
+
+            indices_all += indices
+            priorities_all += priorities
+            losses.append(loss)
+
+        current_weights = self.q_network.get_weights()
+        loss_mean = np.array(losses).mean()
+
+        return current_weights, indices_all, priorities_all, loss_mean
+
+    def _update(self, weights, samples):
+
+        #: Network inputs
+        observations = tf.concat([s.observation for s in samples], axis=0)  #: (batchsize, ...)
+        actions = tf.stack([s.actions for s in samples], axis=1)            #: (unroll_steps, batchsize)
+
+        #: Targets
+        mcts_policies = tf.stack([s.mcts_policies for s in samples], axis=1)  #: (unroll_steps, batch_size, action_space)
+        rewards_scalar = tf.stack([s.rewards for s in samples], axis=1)       #: (unroll_steps, batch_size)
+        values_scalar = tf.stack([s.values for s in samples], axis=1)          #: (unroll_steps, batch_size)
+        import pdb; pdb.set_trace()
 
 
 class Actor:
@@ -127,11 +158,11 @@ class Actor:
         #: 1episodeのrollout
         game_history = self._rollout(T)
 
-        samples, priorities = self.make_samples(game_history)
+        samples, priorities = self._make_samples(game_history)
 
         return samples, priorities
 
-    def make_samples(self, game_history):
+    def _make_samples(self, game_history):
         """
             zは割引が必要であることに注意
             またbootstrapping return
@@ -155,6 +186,7 @@ class Actor:
             np.array([1. / self.action_space] * self.action_space)
             for _ in range(self.td_steps)]
 
+        values = []
         for idx in range(episode_len):
 
             bootstrap_idx = idx + self.td_steps
@@ -167,18 +199,22 @@ class Actor:
 
             value += sum([r * self.gamma ** i for i, r in
                           enumerate(rewards[idx:bootstrap_idx])])
+            values.append(value)
+
+        for idx in range(episode_len):
 
             #: shape == (unroll_steps, ...)
             _rewards = np.array(rewards[idx:idx+self.unroll_steps])
             _actions = np.array(actions[idx:idx+self.unroll_steps])
             _mcts_policies = np.vstack(mcts_policies[idx:idx+self.unroll_steps])
+            _values = np.array(values[idx:idx+self.unroll_steps])
 
             sample = Sample(
                 observation=observations[idx],
                 actions=_actions,
                 mcts_policies=_mcts_policies,
                 rewards=_rewards,
-                value=value)
+                values=_values)
 
             samples.append(sample)
 
@@ -259,7 +295,8 @@ def main(env_id="BreakoutDeterministic-v4",
          n_episodes=10000, unroll_steps=5,
          n_frames=8, gamma=0.997, td_steps=10,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
-         buffer_size=2**21, num_mcts_simulations=10):
+         buffer_size=2**21, num_mcts_simulations=10,
+         batchsize=256):
     """
 
     Args:
@@ -289,12 +326,21 @@ def main(env_id="BreakoutDeterministic-v4",
 
     n = 0
 
-    for _ in range(20):
-        experieces, priorities = actor.sync_weights_and_rollout(current_weights, T=1.0)
-        buffer.add(experieces, priorities)
+    for _ in range(2):
+        samples, priorities = actor.sync_weights_and_rollout(current_weights, T=1.0)
+        buffer.add_samples(priorities, samples)
+        n += 1
 
     while n <= n_episodes:
-        break
+
+        samples, priorities = actor.sync_weights_and_rollout(current_weights, T=1.0)
+        buffer.add_samples(priorities, samples)
+        n += 1
+
+        minibatchs = [buffer.sample_minibatch(batchsize=batchsize)]
+
+        learner.update_network(minibatchs)
+
 
 
 

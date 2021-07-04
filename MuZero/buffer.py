@@ -1,7 +1,6 @@
+import random
 
 import numpy as np
-
-
 
 
 class PrioritizedReplay:
@@ -28,11 +27,11 @@ class PrioritizedReplay:
 
         return len(self.buffer) if self.full else self.next_idx
 
-    def add(self, priorities, experiences):
+    def add_samples(self, priorities, samples):
 
-        assert len(priorities) == len(experiences)
+        assert len(priorities) == len(samples)
 
-        for priority, exp in zip(priorities, experiences):
+        for priority, exp in zip(priorities, samples):
 
             self.sumtree[self.next_idx] = priority
             self.buffer[self.next_idx] = exp
@@ -42,9 +41,9 @@ class PrioritizedReplay:
                 self.full = True
                 self.next_idx = 0
 
-    def sample_minibatch(self, batch_size):
+    def sample_minibatch(self, batchsize):
 
-        indices = [self.sumtree.sample() for _ in range(batch_size)]
+        indices = [self.sumtree.sample() for _ in range(batchsize)]
 
         weights = []
         for idx in indices:
@@ -53,18 +52,17 @@ class PrioritizedReplay:
             weights.append(weight)
         weights = np.array(weights) / max(weights)
 
-        experiences = [self.buffer[idx] for idx in indices]
+        samples = [self.buffer[idx] for idx in indices]
 
-        return indices, weights, experiences
+        return indices, weights, samples
 
-    def update_priorities(self, indices, td_errors):
+    def update_priorities(self, indices, priorities):
         """ Update priorities of sampled transitions.
         """
-        assert len(indices) == len(td_errors)
+        assert len(indices) == len(priorities)
 
-        for idx, td_error in zip(indices, td_errors):
-            priority = (abs(td_error) + 0.001) ** self.alpha
-            self.sumtree[idx] = priority**self.alpha
+        for idx, priority in zip(indices, priorities):
+            self.sumtree[idx] = priority ** (self.alpha)
 
 
 class SumTree:
