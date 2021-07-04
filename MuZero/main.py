@@ -18,9 +18,9 @@ class Sample:
 
     observation: np.ndarray
     actions: list
-    mcts_policies: list
-    rewards: list
-    values: float
+    target_policies: list
+    target_rewards: list
+    target_values: float
 
 
 class Learner:
@@ -33,6 +33,10 @@ class Learner:
         self.n_frames = n_frames
 
         self.V_min, self.V_max = V_min, V_max
+
+        self.n_supports = V_max - V_min + 1
+
+        self.supports = tf.range(V_min, V_max+1, dtype=tf.float32)
 
         self.gamma = gamma
 
@@ -76,7 +80,7 @@ class Learner:
 
             samples = [pickle.loads(lz4f.decompress(sample)) for sample in samples]
 
-            priorities, loss = self._update(weights, samples)
+            priorities, loss = self.update(weights, samples)
 
             indices_all += indices
             priorities_all += priorities
@@ -87,16 +91,22 @@ class Learner:
 
         return current_weights, indices_all, priorities_all, loss_mean
 
-    def _update(self, weights, samples):
+    def update(self, weights, samples):
 
         #: Network inputs
         observations = tf.concat([s.observation for s in samples], axis=0)  #: (batchsize, ...)
         actions = tf.stack([s.actions for s in samples], axis=1)            #: (unroll_steps, batchsize)
 
         #: Targets
-        mcts_policies = tf.stack([s.mcts_policies for s in samples], axis=1)  #: (unroll_steps, batch_size, action_space)
-        rewards_scalar = tf.stack([s.rewards for s in samples], axis=1)       #: (unroll_steps, batch_size)
-        values_scalar = tf.stack([s.values for s in samples], axis=1)          #: (unroll_steps, batch_size)
+        target_policies = tf.stack([s.target_policies for s in samples], axis=1)  #: (unroll_steps, batch_size, action_space)
+
+        target_rewards = tf.stack([s.target_rewards for s in samples], axis=1)         #: (unroll_steps, batch_size)
+        target_rewards = tf.scalar_to_supports(target_rewards)
+
+        target_values = tf.stack([s.target_values for s in samples], axis=1)         #: (unroll_steps, batch_size)
+
+
+    def scalar_to_supports(self, x):
         import pdb; pdb.set_trace()
 
 
@@ -153,16 +163,16 @@ class Actor:
     def sync_weights_and_rollout(self, current_weights, T):
 
         #: 最新のネットワークに同期
-        self._sync_weights(current_weights)
+        self.sync_weights(current_weights)
 
         #: 1episodeのrollout
-        game_history = self._rollout(T)
+        game_history = self.rollout(T)
 
-        samples, priorities = self._make_samples(game_history)
+        samples, priorities = self.make_samples(game_history)
 
         return samples, priorities
 
-    def _make_samples(self, game_history):
+    def make_samples(self, game_history):
         """
             zは割引が必要であることに注意
             またbootstrapping return
@@ -186,47 +196,48 @@ class Actor:
             np.array([1. / self.action_space] * self.action_space)
             for _ in range(self.td_steps)]
 
+        #: n-step bootstrapping value
         values = []
+
         for idx in range(episode_len):
-
             bootstrap_idx = idx + self.td_steps
-
             #: remaining value
-            if bootstrap_idx < episode_len:
-                value = root_values[bootstrap_idx]
-            else:
-                value = 0
-
-            value += sum([r * self.gamma ** i for i, r in
-                          enumerate(rewards[idx:bootstrap_idx])])
+            value = root_values[bootstrap_idx] if bootstrap_idx < episode_len else 0
+            value += sum([r * self.gamma ** i for i, r in enumerate(rewards[idx:bootstrap_idx])])
             values.append(value)
+
+        priorities = [abs(value - value_pred)
+                      for value, value_pred in zip(values, root_values)]
+
+        values += [0] * self.td_steps
+
+        #: Target value rescaling
+        values = util.value_rescaling(values)
 
         for idx in range(episode_len):
 
             #: shape == (unroll_steps, ...)
-            _rewards = np.array(rewards[idx:idx+self.unroll_steps])
             _actions = np.array(actions[idx:idx+self.unroll_steps])
-            _mcts_policies = np.vstack(mcts_policies[idx:idx+self.unroll_steps])
-            _values = np.array(values[idx:idx+self.unroll_steps])
+            target_policies = np.vstack(mcts_policies[idx:idx+self.unroll_steps])
+            target_rewards = np.array(rewards[idx:idx+self.unroll_steps])
+            target_values = np.array(values[idx:idx+self.unroll_steps])
 
             sample = Sample(
                 observation=observations[idx],
                 actions=_actions,
-                mcts_policies=_mcts_policies,
-                rewards=_rewards,
-                values=_values)
+                target_policies=target_policies,
+                target_rewards=target_rewards,
+                target_values=target_values)
 
             samples.append(sample)
 
-        priorities = [abs(sample.value - root_value)
-                      for sample, root_value in zip(samples, root_values)]
 
         #: Compress for memory efficiency
         samples = [lz4f.compress(pickle.dumps(sample)) for sample in samples]
 
         return samples, priorities
 
-    def _sync_weights(self, weights):
+    def sync_weights(self, weights):
 
         self.repr_network.set_weights(weights[0])
 
@@ -234,7 +245,7 @@ class Actor:
 
         self.dynamics_network.set_weights(weights[2])
 
-    def _rollout(self, T):
+    def rollout(self, T):
 
         env = gym.make(self.env_id)
 

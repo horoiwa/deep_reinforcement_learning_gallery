@@ -4,6 +4,8 @@ import tensorflow.keras.layers as kl
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.activations import relu
 
+from util import value_rescaling, inverse_value_rescaling
+
 
 class RepresentationNetwork(tf.keras.Model):
 
@@ -60,6 +62,8 @@ class RepresentationNetwork(tf.keras.Model):
         #x = self.resblock8(x, training=training)
 
         encoded_states = self.pool2(x)
+
+        #: hidden state rescaling
 
         return encoded_states
 
@@ -137,15 +141,16 @@ class PVNetwork(tf.keras.Model):
         x2 = relu(self.bn_v(self.conv_v(x), training=training))
         x2 = self.flat_v(x2)
         logits_value = self.logits_value(x2)
-        value = tf.nn.softmax(logits_value)
+        value_dist = tf.nn.softmax(logits_value)
 
-        return policy, value
+        return policy, value_dist
 
     def predict(self, hidden_state):
         policy, value_dist = self(hidden_state)
 
         policy = policy.numpy()[0]
-        value = tf.reduce_mean(value_dist * self.supports).numpy()
+        value = tf.reduce_sum(value_dist * self.supports).numpy()
+        value = inverse_value_rescaling(value)
 
         return policy, value
 
@@ -206,9 +211,9 @@ class DynamicsNetwork(tf.keras.Model):
         x = relu(self.bn1(self.conv2(x), training=training))
         x = self.flat(x)
         logits = self.logits(x)
-        rewards = tf.nn.softmax(logits)
+        rewards_dist = tf.nn.softmax(logits)
 
-        return next_states, rewards
+        return next_states, rewards_dist
 
     def predict(self, state, action: int):
 
@@ -221,7 +226,7 @@ class DynamicsNetwork(tf.keras.Model):
 
         state = tf.concat([state, action_onehot], axis=3)
         next_state, reward_dist = self(state)
-        reward = tf.reduce_mean(reward_dist * self.supports)
+        reward = tf.reduce_sum(reward_dist * self.supports)
 
         return next_state, reward
 
@@ -251,7 +256,7 @@ class DynamicsNetwork(tf.keras.Model):
 
         supports = tf.tile(
             tf.reshape(self.supports, shape=(1, -1)), (4, 1))
-        rewards = tf.reduce_mean(rewards_dist * supports, axis=1)
+        rewards = tf.reduce_sum(rewards_dist * supports, axis=1)
 
         return next_states, rewards
 
