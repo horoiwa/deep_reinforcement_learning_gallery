@@ -1,5 +1,6 @@
 import collections
 from dataclasses import dataclass
+import math
 import pickle
 
 import gym
@@ -100,14 +101,37 @@ class Learner:
         #: Targets
         target_policies = tf.stack([s.target_policies for s in samples], axis=1)  #: (unroll_steps, batch_size, action_space)
 
-        target_rewards = tf.stack([s.target_rewards for s in samples], axis=1)         #: (unroll_steps, batch_size)
-        target_rewards = tf.scalar_to_supports(target_rewards)
+        target_rewards_scalar = tf.stack([s.target_rewards for s in samples], axis=1)         #: (unroll_steps, batch_size)
+        target_rewards = self.scalar_to_supports(target_rewards_scalar)
 
-        target_values = tf.stack([s.target_values for s in samples], axis=1)         #: (unroll_steps, batch_size)
+        target_values_scalar = tf.stack([s.target_values for s in samples], axis=1)         #: (unroll_steps, batch_size)
+        targt_values = self.scalar_to_supports(target_values_scalar)
 
+    def scalar_to_supports(self, X):
+        """ convert scalar reward/value to categorical distribution
 
-    def scalar_to_supports(self, x):
-        import pdb; pdb.set_trace()
+        Args:
+            X: shape (unroll_steps, batchsize)
+        Returns:
+            X_dist: shape (unroll_steps, batchsize, n_supports)
+        """
+        X_dist = np.zeros((X.shape[0], X.shape[1], self.n_supports))
+
+        for t in range(X.shape[0]):
+            x = X[t]
+
+            x_floor = np.floor(x).astype(np.int8)
+            x_ceil = np.ceil(x).astype(np.int8)
+
+            floor_indices = x_floor - self.V_min
+            ceil_indices = x_ceil - self.V_min
+
+            floor_probs = (x_floor - x)
+            ceil_probs = (x - x_ceil)
+
+            eq_mask = x_floor  == x_ceil
+
+            X_dist[t, ...] = None
 
 
 class Actor:
@@ -200,8 +224,10 @@ class Actor:
         values = []
 
         for idx in range(episode_len):
+
             bootstrap_idx = idx + self.td_steps
-            #: remaining value
+
+            #: value = r_0 + γr_1 + ... r_n + v(n+1)
             value = root_values[bootstrap_idx] if bootstrap_idx < episode_len else 0
             value += sum([r * self.gamma ** i for i, r in enumerate(rewards[idx:bootstrap_idx])])
             values.append(value)
