@@ -26,18 +26,18 @@ class Sample:
 
 class Learner:
 
-    def __init__(self, env_id, n_frames: int,
+    def __init__(self, env_id, unroll_steps, n_frames: int,
                  V_min: int, V_max: int, gamma: float):
 
         self.env_id = env_id
+
+        self.unroll_steps = unroll_steps
 
         self.n_frames = n_frames
 
         self.V_min, self.V_max = V_min, V_max
 
         self.n_supports = V_max - V_min + 1
-
-        self.supports = tf.range(V_min, V_max+1, dtype=tf.float32)
 
         self.gamma = gamma
 
@@ -53,6 +53,8 @@ class Learner:
                                                 V_min=V_min, V_max=V_max)
 
         self.preprocess_func = util.get_preprocess_func(self.env_id)
+
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00015)
 
     def build_network(self):
         """ initialize network parameter """
@@ -105,33 +107,64 @@ class Learner:
         target_rewards = self.scalar_to_supports(target_rewards_scalar)
 
         target_values_scalar = tf.stack([s.target_values for s in samples], axis=1)         #: (unroll_steps, batch_size)
-        targt_values = self.scalar_to_supports(target_values_scalar)
+        target_values = self.scalar_to_supports(target_values_scalar)
+
+        with tf.GradientTape() as tape:
+
+            hidden_states = self.repr_network(observations, traning=True)
+
+            p_preds, v_preds = self.pv_network(hidden_states, training=True)
+
+            policy_loss = 0
+            value_loss = 0
+            reward_loss = 0.
+
+            #: 減退タイミングは要確認
+            hidden_states = 0.5 * hidden_states + 0.5 * tf.stop_gradient(hidden_states)
+
+            for t in self.unroll_steps:
+                hidden_states, reward_preds = self.dynamics_network(hidden_states, actions[t], training=True)
+                p_preds, v_preds = self.pv_network(hidden_states, training=True)
+                hidden_states = 0.5 * hidden_states + 0.5 * tf.stop_gradient(hidden_states)
+
+            loss = 1.0 / self.unroll_steps * (policy_loss + value_loss + reward_loss)
+
+        #: Gather trainable variables
+        variables = [self.repr_network.trainable_variables,
+                     self.pv_network.trainable_variables,
+                     self.dynamincs_network.trainable_variables]
+
+        grads = tape.gradient(loss, variables)
+        self.optimizer.apply_gradients(zip(grads, variables))
 
     def scalar_to_supports(self, X):
-        """ convert scalar reward/value to categorical distribution
+        """Convert scalar reward/value to categorical distribution
 
         Args:
             X: shape (unroll_steps, batchsize)
         Returns:
             X_dist: shape (unroll_steps, batchsize, n_supports)
         """
-        X_dist = np.zeros((X.shape[0], X.shape[1], self.n_supports))
+        timesteps, batchsize = X.shape[0], X.shape[1]
+        X_dist = np.zeros((timesteps, batchsize, self.n_supports))
 
-        for t in range(X.shape[0]):
+        for t in range(timesteps):
+
             x = X[t]
 
-            x_floor = np.floor(x).astype(np.int8)
             x_ceil = np.ceil(x).astype(np.int8)
+            x_floor = np.floor(x).astype(np.int8)
 
-            floor_indices = x_floor - self.V_min
             ceil_indices = x_ceil - self.V_min
+            floor_indices = x_floor - self.V_min
 
-            floor_probs = (x_floor - x)
-            ceil_probs = (x - x_ceil)
+            ceil_probs = x - x_floor
+            floor_probs = 1.0 - ceil_probs
 
-            eq_mask = x_floor  == x_ceil
+            X_dist[t, np.arange(batchsize), floor_indices] += floor_probs
+            X_dist[t, np.arange(batchsize), ceil_indices] += ceil_probs
 
-            X_dist[t, ...] = None
+        return tf.convert_to_tensor(X_dist, dtype=tf.float32)
 
 
 class Actor:
@@ -349,7 +382,8 @@ def main(env_id="BreakoutDeterministic-v4",
         - Reduce the number of residual blocks for compuational efficiency.
     """
 
-    learner = Learner(env_id=env_id, n_frames=n_frames,
+    learner = Learner(env_id=env_id, unroll_steps=unroll_steps,
+                      n_frames=n_frames,
                       V_min=V_min, V_max=V_max, gamma=gamma)
 
     current_weights = learner.build_network()

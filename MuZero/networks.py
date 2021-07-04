@@ -192,7 +192,7 @@ class DynamicsNetwork(tf.keras.Model):
                                kernel_regularizer=l2(0.001),
                                kernel_initializer="he_normal")
 
-    def call(self, x, training=False):
+    def call(self, hidden_states, actions: list, training=False):
 
         x = self.conv1(x)
 
@@ -215,17 +215,19 @@ class DynamicsNetwork(tf.keras.Model):
 
         return next_states, rewards_dist
 
-    def predict(self, state, action: int):
+    def predict(self, hidden_state, action: int):
 
-        assert len(state.shape) == 4 and state.shape[0] == 1
+        assert len(hidden_state.shape) == 4 and hidden_state.shape[0] == 1
         assert action in range(self.action_space)
+
+        next_state, reward_dist = self(hidden_state, [action])
 
         action_onehot = np.zeros(
             state.shape[:3]+(self.action_space,), dtype=np.float32)
         action_onehot[..., action] += 1.0
 
-        state = tf.concat([state, action_onehot], axis=3)
-        next_state, reward_dist = self(state)
+        x = tf.concat([hidden_state, action_onehot], axis=3)
+        next_state, reward_dist = self(x)
         reward = tf.reduce_sum(reward_dist * self.supports)
 
         return next_state, reward
@@ -308,6 +310,6 @@ if __name__ == '__main__':
     dynamics_function = DynamicsNetwork(action_space=action_space, n_supports=61)
     pv_network = PVNetwork(action_space=action_space, n_supports=61)
 
-    state = repr_function.predict(frame_history, action_history)
-    policy, value = pv_network(state)
-    next_states, rewards = dynamics_function.predict_all(state)
+    hidden_state = repr_function.predict(frame_history, action_history)
+    policy, value = pv_network(hidden_state)
+    next_states, rewards = dynamics_function.predict_all(hidden_state)
