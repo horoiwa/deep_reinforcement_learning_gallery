@@ -1,9 +1,11 @@
 import collections
 from dataclasses import dataclass
+import pickle
 
 import gym
 import numpy as np
 import tensorflow as tf
+import lz4.frame as lz4f
 
 import util
 from buffer import PrioritizedReplay
@@ -125,9 +127,9 @@ class Actor:
         #: 1episodeのrollout
         game_history = self._rollout(T)
 
-        experiences, priorities = self.make_targets(game_history)
+        samples, priorities = self.make_samples(game_history)
 
-        return experiences, priorities
+        return samples, priorities
 
     def make_samples(self, game_history):
         """
@@ -142,6 +144,17 @@ class Actor:
 
         episode_len = len(observations)
 
+        #: States past the end of games are treated as absorbing states.
+        rewards += [0] * self.td_steps
+
+        #: NOOP
+        actions += [0] * self.td_steps
+
+        #: Uniform policy
+        mcts_policies += [
+            np.array([1. / self.action_space] * self.action_space)
+            for _ in range(self.td_steps)]
+
         for idx in range(episode_len):
 
             bootstrap_idx = idx + self.td_steps
@@ -155,9 +168,10 @@ class Actor:
             value += sum([r * self.gamma ** i for i, r in
                           enumerate(rewards[idx:bootstrap_idx])])
 
-            _rewards = None
-            _actions = None
-            _mcts_policies = None
+            #: shape == (unroll_steps, ...)
+            _rewards = np.array(rewards[idx:idx+self.unroll_steps])
+            _actions = np.array(actions[idx:idx+self.unroll_steps])
+            _mcts_policies = np.vstack(mcts_policies[idx:idx+self.unroll_steps])
 
             sample = Sample(
                 observation=observations[idx],
@@ -168,8 +182,11 @@ class Actor:
 
             samples.append(sample)
 
-        priorities = [abs(sample.value - value_pred)
-                      for sample, value_pred in zip(samples, root_values)]
+        priorities = [abs(sample.value - root_value)
+                      for sample, root_value in zip(samples, root_values)]
+
+        #: Compress for memory efficiency
+        samples = [lz4f.compress(pickle.dumps(sample)) for sample in samples]
 
         return samples, priorities
 
@@ -185,7 +202,6 @@ class Actor:
 
         env = gym.make(self.env_id)
 
-        #: Game history
         observations, actions, rewards, mcts_policies, root_values = [], [], [], [], []
 
         frame = self.preprocess_func(env.reset())
