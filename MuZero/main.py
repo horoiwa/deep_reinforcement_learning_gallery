@@ -17,7 +17,7 @@ from networks import DynamicsNetwork, PVNetwork, RepresentationNetwork
 @dataclass
 class Sample:
 
-    observation: np.ndarray
+    observation: tf.Tensor
     actions: list
     target_policies: list
     target_rewards: list
@@ -290,7 +290,6 @@ class Actor:
 
             samples.append(sample)
 
-
         #: Compress for memory efficiency
         samples = [lz4f.compress(pickle.dumps(sample)) for sample in samples]
 
@@ -397,7 +396,8 @@ def main(env_id="BreakoutDeterministic-v4",
 
     n = 0
 
-    for _ in range(2):
+    for _ in range(0):
+        print(_)
         samples, priorities = actor.sync_weights_and_rollout(current_weights, T=1.0)
         buffer.add_samples(priorities, samples)
         n += 1
@@ -409,10 +409,8 @@ def main(env_id="BreakoutDeterministic-v4",
         n += 1
 
         minibatchs = [buffer.sample_minibatch(batchsize=batchsize)]
-
         learner.update_network(minibatchs)
-
-
+        break
 
 
 if __name__ == '__main__':

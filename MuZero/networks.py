@@ -132,13 +132,14 @@ class PVNetwork(tf.keras.Model):
                                      kernel_regularizer=l2(0.001),
                                      kernel_initializer="he_normal")
 
-    def call(self, x, training=False):
-        x1 = relu(self.bn_p(self.conv_p(x), training=training))
+    @tf.function
+    def call(self, hidden_states, training=False):
+        x1 = relu(self.bn_p(self.conv_p(hidden_states), training=training))
         x1 = self.flat_p(x1)
         logits_policy = self.logits_policy(x1)
         policy = tf.nn.softmax(logits_policy)
 
-        x2 = relu(self.bn_v(self.conv_v(x), training=training))
+        x2 = relu(self.bn_v(self.conv_v(hidden_states), training=training))
         x2 = self.flat_v(x2)
         logits_value = self.logits_value(x2)
         value_dist = tf.nn.softmax(logits_value)
@@ -146,6 +147,9 @@ class PVNetwork(tf.keras.Model):
         return policy, value_dist
 
     def predict(self, hidden_state):
+
+        assert len(hidden_state.shape) == 4 and hidden_state.shape[0] == 1
+
         policy, value_dist = self(hidden_state)
 
         policy = policy.numpy()[0]
@@ -192,19 +196,40 @@ class DynamicsNetwork(tf.keras.Model):
                                kernel_regularizer=l2(0.001),
                                kernel_initializer="he_normal")
 
-    def call(self, hidden_states, actions: list, training=False):
+    @tf.function
+    def call(self, hidden_states, actions, training=False):
+        """
+        Args:
+            hidden_states: (batchsize, 6, 6, 256)
+            actions: (bathsize, )
+        """
+
+        bs, h, w = hidden_states.shape[:3]
+
+        #: Make onehot action plane
+        actions_onehot = tf.one_hot(actions, self.action_space)         #: (batchsize, action_space)
+        actions_onehot = tf.repeat(
+            actions_onehot, repeats=h * w, axis=1)                      #: (batchsize, action_space * 6 * 6)
+        actions_onehot = tf.reshape(
+            actions_onehot, (bs, self.action_space, h * w))             #: (batchsize, action_space, 6 * 6)
+        actions_onehot = tf.reshape(
+            actions_onehot, (bs, self.action_space, h,  w))             #: (batchsize, action_space, 6, 6)
+        actions_onehot = tf.transpose(
+            actions_onehot, perm=[0, 2, 3, 1])                          #: (batchsize, 6, 6, action_space)
+
+        #: Concat action plane with hidden state
+        x = tf.concat([hidden_states, actions_onehot], axis=3)          #: (batchsize, 6, 6, 256+action_space)
 
         x = self.conv1(x)
+        x = self.resblock1(x, training=training)
+        x = self.resblock2(x, training=training)
+        x = self.resblock3(x, training=training)
+        x = self.resblock4(x, training=training)
 
-        x = self.resblock1(x)
-        x = self.resblock2(x)
-        x = self.resblock3(x)
-        x = self.resblock4(x)
-
-        #x = self.resblock5(x)
-        #x = self.resblock6(x)
-        #x = self.resblock7(x)
-        #x = self.resblock8(x)
+        #x = self.resblock5(x, training=training)
+        #x = self.resblock6(x, training=training)
+        #x = self.resblock7(x, training=training)
+        #x = self.resblock8(x, training=training)
 
         next_states = x
 
@@ -220,41 +245,23 @@ class DynamicsNetwork(tf.keras.Model):
         assert len(hidden_state.shape) == 4 and hidden_state.shape[0] == 1
         assert action in range(self.action_space)
 
-        next_state, reward_dist = self(hidden_state, [action])
-
-        action_onehot = np.zeros(
-            state.shape[:3]+(self.action_space,), dtype=np.float32)
-        action_onehot[..., action] += 1.0
-
-        x = tf.concat([hidden_state, action_onehot], axis=3)
-        next_state, reward_dist = self(x)
+        next_state, reward_dist = self(hidden_state, tf.convert_to_tensor([action]))
         reward = tf.reduce_sum(reward_dist * self.supports)
 
         return next_state, reward
 
-    def predict_all(self, state):
+    def predict_all(self, hidden_state):
         """
-        Utility function for predicting transition of all actions
+        Utility function for predicting dynamics of all actions
 
         Args:
             state: shape == (1, 6, 6, 256)
         """
-        assert len(state.shape) == 4 and state.shape[0] == 1
+        assert len(hidden_state.shape) == 4 and hidden_state.shape[0] == 1
 
-        states = []
-
-        for i in range(self.action_space):
-            #: (1, 6, 6, action_space)
-            action_onehot = np.zeros(
-                state.shape[:3]+(self.action_space,), dtype=np.float32)
-            action_onehot[..., i] += 1.0
-
-            #: (1, 6, 6, 256 + action_space)
-            states.append(tf.concat([state, action_onehot], axis=3))
-
-        #: create batch
-        states = tf.concat(states, axis=0)
-        next_states, rewards_dist = self(states)
+        actions = tf.range(self.action_space)
+        hidden_states = tf.repeat(hidden_state, repeats=4, axis=0)
+        next_states, rewards_dist = self(hidden_states, actions)
 
         supports = tf.tile(
             tf.reshape(self.supports, shape=(1, -1)), (4, 1))
@@ -307,9 +314,12 @@ if __name__ == '__main__':
     action_history = [0, 1, 2, 3, 0, 1, 2, 3]
 
     repr_function = RepresentationNetwork(action_space=action_space)
-    dynamics_function = DynamicsNetwork(action_space=action_space, n_supports=61)
-    pv_network = PVNetwork(action_space=action_space, n_supports=61)
+    dynamics_function = DynamicsNetwork(action_space=action_space, V_min=-30, V_max=30)
+    pv_network = PVNetwork(action_space=action_space, V_min=-30, V_max=30)
 
-    hidden_state = repr_function.predict(frame_history, action_history)
-    policy, value = pv_network(hidden_state)
+    hidden_state, obs = repr_function.predict(frame_history, action_history)
+    action = tf.convert_to_tensor([1])
+    next_states, rewards = dynamics_function(hidden_state, action)
+    next_states, rewards = dynamics_function.predict(hidden_state, 0)
     next_states, rewards = dynamics_function.predict_all(hidden_state)
+    #policy, value = pv_network(hidden_state)
