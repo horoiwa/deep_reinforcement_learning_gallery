@@ -23,7 +23,7 @@ class Sample:
     target_rewards: list
     nstep_returns: list
     dones: list
-    last_observations: tf.Tensor
+    last_observations: list
 
 
 class Learner:
@@ -51,12 +51,20 @@ class Learner:
         self.pv_network = PVNetwork(action_space=self.action_space,
                                     V_min=V_min, V_max=V_max)
 
+        self.target_repr_network = RepresentationNetwork(
+            action_space=self.action_space)
+
+        self.target_pv_network = PVNetwork(action_space=self.action_space,
+                                           V_min=V_min, V_max=V_max)
+
         self.dynamics_network = DynamicsNetwork(action_space=self.action_space,
                                                 V_min=V_min, V_max=V_max)
 
         self.preprocess_func = util.get_preprocess_func(self.env_id)
 
         self.optimizer = tf.keras.optimizers.Adam(lr=0.00015)
+
+        self.update_count = 0
 
     def build_network(self):
         """ initialize network parameter """
@@ -67,9 +75,15 @@ class Learner:
         frame_history = [frame] * self.n_frames
         action_history = [0] * self.n_frames
 
-        state, obs = self.repr_network.predict(frame_history, action_history)
-        policy, value = self.pv_network.predict(state)
-        next_state, reward = self.dynamics_network.predict(state, action=0)
+        hidden_state, obs = self.repr_network.predict(frame_history, action_history)
+        policy, value = self.pv_network.predict(hidden_state)
+        next_state, reward = self.dynamics_network.predict(hidden_state, action=0)
+
+        hidden_state, obs = self.target_repr_network.predict(frame_history, action_history)
+        policy, value = self.target_pv_network.predict(hidden_state)
+
+        self.target_repr_network.set_weights(self.repr_network.get_weights())
+        self.target_pv_network.set_weights(self.pv_network.get_weights())
 
         weights = (self.repr_network.get_weights(),
                    self.pv_network.get_weights(),
@@ -91,12 +105,17 @@ class Learner:
             priorities_all += priorities
             losses.append(loss)
 
+            self.update_count += 1
+
         current_weights = self.q_network.get_weights()
+
         loss_mean = np.array(losses).mean()
 
         return current_weights, indices_all, priorities_all, loss_mean
 
     def update(self, weights, samples):
+
+        import pdb; pdb.set_trace()
 
         #: Network inputs
         observations = tf.concat([s.observation for s in samples], axis=0)  #: (batchsize, ...)
