@@ -21,7 +21,9 @@ class Sample:
     actions: list
     target_policies: list
     target_rewards: list
-    target_values: float
+    nstep_returns: list
+    dones: list
+    last_observations: tf.Tensor
 
 
 class Learner:
@@ -254,39 +256,50 @@ class Actor:
             for _ in range(self.td_steps)]
 
         #: n-step bootstrapping value
-        values = []
+        nstep_returns = []
+
+        priorities = []
 
         for idx in range(episode_len):
 
             bootstrap_idx = idx + self.td_steps
 
+            nstep_return = sum([r * self.gamma ** i for i, r
+                                in enumerate(rewards[idx:bootstrap_idx])])
+
+            residual_value = root_values[bootstrap_idx] if bootstrap_idx < episode_len else 0
+
             #: value = r_0 + γr_1 + ... r_n + v(n+1)
-            value = root_values[bootstrap_idx] if bootstrap_idx < episode_len else 0
-            value += sum([r * self.gamma ** i for i, r in enumerate(rewards[idx:bootstrap_idx])])
-            values.append(value)
+            value = nstep_return + residual_value
 
-        priorities = [abs(value - value_pred)
-                      for value, value_pred in zip(values, root_values)]
+            priorities.append(abs(value - root_values[idx]))
 
-        values += [0] * self.td_steps
+            nstep_returns.append(nstep_return)
 
-        #: Target value rescaling
-        values = util.value_rescaling(values)
+        nstep_returns += [0] * self.td_steps
 
         for idx in range(episode_len):
 
+            bootstrap_idx = idx + self.td_steps
+
             #: shape == (unroll_steps, ...)
             _actions = np.array(actions[idx:idx+self.unroll_steps])
+            _nstep_returns = np.array(nstep_returns[idx:idx+self.unroll_steps])
             target_policies = np.vstack(mcts_policies[idx:idx+self.unroll_steps])
             target_rewards = np.array(rewards[idx:idx+self.unroll_steps])
-            target_values = np.array(values[idx:idx+self.unroll_steps])
+            last_observations = [observations[i] if i < episode_len else observations[-1]
+                                 for i in range(bootstrap_idx, bootstrap_idx+self.unroll_steps)]
+            dones = [False if i < episode_len else True
+                     for i in range(bootstrap_idx, bootstrap_idx+self.unroll_steps)]
 
             sample = Sample(
                 observation=observations[idx],
                 actions=_actions,
                 target_policies=target_policies,
                 target_rewards=target_rewards,
-                target_values=target_values)
+                nstep_returns=_nstep_returns,
+                last_observations=last_observations,
+                dones=dones)
 
             samples.append(sample)
 
@@ -362,7 +375,7 @@ class Actor:
 
 def main(env_id="BreakoutDeterministic-v4",
          n_episodes=10000, unroll_steps=5,
-         n_frames=8, gamma=0.997, td_steps=10,
+         n_frames=8, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**21, num_mcts_simulations=10,
          batchsize=256):

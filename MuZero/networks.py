@@ -61,11 +61,9 @@ class RepresentationNetwork(tf.keras.Model):
         #x = self.resblock7(x, training=training)
         #x = self.resblock8(x, training=training)
 
-        encoded_states = self.pool2(x)
+        hidden_states = self.pool2(x)
 
-        #: hidden state rescaling
-
-        return encoded_states
+        return hidden_states
 
     def predict(self, frame_history, action_history):
 

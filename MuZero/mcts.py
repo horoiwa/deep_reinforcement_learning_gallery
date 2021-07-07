@@ -95,7 +95,7 @@ class AtariMCTS:
 
         mcts_policy = visit_counts ** (1 / T) / (visit_counts ** (1 / T)).sum()
 
-        return mcts_policy, root_value
+        return mcts_policy
 
     def _expand(self, state):
 
