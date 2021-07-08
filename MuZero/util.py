@@ -21,7 +21,6 @@ def _preprocess_breakout(frame):
 def value_rescaling(x):
     """https://github.com/google-research/seed_rl/blob/f53c5be4ea083783fb10bdf26f11c3a80974fa03/agents/r2d2/learner.py#L180
     """
-    x = tf.convert_to_tensor(x)
     return tf.math.sign(x) * (tf.math.sqrt(tf.math.abs(x) + 1.) - 1.) + 0.001 * x
 
 
@@ -33,3 +32,10 @@ def inverse_value_rescaling(x):
         tf.math.square(
             ((tf.math.sqrt(1. + 4. * eps * (tf.math.abs(x) + 1. + eps))) - 1.) / (2. * eps)
             ) - 1.)
+
+
+if __name__ == "__main__":
+    import numpy as np
+    arr = np.array([1,2,3,4],dtype=np.float32).reshape(4, 1)
+    arr_inv = inverse_value_rescaling(arr)
+    print(arr_inv)

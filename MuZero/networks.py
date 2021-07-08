@@ -146,13 +146,17 @@ class PVNetwork(tf.keras.Model):
 
     def predict(self, hidden_state):
 
-        assert len(hidden_state.shape) == 4 and hidden_state.shape[0] == 1
+        assert len(hidden_state.shape) == 4
 
         policy, value_dist = self(hidden_state)
 
-        policy = policy.numpy()[0]
-        value = tf.reduce_sum(value_dist * self.supports).numpy()
-        value = inverse_value_rescaling(value)
+        if hidden_state.shape[0] == 1:
+            policy = policy.numpy()[0]
+            value = tf.reduce_sum(value_dist * self.supports).numpy()
+            value = inverse_value_rescaling(value)
+        else:
+            value = tf.reduce_sum(value_dist * self.supports, axis=1)
+            value = inverse_value_rescaling(value)
 
         return policy, value
 

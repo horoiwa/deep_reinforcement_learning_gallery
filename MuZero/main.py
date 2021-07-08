@@ -115,38 +115,63 @@ class Learner:
 
     def update(self, weights, samples):
 
-        import pdb; pdb.set_trace()
+        #: (batchsize, ...)
+        observations = tf.concat([s.observation for s in samples], axis=0)
 
-        #: Network inputs
-        observations = tf.concat([s.observation for s in samples], axis=0)  #: (batchsize, ...)
-        actions = tf.stack([s.actions for s in samples], axis=1)            #: (unroll_steps, batchsize)
+        #: (unroll_steps, batchsize, 1)
+        actions = tf.expand_dims(
+            tf.stack([s.actions for s in samples], axis=1), axis=2)
 
-        #: Targets
-        target_policies = tf.stack([s.target_policies for s in samples], axis=1)  #: (unroll_steps, batch_size, action_space)
+        #: (unroll_steps, batch_size, action_space)
+        target_policies = tf.stack([s.target_policies for s in samples], axis=1)
 
-        target_rewards_scalar = tf.stack([s.target_rewards for s in samples], axis=1)         #: (unroll_steps, batch_size)
+        #: (unroll_steps, batch_size, 1)
+        target_rewards_scalar = tf.expand_dims(
+            tf.stack([s.target_rewards for s in samples], axis=1), axis=2)
+
+        #: (unroll_steps, batch_size, n_supports)
         target_rewards = self.scalar_to_supports(target_rewards_scalar)
 
-        target_values_scalar = tf.stack([s.target_values for s in samples], axis=1)         #: (unroll_steps, batch_size)
+        #: (unroll_steps, batch_size, 1)
+        nstep_returns = tf.expand_dims(
+            tf.stack([s.nstep_returns for s in samples], axis=1), axis=2)
+
+        residual_values = []
+
+        for i in range(self.unroll_steps):
+            #: (batch_size, ...)
+            last_observations = tf.concat(
+                [s.last_observations[i] for s in samples], axis=0)
+            #: (batch_size, 1)
+            _, values = self.target_pv_network.predict(
+                self.target_repr_network(last_observations))
+            residual_values.append(values)
+
+        #: (unroll_steps, batch_size, 1)
+        residual_values = tf.expand_dims(
+            tf.stack(residual_values, axis=0), axis=2)
+
+        #: (unroll_steps, batch_size, 1)
+        target_values_scalar = util.value_rescaling(nstep_returns + residual_values)
+        #: (unroll_steps, batch_size, n_supports)
         target_values = self.scalar_to_supports(target_values_scalar)
+
 
         with tf.GradientTape() as tape:
 
+            policy_loss, value_loss, reward_loss = 0., 0., 0.
+
             hidden_states = self.repr_network(observations, traning=True)
 
-            p_preds, v_preds = self.pv_network(hidden_states, training=True)
-
-            policy_loss = 0
-            value_loss = 0
-            reward_loss = 0.
-
-            #: 減退タイミングは要確認
-            hidden_states = 0.5 * hidden_states + 0.5 * tf.stop_gradient(hidden_states)
-
             for t in self.unroll_steps:
-                hidden_states, reward_preds = self.dynamics_network(hidden_states, actions[t], training=True)
+                import pdb; pdb.set_trace()
                 p_preds, v_preds = self.pv_network(hidden_states, training=True)
+
+                hidden_states, reward_preds = self.dynamics_network(
+                    hidden_states, actions[t], training=True)
+
                 hidden_states = 0.5 * hidden_states + 0.5 * tf.stop_gradient(hidden_states)
+
 
             loss = 1.0 / self.unroll_steps * (policy_loss + value_loss + reward_loss)
 
@@ -303,7 +328,7 @@ class Actor:
 
             #: shape == (unroll_steps, ...)
             _actions = np.array(actions[idx:idx+self.unroll_steps])
-            _nstep_returns = np.array(nstep_returns[idx:idx+self.unroll_steps])
+            _nstep_returns = np.array(nstep_returns[idx:idx+self.unroll_steps], dtype=np.float32)
             target_policies = np.vstack(mcts_policies[idx:idx+self.unroll_steps])
             target_rewards = np.array(rewards[idx:idx+self.unroll_steps])
             last_observations = [observations[i] if i < episode_len else observations[-1]
@@ -397,7 +422,7 @@ def main(env_id="BreakoutDeterministic-v4",
          n_frames=8, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**21, num_mcts_simulations=10,
-         batchsize=256):
+         batchsize=32):
     """
 
     Args:
