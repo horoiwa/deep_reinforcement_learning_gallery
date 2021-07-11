@@ -183,8 +183,11 @@ class Learner:
 
                 hidden_states = 0.5 * hidden_states + 0.5 * tf.stop_gradient(hidden_states)
 
-            loss = tf.reduce_mean(
-                policy_loss + 0.25 * value_loss + reward_loss)
+            policy_loss = tf.reduce_mean(policy_loss)
+            value_loss = tf.reduce_mean(value_loss)
+            reward_loss = tf.reduce_mean(reward_loss)
+
+            loss = policy_loss + 0.25 * value_loss + reward_loss
 
         #: Gather trainable variables
         variables = [self.repr_network.trainable_variables,
@@ -192,7 +195,9 @@ class Learner:
                      self.dynamics_network.trainable_variables]
 
         grads = tape.gradient(loss, variables)
-        self.optimizer.apply_gradients(zip(grads, variables))
+
+        for i in range(len(variables)):
+            self.optimizer.apply_gradients(zip(grads[i], variables[i]))
 
     def scalar_to_supports(self, X):
         """Convert scalar reward/value to categorical distribution
