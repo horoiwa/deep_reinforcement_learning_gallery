@@ -28,12 +28,14 @@ class Sample:
 
 class Learner:
 
-    def __init__(self, env_id, unroll_steps, n_frames: int,
+    def __init__(self, env_id, unroll_steps, td_steps, n_frames: int,
                  V_min: int, V_max: int, gamma: float):
 
         self.env_id = env_id
 
         self.unroll_steps = unroll_steps
+
+        self.td_steps = td_steps
 
         self.n_frames = n_frames
 
@@ -118,9 +120,8 @@ class Learner:
         #: (batchsize, ...)
         observations = tf.concat([s.observation for s in samples], axis=0)
 
-        #: (unroll_steps, batchsize, 1)
-        actions = tf.expand_dims(
-            tf.stack([s.actions for s in samples], axis=1), axis=2)
+        #: (unroll_steps, batchsize)
+        actions = tf.stack([s.actions for s in samples], axis=1)
 
         #: (unroll_steps, batch_size, action_space)
         target_policies = tf.stack([s.target_policies for s in samples], axis=1)
@@ -152,33 +153,43 @@ class Learner:
             tf.stack(residual_values, axis=0), axis=2)
 
         #: (unroll_steps, batch_size, 1)
-        target_values_scalar = util.value_rescaling(nstep_returns + residual_values)
+        target_values_scalar = util.value_rescaling(
+            nstep_returns + (self.gamma ** self.td_steps) * residual_values)
         #: (unroll_steps, batch_size, n_supports)
         target_values = self.scalar_to_supports(target_values_scalar)
-
 
         with tf.GradientTape() as tape:
 
             policy_loss, value_loss, reward_loss = 0., 0., 0.
 
-            hidden_states = self.repr_network(observations, traning=True)
+            hidden_states = self.repr_network(observations, training=True)
 
-            for t in self.unroll_steps:
-                import pdb; pdb.set_trace()
-                p_preds, v_preds = self.pv_network(hidden_states, training=True)
+            for t in range(self.unroll_steps):
+                policy_preds, value_preds = self.pv_network(hidden_states, training=True)
 
                 hidden_states, reward_preds = self.dynamics_network(
                     hidden_states, actions[t], training=True)
 
+                #: cross_entoropy
+                policy_loss += (1. / self.unroll_steps) * tf.reduce_sum(
+                    -target_policies[t] * tf.math.log(policy_preds + 0.00001),
+                    axis=1, keepdims=True)
+                value_loss += (1. / self.unroll_steps) * tf.reduce_sum(
+                    -target_values[t] * tf.math.log(value_preds + 0.00001),
+                    axis=1, keepdims=True)
+                reward_loss += (1. / self.unroll_steps) * tf.reduce_sum(
+                    -target_rewards[t] * tf.math.log(reward_preds + 0.00001),
+                    axis=1, keepdims=True)
+
                 hidden_states = 0.5 * hidden_states + 0.5 * tf.stop_gradient(hidden_states)
 
-
-            loss = 1.0 / self.unroll_steps * (policy_loss + value_loss + reward_loss)
+            loss = tf.reduce_mean(
+                policy_loss + 0.25 * value_loss + reward_loss)
 
         #: Gather trainable variables
         variables = [self.repr_network.trainable_variables,
                      self.pv_network.trainable_variables,
-                     self.dynamincs_network.trainable_variables]
+                     self.dynamics_network.trainable_variables]
 
         grads = tape.gradient(loss, variables)
         self.optimizer.apply_gradients(zip(grads, variables))
@@ -187,7 +198,7 @@ class Learner:
         """Convert scalar reward/value to categorical distribution
 
         Args:
-            X: shape (unroll_steps, batchsize)
+            X: shape (unroll_steps, batchsize, 1)
         Returns:
             X_dist: shape (unroll_steps, batchsize, n_supports)
         """
@@ -196,7 +207,7 @@ class Learner:
 
         for t in range(timesteps):
 
-            x = X[t]
+            x = X[t].numpy().flatten()
 
             x_ceil = np.ceil(x).astype(np.int8)
             x_floor = np.floor(x).astype(np.int8)
@@ -398,7 +409,7 @@ class Actor:
                     range(self.action_space), p=mcts_policy)
 
             else:
-                mcts_policy, root_value = np.array([0.1, 0.1, 0.3, 0.5]), 1.0
+                mcts_policy, root_value = np.array([0.1, 0.1, 0.3, 0.5], dtype=np.float32), 1.0
                 action = np.random.choice(range(self.action_space), p=mcts_policy)
 
             frame, reward, done, info = env.step(action)
@@ -439,7 +450,7 @@ def main(env_id="BreakoutDeterministic-v4",
     """
 
     learner = Learner(env_id=env_id, unroll_steps=unroll_steps,
-                      n_frames=n_frames,
+                      td_steps=td_steps, n_frames=n_frames,
                       V_min=V_min, V_max=V_max, gamma=gamma)
 
     current_weights = learner.build_network()
