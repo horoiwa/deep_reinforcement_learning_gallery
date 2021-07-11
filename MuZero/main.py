@@ -1,6 +1,5 @@
 import collections
 from dataclasses import dataclass
-import math
 import pickle
 
 import gym
@@ -42,6 +41,8 @@ class Learner:
         self.V_min, self.V_max = V_min, V_max
 
         self.n_supports = V_max - V_min + 1
+
+        self.supports = tf.range(V_min, V_max+1, dtype=tf.float32)
 
         self.gamma = gamma
 
@@ -101,7 +102,7 @@ class Learner:
 
             samples = [pickle.loads(lz4f.decompress(sample)) for sample in samples]
 
-            priorities, loss = self.update(weights, samples)
+            priorities = self.update(weights, samples)
 
             indices_all += indices
             priorities_all += priorities
@@ -183,6 +184,15 @@ class Learner:
 
                 hidden_states = 0.5 * hidden_states + 0.5 * tf.stop_gradient(hidden_states)
 
+                #: compute priority
+                if t == 0:
+                    value_preds_scalar = tf.reduce_sum(
+                        self.supports * value_preds, axis=1).numpy()
+                    targets = target_values_scalar[0].numpy().flatten()
+
+                    priorities = [abs(t - vpred) for t, vpred
+                                  in zip(targets, value_preds_scalar)]
+
             policy_loss = tf.reduce_mean(policy_loss)
             value_loss = tf.reduce_mean(value_loss)
             reward_loss = tf.reduce_mean(reward_loss)
@@ -198,6 +208,9 @@ class Learner:
 
         for i in range(len(variables)):
             self.optimizer.apply_gradients(zip(grads[i], variables[i]))
+
+        return priorities
+
 
     def scalar_to_supports(self, X):
         """Convert scalar reward/value to categorical distribution
@@ -312,7 +325,7 @@ class Actor:
 
         #: Uniform policy
         mcts_policies += [
-            np.array([1. / self.action_space] * self.action_space)
+            np.array([1. / self.action_space] * self.action_space, dtype=np.float32)
             for _ in range(self.td_steps)]
 
         #: n-step bootstrapping value
