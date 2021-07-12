@@ -24,6 +24,7 @@ class Sample:
     target_policies: list
     target_rewards: list
     nstep_returns: list
+    last_observations: list
     dones: list
 
 
@@ -147,6 +148,11 @@ class Learner:
         nstep_returns = tf.expand_dims(
             tf.stack([s.nstep_returns for s in samples], axis=1), axis=2)
 
+        #: (unroll_steps, batch_size, 1)
+        dones = tf.expand_dims(
+            tf.cast(tf.stack([s.dones for s in samples], axis=1), tf.float32),
+            axis=2)
+
         residual_values = []
 
         for i in range(self.unroll_steps):
@@ -164,7 +170,8 @@ class Learner:
 
         #: (unroll_steps, batch_size, 1)
         target_values_scalar = util.value_rescaling(
-            nstep_returns + (self.gamma ** self.td_steps) * residual_values)
+            nstep_returns + (1. - dones) * (self.gamma ** self.td_steps) * residual_values)
+
         #: (unroll_steps, batch_size, n_supports)
         target_values = self.scalar_to_supports(target_values_scalar)
 
@@ -226,7 +233,6 @@ class Learner:
         self.update_count += 1
 
         return priorities, (loss, policy_loss, value_loss, reward_loss)
-
 
     def scalar_to_supports(self, X):
         """Convert scalar reward/value to categorical distribution
@@ -462,6 +468,64 @@ class Actor:
         return game_history
 
 
+class Tester(Actor):
+
+    def __init__(self, env_id, n_frames,
+                 num_mcts_simulations, unroll_steps,
+                 gamma, V_max, V_min, td_steps,
+                 dirichlet_alpha):
+
+        super().__init__(env_id, n_frames, num_mcts_simulations, unroll_steps,
+                         gamma, V_max, V_min, td_steps, dirichlet_alpha)
+
+    def play(self, current_weights):
+
+        #: 最新のネットワークに同期
+        self.sync_weights(current_weights)
+
+        env = gym.make(self.env_id)
+
+        frame = self.preprocess_func(env.reset())
+
+        frame_history = collections.deque(
+            [frame] * self.n_frames, maxlen=self.n_frames)
+
+        action_history = collections.deque(
+            [0] * self.n_frames, maxlen=self.n_frames)
+
+        mcts = AtariMCTS(
+            action_space=self.action_space,
+            pv_network=self.pv_network,
+            dynamics_network=self.dynamics_network,
+            gamma=self.gamma,
+            dirichlet_alpha=self.dirichlet_alpha)
+
+        total_rewards = 0
+
+        done = False
+
+        while not done:
+
+            with tf.device("/cpu:0"):
+                hidden_state, obs = self.repr_network.predict(frame_history, action_history)
+
+            mcts_policy, root_value = mcts.search(
+                hidden_state, self.num_mcts_simulations, T=0.25)
+
+            action = np.random.choice(
+                range(self.action_space), p=mcts_policy)
+
+            frame, reward, done, info = env.step(action)
+
+            total_rewards += reward
+
+            frame_history.append(self.preprocess_func(frame))
+            action_history.append(action)
+
+
+        return total_rewards
+
+
 def main(env_id="BreakoutDeterministic-v4",
          n_episodes=10000, unroll_steps=5,
          n_frames=8, gamma=0.997, td_steps=5,
@@ -527,6 +591,7 @@ def main(env_id="BreakoutDeterministic-v4",
             tf.summary.scalar("policy_loss", info[1], step=n)
             tf.summary.scalar("value_loss", info[2], step=n)
             tf.summary.scalar("reward_loss", info[3], step=n)
+        import pdb; pdb.set_trace()
 
 
 if __name__ == '__main__':
