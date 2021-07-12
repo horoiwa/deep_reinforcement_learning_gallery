@@ -56,7 +56,7 @@ class PrioritizedReplay:
 
         return indices, weights, samples
 
-    def update_priorities(self, indices, priorities):
+    def update_priority(self, indices, priorities):
         """ Update priorities of sampled transitions.
         """
         assert len(indices) == len(priorities)

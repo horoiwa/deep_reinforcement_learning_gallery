@@ -1,6 +1,9 @@
 import collections
 from dataclasses import dataclass
+import collections
 import pickle
+import shutil
+from pathlib import Path
 
 import gym
 import numpy as np
@@ -22,13 +25,12 @@ class Sample:
     target_rewards: list
     nstep_returns: list
     dones: list
-    last_observations: list
 
 
 class Learner:
 
-    def __init__(self, env_id, unroll_steps, td_steps, n_frames: int,
-                 V_min: int, V_max: int, gamma: float):
+    def __init__(self, env_id, unroll_steps=5, td_steps=5, n_frames=8,
+                 V_min=-30, V_max=30, gamma=0.998, target_update_period=1600):
 
         self.env_id = env_id
 
@@ -45,6 +47,8 @@ class Learner:
         self.supports = tf.range(V_min, V_max+1, dtype=tf.float32)
 
         self.gamma = gamma
+
+        self.target_update_period = target_update_period
 
         self.action_space = gym.make(env_id).action_space.n
 
@@ -102,19 +106,24 @@ class Learner:
 
             samples = [pickle.loads(lz4f.decompress(sample)) for sample in samples]
 
-            priorities = self.update(weights, samples)
+            priorities, loss_info = self.update(weights, samples)
 
             indices_all += indices
-            priorities_all += priorities
-            losses.append(loss)
 
-            self.update_count += 1
+            priorities_all += priorities
+
+            losses.append(loss_info)
 
         current_weights = self.q_network.get_weights()
 
-        loss_mean = np.array(losses).mean()
+        total_loss = sum([l[0] for l in losses]) / len(losses)
+        policy_loss = sum([l[1] for l in losses]) / len(losses)
+        value_loss = sum([l[2] for l in losses]) / len(losses)
+        reward_loss = sum([l[3] for l in losses]) / len(losses)
 
-        return current_weights, indices_all, priorities_all, loss_mean
+        losses_mean = (total_loss, policy_loss, value_loss, reward_loss)
+
+        return (current_weights, indices_all, priorities_all, losses_mean)
 
     def update(self, weights, samples):
 
@@ -209,7 +218,14 @@ class Learner:
         for i in range(len(variables)):
             self.optimizer.apply_gradients(zip(grads[i], variables[i]))
 
-        return priorities
+        if self.update_count % self.target_update_period:
+            print("==== Target Update ====")
+            self.target_repr_network.set_weights(self.repr_network.get_weights())
+            self.target_pv_network.set_weights(self.pv_network.get_weights())
+
+        self.update_count += 1
+
+        return priorities, (loss, policy_loss, value_loss, reward_loss)
 
 
     def scalar_to_supports(self, X):
@@ -467,6 +483,11 @@ def main(env_id="BreakoutDeterministic-v4",
         - Reduce the number of residual blocks for compuational efficiency.
     """
 
+    logdir = Path(__file__).parent / "log"
+    if logdir.exists():
+        shutil.rmtree(logdir)
+    summary_writer = tf.summary.create_file_writer(str(logdir))
+
     learner = Learner(env_id=env_id, unroll_steps=unroll_steps,
                       td_steps=td_steps, n_frames=n_frames,
                       V_min=V_min, V_max=V_max, gamma=gamma)
@@ -483,7 +504,6 @@ def main(env_id="BreakoutDeterministic-v4",
     n = 0
 
     for _ in range(0):
-        print(_)
         samples, priorities = actor.sync_weights_and_rollout(current_weights, T=1.0)
         buffer.add_samples(priorities, samples)
         n += 1
@@ -495,8 +515,18 @@ def main(env_id="BreakoutDeterministic-v4",
         n += 1
 
         minibatchs = [buffer.sample_minibatch(batchsize=batchsize)]
-        learner.update_network(minibatchs)
-        break
+
+        current_weights, priorities, indices, info = learner.update_network(minibatchs)
+
+        #current_weights = ray.put(current_weights)
+
+        buffer.update_priority(indices, priorities)
+
+        with summary_writer.as_default():
+            tf.summary.scalar("loss", info[0], step=n)
+            tf.summary.scalar("policy_loss", info[1], step=n)
+            tf.summary.scalar("value_loss", info[2], step=n)
+            tf.summary.scalar("reward_loss", info[3], step=n)
 
 
 if __name__ == '__main__':
