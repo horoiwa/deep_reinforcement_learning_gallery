@@ -6,6 +6,7 @@ from pathlib import Path
 import gym
 import numpy as np
 import tensorflow as tf
+import ray
 import lz4.frame as lz4f
 
 import util
@@ -14,6 +15,7 @@ from actor import Actor, Tester
 from networks import DynamicsNetwork, PVNetwork, RepresentationNetwork
 
 
+@ray.remote(num_cpus=1, num_gpus=1)
 class Learner:
 
     def __init__(self, env_id, unroll_steps=5, td_steps=5, n_frames=8,
@@ -60,7 +62,9 @@ class Learner:
 
         self.update_count = 0
 
-    def build_network(self):
+        self._build_network()
+
+    def _build_network(self):
         """ initialize network parameter """
 
         env = gym.make(self.env_id)
@@ -79,6 +83,8 @@ class Learner:
         self.target_repr_network.set_weights(self.repr_network.get_weights())
         self.target_pv_network.set_weights(self.pv_network.get_weights())
 
+    def get_weights(self):
+
         weights = (self.repr_network.get_weights(),
                    self.pv_network.get_weights(),
                    self.dynamics_network.get_weights())
@@ -91,7 +97,7 @@ class Learner:
 
         for (indices, weights, samples) in minibatchs:
 
-            samples = [pickle.loads(lz4f.decompress(sample)) for sample in samples]
+            samples = [pickle.loads(lz4f.decompress(s)) for s in samples]
 
             priorities, loss_info = self.update(weights, samples)
 
@@ -101,9 +107,7 @@ class Learner:
 
             losses.append(loss_info)
 
-        current_weights = (self.repr_network.get_weights(),
-                           self.pv_network.get_weights(),
-                           self.dynamics_network.get_weights())
+        current_weights = self.get_weights()
 
         total_loss = sum([l[0] for l in losses]) / len(losses)
         policy_loss = sum([l[1] for l in losses]) / len(losses)
@@ -253,11 +257,12 @@ class Learner:
 
 
 def main(env_id="BreakoutDeterministic-v4",
+         num_actors=20,
          n_episodes=10000, unroll_steps=5,
          n_frames=8, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**21, num_mcts_simulations=10,
-         batchsize=32):
+         batchsize=128, num_minibatchs=10):
     """
 
     Args:
@@ -278,63 +283,107 @@ def main(env_id="BreakoutDeterministic-v4",
         shutil.rmtree(logdir)
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
-    learner = Learner(env_id=env_id, unroll_steps=unroll_steps,
-                      td_steps=td_steps, n_frames=n_frames,
-                      V_min=V_min, V_max=V_max, gamma=gamma)
+    ray.init(local_mode=False)
 
-    current_weights = learner.build_network()
+    learner = Learner.remote(env_id=env_id, unroll_steps=unroll_steps,
+                             td_steps=td_steps, n_frames=n_frames,
+                             V_min=V_min, V_max=V_max, gamma=gamma)
+
+    current_weights = ray.put(ray.get(learner.get_weights.remote()))
 
     buffer = PrioritizedReplay(capacity=buffer_size)
 
-    actor = Actor(env_id=env_id, n_frames=n_frames, unroll_steps=unroll_steps,
-                  num_mcts_simulations=num_mcts_simulations, td_steps=td_steps,
-                  V_min=V_min, V_max=V_max, gamma=gamma,
-                  dirichlet_alpha=0.25)
+    actors = [Actor.remote(pid=pid, env_id=env_id, n_frames=n_frames,
+                           unroll_steps=unroll_steps, td_steps=td_steps,
+                           num_mcts_simulations=num_mcts_simulations,
+                           V_min=V_min, V_max=V_max, gamma=gamma,
+                           dirichlet_alpha=0.25)
+              for pid in range(num_actors)]
 
-    tester = Tester(env_id=env_id, n_frames=n_frames, unroll_steps=unroll_steps,
-                    num_mcts_simulations=num_mcts_simulations, td_steps=td_steps,
+    tester = Tester(pid=0, env_id=env_id, n_frames=n_frames,
+                    unroll_steps=unroll_steps, td_steps=td_steps,
+                    num_mcts_simulations=num_mcts_simulations,
                     V_min=V_min, V_max=V_max, gamma=gamma,
                     dirichlet_alpha=0.25)
 
-    n = 0
+    wip_actors = [actor.sync_weights_and_rollout.remote(current_weights)
+                  for actor in actors]
 
-    for _ in range(0):
-        s = time.time()
-        samples, priorities = actor.sync_weights_and_rollout(current_weights, T=1.0)
+    n = 0
+    for _ in range(100):
+        finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
+        pid, samples, priorities = ray.get(finished_actor)
         buffer.add_samples(priorities, samples)
-        print("Actor", time.time() - s)
+        wip_actors.extend(
+            [actors[pid].sync_weights_and_rollout.remote(current_weights)])
         n += 1
 
+    minibatchs = [buffer.sample_minibatch(batchsize=batchsize)
+                  for _ in range(num_minibatchs)]
+
+    wip_learner = learner.update_network.remote(minibatchs)
+
+    wip_tester = tester.play.remote(current_weights)
+
+    minibatchs = [buffer.sample_minibatch(batchsize=batchsize)
+                  for _ in range(num_minibatchs)]
+
     t = time.time()
+
+    actor_count = 0
+
     while n <= n_episodes:
 
-        for _ in range(2):
-            samples, priorities = actor.sync_weights_and_rollout(current_weights, T=1.0)
-            buffer.add_samples(priorities, samples)
-            n += 1
+        finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
 
-        minibatchs = [buffer.sample_minibatch(batchsize=batchsize) for _ in range(10)]
+        pid, samples, priorities = ray.get(finished_actor)
 
-        current_weights, indices, priorities, info = learner.update_network(minibatchs)
+        buffer.add_samples(priorities, samples)
 
-        #current_weights = ray.put(current_weights)
+        wip_actors.extend(
+            [actors[pid].sync_weights_and_rollout.remote(current_weights)])
 
-        buffer.update_priority(indices, priorities)
+        n += 1
 
-        with summary_writer.as_default():
-            tf.summary.scalar("loss", info[0], step=n)
-            tf.summary.scalar("policy_loss", info[1], step=n)
-            tf.summary.scalar("value_loss", info[2], step=n)
-            tf.summary.scalar("reward_loss", info[3], step=n)
-            tf.summary.scalar("time", time.time() - t, step=n)
+        actor_count += 1
+
+        finished_learner, _ = ray.wait([wip_learner], timeout=0)
+
+        if finished_learner:
+
+            current_weights, indices, priorities, info = ray.get(finished_learner)
+
+            current_weights = ray.put(current_weights)
+
+            wip_learner = learner.update_network.remote(minibatchs)
+
+            buffer.update_priority(indices, priorities)
+
+            minibatchs = [buffer.sample_minibatch(batchsize=batchsize) for _ in range(10)]
+
+            with summary_writer.as_default():
+                tf.summary.scalar("Buffer", len(buffer), step=n)
+                tf.summary.scalar("loss", info[0], step=n)
+                tf.summary.scalar("policy_loss", info[1], step=n)
+                tf.summary.scalar("value_loss", info[2], step=n)
+                tf.summary.scalar("reward_loss", info[3], step=n)
+                tf.summary.scalar("time", time.time() - t, step=n)
+                tf.summary.scalar("actor_count", actor_count, step=n)
+
+            t = time.time()
+            actor_count = 0
 
         if n % 50 == 0:
-            score, step = tester.play(current_weights)
+
+            score, step = ray.get(wip_tester)
+
+            wip_tester = tester.play.remote(current_weights)
+
             with summary_writer.as_default():
-                tf.summary.scalar("Score", score, step=n)
-                tf.summary.scalar("Step", step, step=n)
+                tf.summary.scalar("Test Score", score, step=n)
+                tf.summary.scalar("Test Step", step, step=n)
 
         t = time.time()
 
 if __name__ == '__main__':
-    main()
+    main(num_actors=20)

@@ -2,6 +2,7 @@ import collections
 from dataclasses import dataclass
 import pickle
 
+import ray
 import gym
 import numpy as np
 import tensorflow as tf
@@ -24,12 +25,15 @@ class Sample:
     dones: list
 
 
+@ray.remote(num_cpus=1)
 class Actor:
 
-    def __init__(self, env_id, n_frames,
+    def __init__(self, pid, env_id, n_frames,
                  num_mcts_simulations, unroll_steps,
                  gamma, V_max, V_min, td_steps,
                  dirichlet_alpha):
+
+        self.pid = pid
 
         self.env_id = env_id
 
@@ -84,7 +88,7 @@ class Actor:
 
         samples, priorities = self.make_samples(game_history)
 
-        return samples, priorities
+        return self.pid, samples, priorities
 
     def make_samples(self, game_history):
         """
@@ -224,14 +228,15 @@ class Actor:
         return game_history
 
 
+@ray.remote(num_cpus=1)
 class Tester(Actor):
 
-    def __init__(self, env_id, n_frames,
+    def __init__(self, pid, env_id, n_frames,
                  num_mcts_simulations, unroll_steps,
                  gamma, V_max, V_min, td_steps,
                  dirichlet_alpha):
 
-        super().__init__(env_id, n_frames, num_mcts_simulations, unroll_steps,
+        super().__init__(pid, env_id, n_frames, num_mcts_simulations, unroll_steps,
                          gamma, V_max, V_min, td_steps, dirichlet_alpha)
 
     def play(self, current_weights):
@@ -275,7 +280,7 @@ class Tester(Actor):
 
             total_rewards += reward
 
-            step += 1
+            steps += 1
 
             frame_history.append(self.preprocess_func(frame))
             action_history.append(action)
