@@ -91,11 +91,11 @@ class AtariMCTS:
             self.q_min = min(self.q_min, self.Q[s][a])
             self.q_max = max(self.q_max, self.Q[s][a])
 
-        visit_counts = np.array(self.N[s])
+        visit_counts = np.array(self.N[s], dtype=np.float32)
 
         mcts_policy = visit_counts ** (1 / T) / (visit_counts ** (1 / T)).sum()
 
-        return mcts_policy
+        return mcts_policy, root_value
 
     def _expand(self, state):
 
