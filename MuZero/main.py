@@ -269,8 +269,8 @@ class Learner:
 
 def main(env_id="BreakoutDeterministic-v4",
          num_actors=20,
-         n_episodes=10000, unroll_steps=5,
-         n_frames=8, gamma=0.997, td_steps=5,
+         n_episodes=10000, unroll_steps=3,
+         n_frames=4, gamma=0.997, td_steps=3,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**18, num_mcts_simulations=10,
          batchsize=64, num_minibatchs=64):
@@ -363,7 +363,7 @@ def main(env_id="BreakoutDeterministic-v4",
 
         actor_count += 1
 
-        if actor_count < 3:
+        if actor_count < 5:
             continue
 
         finished_learner, _ = ray.wait([wip_learner], timeout=0)
@@ -398,7 +398,7 @@ def main(env_id="BreakoutDeterministic-v4",
             t = time.time()
             actor_count = 0
 
-        if n % 50 == 0:
+        if n % 20 == 0:
 
             print("Tester Ready")
 
