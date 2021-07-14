@@ -25,7 +25,7 @@ class Sample:
     dones: list
 
 
-@ray.remote(num_cpus=1)
+@ray.remote(num_cpus=1, num_gpus=0)
 class Actor:
 
     def __init__(self, pid, env_id, n_frames,
@@ -83,8 +83,9 @@ class Actor:
         #: 最新のネットワークに同期
         self.sync_weights(current_weights)
 
-        #: 1episodeのrollout
-        game_history = self.rollout(T)
+        with util.Timer("Actor:"):
+            #: 1episodeのrollout
+            game_history = self.rollout(T)
 
         samples, priorities = self.make_samples(game_history)
 
@@ -228,18 +229,80 @@ class Actor:
         return game_history
 
 
-@ray.remote(num_cpus=1)
-class Tester(Actor):
+@ray.remote(num_cpus=1, num_gpus=0)
+class Tester:
 
     def __init__(self, pid, env_id, n_frames,
                  num_mcts_simulations, unroll_steps,
                  gamma, V_max, V_min, td_steps,
                  dirichlet_alpha):
 
-        super().__init__(pid, env_id, n_frames, num_mcts_simulations, unroll_steps,
-                         gamma, V_max, V_min, td_steps, dirichlet_alpha)
+        self.pid = pid
 
-    def play(self, current_weights):
+        self.env_id = env_id
+
+        self.unroll_steps = unroll_steps
+
+        self.num_mcts_simulations = num_mcts_simulations
+
+        self.action_space = gym.make(env_id).action_space.n
+
+        self.n_frames = n_frames
+
+        self.gamma = gamma
+
+        self.dirichlet_alpha = dirichlet_alpha
+
+        self.V_min, self.V_max = V_min, V_max
+
+        self.td_steps = td_steps
+
+        self.preprocess_func = util.get_preprocess_func(self.env_id)
+
+        self.repr_network = RepresentationNetwork(
+            action_space=self.action_space)
+
+        self.pv_network = PVNetwork(action_space=self.action_space,
+                                    V_min=V_min, V_max=V_max)
+
+        self.dynamics_network = DynamicsNetwork(action_space=self.action_space,
+                                                V_min=V_min, V_max=V_max)
+
+        self._build_network()
+
+    def _build_network(self):
+
+        env = gym.make(self.env_id)
+        frame = self.preprocess_func(env.reset())
+
+        frame_history = [frame] * self.n_frames
+        action_history = [0] * self.n_frames
+
+        state, obs = self.repr_network.predict(frame_history, action_history)
+        policy, value = self.pv_network(state)
+        next_state, reward = self.dynamics_network.predict(state, action=0)
+
+    def sync_weights_and_rollout(self, current_weights, T):
+
+        #: 最新のネットワークに同期
+        self.sync_weights(current_weights)
+
+        #: 1episodeのrollout
+        game_history = self.rollout(T)
+
+        samples, priorities = self.make_samples(game_history)
+
+        return self.pid, samples, priorities
+
+    def sync_weights(self, weights):
+
+        self.repr_network.set_weights(weights[0])
+
+        self.pv_network.set_weights(weights[1])
+
+        self.dynamics_network.set_weights(weights[2])
+
+    def play(self, current_weights, T=0.25):
 
         #: 最新のネットワークに同期
         self.sync_weights(current_weights)
@@ -271,7 +334,7 @@ class Tester(Actor):
                 hidden_state, obs = self.repr_network.predict(frame_history, action_history)
 
             mcts_policy, root_value = mcts.search(
-                hidden_state, self.num_mcts_simulations, T=0.25)
+                hidden_state, self.num_mcts_simulations, T=T)
 
             action = np.random.choice(
                 range(self.action_space), p=mcts_policy)

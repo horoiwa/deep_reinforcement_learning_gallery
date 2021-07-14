@@ -83,6 +83,11 @@ class Learner:
         self.target_repr_network.set_weights(self.repr_network.get_weights())
         self.target_pv_network.set_weights(self.pv_network.get_weights())
 
+    def save(self):
+        self.repr_network.save_weights("checkpoints/repr_net")
+        self.pv_network.save_weights("checkpoints/pv_net")
+        self.dynamics_network.save_weights("checkpoints/dynamics_net")
+
     def get_weights(self):
 
         weights = (self.repr_network.get_weights(),
@@ -95,17 +100,19 @@ class Learner:
 
         indices_all, priorities_all, losses = [], [], []
 
-        for (indices, weights, samples) in minibatchs:
+        with util.Timer("Leaner update:"):
 
-            samples = [pickle.loads(lz4f.decompress(s)) for s in samples]
+            for (indices, weights, samples) in minibatchs:
 
-            priorities, loss_info = self.update(weights, samples)
+                samples = [pickle.loads(lz4f.decompress(s)) for s in samples]
 
-            indices_all += indices
+                priorities, loss_info = self.update(weights, samples)
 
-            priorities_all += priorities
+                indices_all += indices
 
-            losses.append(loss_info)
+                priorities_all += priorities
+
+                losses.append(loss_info)
 
         current_weights = self.get_weights()
 
@@ -222,6 +229,10 @@ class Learner:
             self.target_repr_network.set_weights(self.repr_network.get_weights())
             self.target_pv_network.set_weights(self.pv_network.get_weights())
 
+        if self.update_count % 10000 == 0:
+            print("==== Save weights ====")
+            self.save()
+
         self.update_count += 1
 
         return priorities, (loss, policy_loss, value_loss, reward_loss)
@@ -261,8 +272,8 @@ def main(env_id="BreakoutDeterministic-v4",
          n_episodes=10000, unroll_steps=5,
          n_frames=8, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
-         buffer_size=2**21, num_mcts_simulations=10,
-         batchsize=128, num_minibatchs=10):
+         buffer_size=2**18, num_mcts_simulations=10,
+         batchsize=64, num_minibatchs=64):
     """
 
     Args:
@@ -300,22 +311,23 @@ def main(env_id="BreakoutDeterministic-v4",
                            dirichlet_alpha=0.25)
               for pid in range(num_actors)]
 
-    tester = Tester(pid=0, env_id=env_id, n_frames=n_frames,
-                    unroll_steps=unroll_steps, td_steps=td_steps,
-                    num_mcts_simulations=num_mcts_simulations,
-                    V_min=V_min, V_max=V_max, gamma=gamma,
-                    dirichlet_alpha=0.25)
+    tester = Tester.remote(pid=0, env_id=env_id, n_frames=n_frames,
+                           unroll_steps=unroll_steps, td_steps=td_steps,
+                           num_mcts_simulations=num_mcts_simulations,
+                           V_min=V_min, V_max=V_max, gamma=gamma,
+                           dirichlet_alpha=0.25)
 
-    wip_actors = [actor.sync_weights_and_rollout.remote(current_weights)
+    wip_actors = [actor.sync_weights_and_rollout.remote(current_weights, T=1.0)
                   for actor in actors]
 
     n = 0
-    for _ in range(100):
+    #for _ in range(50):
+    for _ in range(10):
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
-        pid, samples, priorities = ray.get(finished_actor)
+        pid, samples, priorities = ray.get(finished_actor[0])
         buffer.add_samples(priorities, samples)
         wip_actors.extend(
-            [actors[pid].sync_weights_and_rollout.remote(current_weights)])
+            [actors[pid].sync_weights_and_rollout.remote(current_weights, T=1.0)])
         n += 1
 
     minibatchs = [buffer.sample_minibatch(batchsize=batchsize)
@@ -336,22 +348,33 @@ def main(env_id="BreakoutDeterministic-v4",
 
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
 
-        pid, samples, priorities = ray.get(finished_actor)
+        pid, samples, priorities = ray.get(finished_actor[0])
+
+        print(f"Actor {pid} finished")
 
         buffer.add_samples(priorities, samples)
 
+        T = 1.0 if n < 2500 else 0.5 if n < 4000 else 0.25
+
         wip_actors.extend(
-            [actors[pid].sync_weights_and_rollout.remote(current_weights)])
+            [actors[pid].sync_weights_and_rollout.remote(current_weights, T=T)])
 
         n += 1
 
         actor_count += 1
 
+        if actor_count < 3:
+            continue
+
         finished_learner, _ = ray.wait([wip_learner], timeout=0)
+
+        print(finished_learner)
 
         if finished_learner:
 
-            current_weights, indices, priorities, info = ray.get(finished_learner)
+            print("Learner Ready")
+
+            current_weights, indices, priorities, info = ray.get(finished_learner[0])
 
             current_weights = ray.put(current_weights)
 
@@ -359,7 +382,9 @@ def main(env_id="BreakoutDeterministic-v4",
 
             buffer.update_priority(indices, priorities)
 
-            minibatchs = [buffer.sample_minibatch(batchsize=batchsize) for _ in range(10)]
+            with util.Timer("Make minibatchs:"):
+                minibatchs = [buffer.sample_minibatch(batchsize=batchsize)
+                              for _ in range(num_minibatchs)]
 
             with summary_writer.as_default():
                 tf.summary.scalar("Buffer", len(buffer), step=n)
@@ -375,6 +400,8 @@ def main(env_id="BreakoutDeterministic-v4",
 
         if n % 50 == 0:
 
+            print("Tester Ready")
+
             score, step = ray.get(wip_tester)
 
             wip_tester = tester.play.remote(current_weights)
@@ -383,7 +410,6 @@ def main(env_id="BreakoutDeterministic-v4",
                 tf.summary.scalar("Test Score", score, step=n)
                 tf.summary.scalar("Test Step", step, step=n)
 
-        t = time.time()
 
 if __name__ == '__main__':
     main(num_actors=20)

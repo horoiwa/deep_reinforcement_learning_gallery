@@ -98,7 +98,6 @@ class SumTree:
 
     def sample(self, z=None):
         z = random.uniform(0, self.sum()) if z is None else z
-        assert 0 <= z <= self.sum()
 
         current_idx = 1
         while current_idx < self.capacity:
@@ -109,7 +108,7 @@ class SumTree:
             #: 左子ノードよりzが大きい場合は右子ノードへ
             if z > self.values[idx_lchild]:
                 current_idx = idx_rchild
-                z = z -self.values[idx_lchild]
+                z = z - self.values[idx_lchild]
             else:
                 current_idx = idx_lchild
 

@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import tensorflow as tf
 from PIL import Image
@@ -33,6 +35,19 @@ def inverse_value_rescaling(x):
         tf.math.square(
             ((tf.math.sqrt(1. + 4. * eps * (tf.math.abs(x) + 1. + eps))) - 1.) / (2. * eps)
             ) - 1.)
+
+
+class Timer:
+
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        self.start = time.time()
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        fin = time.time() - self.start
+        print(self.name, fin)
 
 
 if __name__ == "__main__":
