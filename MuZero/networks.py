@@ -84,7 +84,6 @@ class RepresentationNetwork(tf.keras.Model):
         """
 
         (h, w), L = frame_history[0].shape, len(frame_history)
-
         frames = np.stack(frame_history, axis=2)
 
         actions = np.ones((h, w, L), dtype=np.float32)
