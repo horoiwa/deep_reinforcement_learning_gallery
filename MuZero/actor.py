@@ -81,7 +81,8 @@ class Actor:
     def sync_weights_and_rollout(self, current_weights, T):
 
         #: 最新のネットワークに同期
-        self.sync_weights(current_weights)
+        if current_weights:
+            self.sync_weights(current_weights)
 
         with util.Timer("Actor:"):
             #: 1episodeのrollout
@@ -197,6 +198,8 @@ class Actor:
             gamma=self.gamma,
             dirichlet_alpha=self.dirichlet_alpha)
 
+        lives = env.ale.lives()
+
         done = False
 
         while not done:
@@ -210,10 +213,11 @@ class Actor:
             action = np.random.choice(
                 range(self.action_space), p=mcts_policy)
 
-            #mcts_policy, root_value = np.array([0.1, 0.1, 0.3, 0.5], dtype=np.float32), 1.0
-            #action = np.random.choice(range(self.action_space), p=mcts_policy)
-
             frame, reward, done, info = env.step(action)
+
+            #: Life loss as episode termination
+            if info["ale.lives"] != lives:
+                done = True
 
             frame_history.append(self.preprocess_func(frame))
             action_history.append(action)
@@ -282,18 +286,6 @@ class Tester:
         policy, value = self.pv_network(state)
         next_state, reward = self.dynamics_network.predict(state, action=0)
 
-    def sync_weights_and_rollout(self, current_weights, T):
-
-        #: 最新のネットワークに同期
-        self.sync_weights(current_weights)
-
-        #: 1episodeのrollout
-        game_history = self.rollout(T)
-
-        samples, priorities = self.make_samples(game_history)
-
-        return self.pid, samples, priorities
-
     def sync_weights(self, weights):
 
         self.repr_network.set_weights(weights[0])
@@ -305,7 +297,8 @@ class Tester:
     def play(self, current_weights, T=0.25):
 
         #: 最新のネットワークに同期
-        self.sync_weights(current_weights)
+        if current_weights:
+            self.sync_weights(current_weights)
 
         env = gym.make(self.env_id)
 
@@ -326,6 +319,8 @@ class Tester:
 
         total_rewards, steps = 0, 0
 
+        lives = env.ale.lives()
+
         done = False
 
         while not done:
@@ -341,6 +336,9 @@ class Tester:
 
             frame, reward, done, info = env.step(action)
 
+            if info["ale.lives"] != lives:
+                done = True
+
             total_rewards += reward
 
             steps += 1
@@ -349,3 +347,14 @@ class Tester:
             action_history.append(action)
 
         return total_rewards, steps
+
+
+if __name__ == "__main__":
+
+    actor = Actor(pid=0, env_id="BreakoutDeterministic-v4", n_frames=4,
+                  unroll_steps=3, td_steps=3,
+                  num_mcts_simulations=10,
+                  V_min=-30, V_max=30, gamma=0.997,
+                  dirichlet_alpha=0.25)
+
+    actor.sync_weights_and_rollout(current_weights=None, T=1.0)
