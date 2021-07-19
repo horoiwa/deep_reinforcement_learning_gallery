@@ -108,7 +108,7 @@ class AtariMCTS:
         self.P[s] = nn_policy.tolist()
         self.N[s] = [0] * self.action_space
         self.Q[s] = [0] * self.action_space
-        self.R[s] = [r for r in rewards.numpy()]
+        self.R[s] = [r for r in rewards.numpy().flatten()]
 
         #: cache valid actions and next state to save computation
         #: instead of [i, ...], [i:i+1, ...] to keep the dimension
