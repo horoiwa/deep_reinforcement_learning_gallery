@@ -272,8 +272,8 @@ def main(env_id="BreakoutDeterministic-v4",
          n_episodes=10000, unroll_steps=3,
          n_frames=4, gamma=0.997, td_steps=3,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
-         buffer_size=2**18, num_mcts_simulations=10,
-         batchsize=64, num_minibatchs=64):
+         buffer_size=2**18, num_mcts_simulations=12,
+         batchsize=32, num_minibatchs=64):
     """
 
     Args:
