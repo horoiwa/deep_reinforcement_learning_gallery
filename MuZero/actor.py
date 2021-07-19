@@ -197,6 +197,8 @@ class Actor:
             gamma=self.gamma,
             dirichlet_alpha=self.dirichlet_alpha)
 
+        lives = env.ale.lives()
+
         done = False
 
         while not done:
@@ -214,6 +216,10 @@ class Actor:
             #action = np.random.choice(range(self.action_space), p=mcts_policy)
 
             frame, reward, done, info = env.step(action)
+
+            #: Life loss as episode termination
+            if info["lives"] != lives:
+                done = True
 
             frame_history.append(self.preprocess_func(frame))
             action_history.append(action)
@@ -326,6 +332,8 @@ class Tester:
 
         total_rewards, steps = 0, 0
 
+        lives = env.ale.lives()
+
         done = False
 
         while not done:
@@ -340,6 +348,9 @@ class Tester:
                 range(self.action_space), p=mcts_policy)
 
             frame, reward, done, info = env.step(action)
+
+            if info["lives"] != lives:
+                done = True
 
             total_rewards += reward
 
