@@ -147,7 +147,7 @@ class Actor:
             _actions = np.array(actions[idx:idx+self.unroll_steps])
             _nstep_returns = np.array(nstep_returns[idx:idx+self.unroll_steps], dtype=np.float32)
             target_policies = np.vstack(mcts_policies[idx:idx+self.unroll_steps])
-            target_rewards = np.array(rewards[idx:idx+self.unroll_steps])
+            target_rewards = np.array(rewards[idx:idx+self.unroll_steps], dtype=np.float32)
             last_observations = [observations[i] if i < episode_len else observations[-1]
                                  for i in range(bootstrap_idx, bootstrap_idx+self.unroll_steps)]
             dones = [False if i < episode_len else True

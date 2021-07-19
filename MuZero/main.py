@@ -19,7 +19,7 @@ from networks import DynamicsNetwork, PVNetwork, RepresentationNetwork
 class Learner:
 
     def __init__(self, env_id, unroll_steps=5, td_steps=5, n_frames=8,
-                 V_min=-30, V_max=30, gamma=0.998, target_update_period=1600):
+                 V_min=-30, V_max=30, gamma=0.998, target_update_period=1200):
 
         self.env_id = env_id
 
@@ -137,11 +137,8 @@ class Learner:
         target_policies = tf.stack([s.target_policies for s in samples], axis=1)
 
         #: (unroll_steps, batch_size, 1)
-        target_rewards_scalar = tf.expand_dims(
+        target_rewards = tf.expand_dims(
             tf.stack([s.target_rewards for s in samples], axis=1), axis=2)
-
-        #: (unroll_steps, batch_size, n_supports)
-        target_rewards = self.scalar_to_supports(target_rewards_scalar)
 
         #: (unroll_steps, batch_size, 1)
         nstep_returns = tf.expand_dims(
@@ -161,18 +158,15 @@ class Learner:
             #: (batch_size, 1)
             _, values = self.target_pv_network.predict(
                 self.target_repr_network(last_observations))
+
             residual_values.append(values)
 
         #: (unroll_steps, batch_size, 1)
-        residual_values = tf.expand_dims(
-            tf.stack(residual_values, axis=0), axis=2)
+        residual_values = tf.stack(residual_values, axis=0)
 
         #: (unroll_steps, batch_size, 1)
-        target_values_scalar = util.value_rescaling(
+        target_values = util.value_rescaling(
             nstep_returns + (1. - dones) * (self.gamma ** self.td_steps) * residual_values)
-
-        #: (unroll_steps, batch_size, n_supports)
-        target_values = self.scalar_to_supports(target_values_scalar)
 
         with tf.GradientTape() as tape:
 
@@ -190,23 +184,18 @@ class Learner:
                 policy_loss += (1. / self.unroll_steps) * tf.reduce_sum(
                     -target_policies[t] * tf.math.log(policy_preds + 0.00001),
                     axis=1, keepdims=True)
-                value_loss += (1. / self.unroll_steps) * tf.reduce_sum(
-                    -target_values[t] * tf.math.log(value_preds + 0.00001),
-                    axis=1, keepdims=True)
-                reward_loss += (1. / self.unroll_steps) * tf.reduce_sum(
-                    -target_rewards[t] * tf.math.log(reward_preds + 0.00001),
-                    axis=1, keepdims=True)
+
+                value_loss += (1. / self.unroll_steps) * tf.square(target_values[t] - value_preds)
+
+                reward_loss += (1. / self.unroll_steps) * tf.square(target_rewards[t] - reward_preds)
 
                 hidden_states = 0.5 * hidden_states + 0.5 * tf.stop_gradient(hidden_states)
 
-                #: compute priority
+                #: Compute priority
                 if t == 0:
-                    value_preds_scalar = tf.reduce_sum(
-                        self.supports * value_preds, axis=1).numpy()
-                    targets = target_values_scalar[0].numpy().flatten()
-
                     priorities = [abs(t - vpred) for t, vpred
-                                  in zip(targets, value_preds_scalar)]
+                                  in zip(target_values[0].numpy().flatten(),
+                                         value_preds.numpy().flatten())]
 
             policy_loss = tf.reduce_mean(policy_loss)
             value_loss = tf.reduce_mean(value_loss)
@@ -273,7 +262,7 @@ def main(env_id="BreakoutDeterministic-v4",
          n_frames=4, gamma=0.997, td_steps=3,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**18, num_mcts_simulations=12,
-         batchsize=32, num_minibatchs=64):
+         batchsize=32, num_minibatchs=64, debug=False):
     """
 
     Args:
@@ -321,8 +310,7 @@ def main(env_id="BreakoutDeterministic-v4",
                   for actor in actors]
 
     n = 0
-    #for _ in range(50):
-    for _ in range(10):
+    for _ in range(20):
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
         pid, samples, priorities = ray.get(finished_actor[0])
         buffer.add_samples(priorities, samples)
@@ -334,6 +322,9 @@ def main(env_id="BreakoutDeterministic-v4",
                   for _ in range(num_minibatchs)]
 
     wip_learner = learner.update_network.remote(minibatchs)
+
+    if debug:
+        time.sleep(99999)
 
     wip_tester = tester.play.remote(current_weights)
 
@@ -412,4 +403,4 @@ def main(env_id="BreakoutDeterministic-v4",
 
 
 if __name__ == '__main__':
-    main(num_actors=20)
+    main(num_actors=20, debug=True)
