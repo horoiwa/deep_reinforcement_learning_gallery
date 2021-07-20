@@ -94,6 +94,9 @@ class Learner:
         self.pv_network.load_weights(pv_path)
         self.dynamics_network.load_weights(dynamics_path)
 
+        self.target_repr_network.set_weights(self.repr_network.get_weights())
+        self.target_pv_network.set_weights(self.pv_network.get_weights())
+
     def get_weights(self):
 
         weights = (self.repr_network.get_weights(),
@@ -272,7 +275,7 @@ class Learner:
 
 def main(env_id="BreakoutDeterministic-v4",
          num_actors=20,
-         n_episodes=30000, unroll_steps=3,
+         n_episodes=20000, unroll_steps=3,
          n_frames=4, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**18, num_mcts_simulations=20,
