@@ -29,13 +29,13 @@ class RepresentationNetwork(tf.keras.Model):
                                kernel_initializer="he_normal")
 
         self.resblock3 = ResidualBlock(filters=256)
-        #self.resblock4 = ResidualBlock(filters=256)
+        self.resblock4 = ResidualBlock(filters=256)
         #self.resblock5 = ResidualBlock(filters=256)
 
         self.pool1 = kl.AveragePooling2D(pool_size=3, strides=2, padding="same")
 
         self.resblock6 = ResidualBlock(filters=256)
-        #self.resblock7 = ResidualBlock(filters=256)
+        self.resblock7 = ResidualBlock(filters=256)
         #self.resblock8 = ResidualBlock(filters=256)
 
         self.pool2 = kl.AveragePooling2D(pool_size=3, strides=2, padding="same")
