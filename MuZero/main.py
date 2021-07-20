@@ -58,7 +58,7 @@ class Learner:
 
         self.preprocess_func = util.get_preprocess_func(self.env_id)
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.00015)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0001)
 
         self.update_count = 0
 
@@ -87,6 +87,12 @@ class Learner:
         self.repr_network.save_weights("checkpoints/repr_net")
         self.pv_network.save_weights("checkpoints/pv_net")
         self.dynamics_network.save_weights("checkpoints/dynamics_net")
+
+    def load(self, repr_path, pv_path, dynamics_path):
+
+        self.repr_network.load_weights(repr_path)
+        self.pv_network.load_weights(pv_path)
+        self.dynamics_network.load_weights(dynamics_path)
 
     def get_weights(self):
 
@@ -168,6 +174,8 @@ class Learner:
         target_values = util.value_rescaling(
             nstep_returns + (1. - dones) * (self.gamma ** self.td_steps) * residual_values)
 
+        scale = 1.0 / self.unroll_steps
+
         with tf.GradientTape() as tape:
 
             policy_loss, value_loss, reward_loss = 0., 0., 0.
@@ -181,19 +189,25 @@ class Learner:
                     hidden_states, actions[t], training=True)
 
                 #: cross_entoropy
-                policy_loss += (1. / self.unroll_steps) * tf.reduce_sum(
+                ploss = tf.reduce_sum(
                     -target_policies[t] * tf.math.log(policy_preds + 0.00001),
                     axis=1, keepdims=True)
 
-                value_loss += (1. / self.unroll_steps) * tf.square(target_values[t] - value_preds)
+                vloss = tf.square(target_values[t] - value_preds)
 
-                reward_loss += (1. / self.unroll_steps) * tf.square(target_rewards[t] - reward_preds)
+                rloss = tf.square(target_rewards[t] - reward_preds)
+
+                policy_loss += scale * ploss + (1. - scale) * tf.stop_gradient(ploss)
+
+                value_loss += scale * vloss + (1. - scale) * tf.stop_gradient(vloss)
+
+                reward_loss += scale * rloss + (1. - scale) * tf.stop_gradient(rloss)
 
                 hidden_states = 0.5 * hidden_states + 0.5 * tf.stop_gradient(hidden_states)
 
                 #: Compute priority
                 if t == 0:
-                    priorities = [abs(t - vpred) for t, vpred
+                    priorities = [abs(v - vpred) for v, vpred
                                   in zip(target_values[0].numpy().flatten(),
                                          value_preds.numpy().flatten())]
 
@@ -201,7 +215,7 @@ class Learner:
             value_loss = tf.reduce_mean(value_loss)
             reward_loss = tf.reduce_mean(reward_loss)
 
-            loss = policy_loss + 0.25 * value_loss + reward_loss
+            loss = 0.01 * policy_loss + value_loss + reward_loss
 
         #: Gather trainable variables
         variables = [self.repr_network.trainable_variables,
@@ -258,10 +272,10 @@ class Learner:
 
 def main(env_id="BreakoutDeterministic-v4",
          num_actors=20,
-         n_episodes=10000, unroll_steps=3,
-         n_frames=4, gamma=0.997, td_steps=3,
+         n_episodes=30000, unroll_steps=3,
+         n_frames=4, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
-         buffer_size=2**18, num_mcts_simulations=12,
+         buffer_size=2**18, num_mcts_simulations=20,
          batchsize=32, num_minibatchs=64, debug=False):
     """
 
@@ -288,6 +302,10 @@ def main(env_id="BreakoutDeterministic-v4",
     learner = Learner.remote(env_id=env_id, unroll_steps=unroll_steps,
                              td_steps=td_steps, n_frames=n_frames,
                              V_min=V_min, V_max=V_max, gamma=gamma)
+    if debug:
+        learner.load.remote("checkpoints/repr_net",
+                            "checkpoints/pv_net",
+                            "checkpoints/dynamics_net")
 
     current_weights = ray.put(ray.get(learner.get_weights.remote()))
 
@@ -341,11 +359,9 @@ def main(env_id="BreakoutDeterministic-v4",
 
         pid, samples, priorities = ray.get(finished_actor[0])
 
-        print(f"Actor {pid} finished")
-
         buffer.add_samples(priorities, samples)
 
-        T = 1.0 if n < 2500 else 0.5 if n < 4000 else 0.25
+        T = 1.0 if n < 5000 else 0.5 if n < 10000 else 0.25
 
         wip_actors.extend(
             [actors[pid].sync_weights_and_rollout.remote(current_weights, T=T)])
@@ -354,16 +370,9 @@ def main(env_id="BreakoutDeterministic-v4",
 
         actor_count += 1
 
-        if actor_count < 5:
-            continue
-
         finished_learner, _ = ray.wait([wip_learner], timeout=0)
 
-        print(finished_learner)
-
         if finished_learner:
-
-            print("Learner Ready")
 
             current_weights, indices, priorities, info = ray.get(finished_learner[0])
 
@@ -389,7 +398,7 @@ def main(env_id="BreakoutDeterministic-v4",
             t = time.time()
             actor_count = 0
 
-        if n % 20 == 0:
+        if n % 50 == 0:
 
             print("Tester Ready")
 
@@ -403,4 +412,4 @@ def main(env_id="BreakoutDeterministic-v4",
 
 
 if __name__ == '__main__':
-    main(num_actors=20, debug=True)
+    main(num_actors=20, debug=False)

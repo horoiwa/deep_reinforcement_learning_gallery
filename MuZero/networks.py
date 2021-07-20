@@ -53,15 +53,28 @@ class RepresentationNetwork(tf.keras.Model):
 
         x = self.conv2(x)
         x = self.resblock3(x, training=training)
-        #x = self.resblock4(x, training=training)
+        x = self.resblock4(x, training=training)
         #x = self.resblock5(x, training=training)
 
         x = self.pool1(x)
         x = self.resblock6(x, training=training)
-        #x = self.resblock7(x, training=training)
+        x = self.resblock7(x, training=training)
         #x = self.resblock8(x, training=training)
 
-        hidden_states = self.pool2(x)
+        x = self.pool2(x)
+
+        bs, h, w, d = x.shape
+
+        s_min = tf.reduce_min(tf.reshape(x, (bs, -1)), axis=1, keepdims=True)
+        s_max = tf.reduce_max(tf.reshape(x, (bs, -1)), axis=1, keepdims=True)
+
+        s_min = s_min * tf.ones((bs, h*w*d), dtype=tf.float32)
+        s_max = s_max * tf.ones((bs, h*w*d), dtype=tf.float32)
+
+        s_min = tf.reshape(s_min, (bs, h, w, d))
+        s_max = tf.reshape(s_max, (bs, h, w, d))
+
+        hidden_states = (x - s_min) / (s_max - s_min)
 
         return hidden_states
 
@@ -202,7 +215,7 @@ class DynamicsNetwork(tf.keras.Model):
             actions: (bathsize, )
         """
 
-        bs, h, w = hidden_states.shape[:3]
+        bs, h, w, d = hidden_states.shape
 
         #: Make onehot action plane
         actions_onehot = tf.one_hot(actions, self.action_space)         #: (batchsize, action_space)
@@ -229,13 +242,22 @@ class DynamicsNetwork(tf.keras.Model):
         #x = self.resblock7(x, training=training)
         #x = self.resblock8(x, training=training)
 
-        next_states = x
+        s_min = tf.reduce_min(tf.reshape(x, (bs, -1)), axis=1, keepdims=True)
+        s_max = tf.reduce_max(tf.reshape(x, (bs, -1)), axis=1, keepdims=True)
+
+        s_min = s_min * tf.ones((bs, h*w*d), dtype=tf.float32)
+        s_max = s_max * tf.ones((bs, h*w*d), dtype=tf.float32)
+
+        s_min = tf.reshape(s_min, (bs, h, w, d))
+        s_max = tf.reshape(s_max, (bs, h, w, d))
+
+        next_hidden_states = (x - s_min) / (s_max - s_min)
 
         x = relu(self.bn1(self.conv2(x), training=training))
         x = self.flat(x)
         rewards = self.reward(x)
 
-        return next_states, rewards
+        return next_hidden_states, rewards
 
     def predict(self, hidden_state, action: int):
 
@@ -310,9 +332,11 @@ if __name__ == '__main__':
     pv_network = PVNetwork(action_space=action_space, V_min=-30, V_max=30)
 
     hidden_state, obs = repr_function.predict(frame_history, action_history)
+    hidden_states = tf.repeat(hidden_state, repeats=4, axis=0)
+
     policy, value = pv_network.predict(hidden_state)
 
     action = tf.convert_to_tensor([1])
-    next_states, rewards = dynamics_function(hidden_state, action)
+    #next_states, rewards = dynamics_function(hidden_state, action)
     #next_states, rewards = dynamics_function.predict(hidden_state, 0)
     next_states, rewards = dynamics_function.predict_all(hidden_state)
