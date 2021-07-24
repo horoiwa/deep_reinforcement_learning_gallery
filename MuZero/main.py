@@ -19,7 +19,7 @@ from networks import DynamicsNetwork, PVNetwork, RepresentationNetwork
 class Learner:
 
     def __init__(self, env_id, unroll_steps=5, td_steps=5, n_frames=8,
-                 V_min=-30, V_max=30, gamma=0.998, target_update_period=1200):
+                 V_min=-30, V_max=30, gamma=0.998, target_update_period=1600):
 
         self.env_id = env_id
 
@@ -58,7 +58,7 @@ class Learner:
 
         self.preprocess_func = util.get_preprocess_func(self.env_id)
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.0001)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00025)
 
         self.update_count = 0
 
