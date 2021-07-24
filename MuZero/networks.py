@@ -138,9 +138,13 @@ class PVNetwork(tf.keras.Model):
         self.bn_v = kl.BatchNormalization()
         self.flat_v = kl.Flatten()
 
-        self.value = kl.Dense(1,
-                              kernel_regularizer=l2(0.001),
-                              kernel_initializer="he_normal")
+        #self.value = kl.Dense(1,
+        #                      kernel_regularizer=l2(0.001),
+        #                      kernel_initializer="he_normal")
+
+        self.logits_value = kl.Dense(self.n_supports,
+                                     kernel_regularizer=l2(0.001),
+                                     kernel_initializer="he_normal")
 
     @tf.function
     def call(self, hidden_states, training=False):
@@ -151,23 +155,29 @@ class PVNetwork(tf.keras.Model):
 
         x2 = relu(self.bn_v(self.conv_v(hidden_states), training=training))
         x2 = self.flat_v(x2)
-        value = self.value(x2)
 
-        return policy, value
+        logits_value = self.logits_value(x2)
 
-    def predict(self, hidden_state):
+        categorical_values = tf.nn.softmax(logits_value)
 
-        assert len(hidden_state.shape) == 4
+        return policy, categorical_values
 
-        policy, value = self(hidden_state)
+    def predict(self, hidden_states):
 
-        if hidden_state.shape[0] == 1:
+        assert len(hidden_states.shape) == 4
+
+        policy, categorical_values = self(hidden_states)
+
+        if hidden_states.shape[0] == 1:
             policy = policy.numpy()[0]
-            value = inverse_value_rescaling(value).numpy()[0][0]
+            values = tf.reduce_sum(self.supports * categorical_values, axis=1)
+            rescaled_values = inverse_value_rescaling(values).numpy()[0]
         else:
-            value = inverse_value_rescaling(value)
+            values = tf.reduce_sum(self.supports * categorical_values,
+                                   axis=1, keepdims=True)
+            rescaled_values = inverse_value_rescaling(values)
 
-        return policy, value
+        return policy, rescaled_values
 
 
 class DynamicsNetwork(tf.keras.Model):
@@ -203,7 +213,12 @@ class DynamicsNetwork(tf.keras.Model):
                                kernel_initializer="he_normal")
         self.bn1 = kl.BatchNormalization()
         self.flat = kl.Flatten()
-        self.reward = kl.Dense(1,
+
+        #self.reward = kl.Dense(1,
+        #                       kernel_regularizer=l2(0.001),
+        #                       kernel_initializer="he_normal")
+
+        self.logits = kl.Dense(self.n_supports,
                                kernel_regularizer=l2(0.001),
                                kernel_initializer="he_normal")
 
@@ -255,16 +270,22 @@ class DynamicsNetwork(tf.keras.Model):
 
         x = relu(self.bn1(self.conv2(x), training=training))
         x = self.flat(x)
-        rewards = self.reward(x)
 
-        return next_hidden_states, rewards
+        logits = self.logits(x)
+
+        categorical_rewards = tf.nn.softmax(logits, axis=1)
+
+        return next_hidden_states, categorical_rewards
 
     def predict(self, hidden_state, action: int):
 
         assert len(hidden_state.shape) == 4 and hidden_state.shape[0] == 1
         assert action in range(self.action_space)
 
-        next_state, reward = self(hidden_state, tf.convert_to_tensor([action]))
+        next_state, categorical_reward = self(hidden_state, tf.convert_to_tensor([action]))
+
+        reward = tf.reduce_sum(self.supports * categorical_reward,
+                               axis=1, keepdims=True)
 
         return next_state, reward
 
@@ -278,8 +299,13 @@ class DynamicsNetwork(tf.keras.Model):
         assert len(hidden_state.shape) == 4 and hidden_state.shape[0] == 1
 
         actions = tf.range(self.action_space)
+
         hidden_states = tf.repeat(hidden_state, repeats=4, axis=0)
-        next_states, rewards = self(hidden_states, actions)
+
+        next_states, categorical_rewards = self(hidden_states, actions)
+
+        rewards = tf.reduce_sum(self.supports * categorical_rewards,
+                                axis=1, keepdims=True)
 
         return next_states, rewards
 
@@ -335,6 +361,9 @@ if __name__ == '__main__':
     hidden_states = tf.repeat(hidden_state, repeats=4, axis=0)
 
     policy, value = pv_network.predict(hidden_state)
+    policy, value = pv_network.predict(hidden_states)
+    policies, categorical_values = pv_network(hidden_states)
+    import pdb; pdb.set_trace()
 
     action = tf.convert_to_tensor([1])
     #next_states, rewards = dynamics_function(hidden_state, action)

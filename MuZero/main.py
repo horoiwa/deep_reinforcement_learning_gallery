@@ -6,6 +6,7 @@ from pathlib import Path
 import gym
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras.metrics import categorical_crossentropy
 import ray
 import lz4.frame as lz4f
 
@@ -146,8 +147,11 @@ class Learner:
         target_policies = tf.stack([s.target_policies for s in samples], axis=1)
 
         #: (unroll_steps, batch_size, 1)
-        target_rewards = tf.expand_dims(
+        target_rewards_scalar = tf.expand_dims(
             tf.stack([s.target_rewards for s in samples], axis=1), axis=2)
+
+        #: (unroll_steps, batch_size, n_supports)
+        target_rewards = self.scalar_to_supports(target_rewards_scalar)
 
         #: (unroll_steps, batch_size, 1)
         nstep_returns = tf.expand_dims(
@@ -174,8 +178,11 @@ class Learner:
         residual_values = tf.stack(residual_values, axis=0)
 
         #: (unroll_steps, batch_size, 1)
-        target_values = util.value_rescaling(
+        target_values_scalar = util.value_rescaling(
             nstep_returns + (1. - dones) * (self.gamma ** self.td_steps) * residual_values)
+
+        #: (unroll_steps, batch_size, n_supports)
+        target_values = self.scalar_to_supports(target_values_scalar)
 
         scale = 1.0 / self.unroll_steps
 
@@ -192,13 +199,11 @@ class Learner:
                     hidden_states, actions[t], training=True)
 
                 #: cross_entoropy
-                ploss = tf.reduce_sum(
-                    -target_policies[t] * tf.math.log(policy_preds + 0.00001),
-                    axis=1, keepdims=True)
+                ploss = categorical_crossentropy(target_policies[t], policy_preds)
 
-                vloss = tf.square(target_values[t] - value_preds)
+                vloss = categorical_crossentropy(target_values[t], value_preds)
 
-                rloss = tf.square(target_rewards[t] - reward_preds)
+                rloss = categorical_crossentropy(target_rewards[t], reward_preds)
 
                 policy_loss += scale * ploss + (1. - scale) * tf.stop_gradient(ploss)
 
@@ -208,17 +213,15 @@ class Learner:
 
                 hidden_states = 0.5 * hidden_states + 0.5 * tf.stop_gradient(hidden_states)
 
-                #: Compute priority
+                #: To compute priority
                 if t == 0:
-                    priorities = [abs(v - vpred) for v, vpred
-                                  in zip(target_values[0].numpy().flatten(),
-                                         value_preds.numpy().flatten())]
+                    vpred_0 = value_preds
 
             policy_loss = tf.reduce_mean(policy_loss)
             value_loss = tf.reduce_mean(value_loss)
             reward_loss = tf.reduce_mean(reward_loss)
 
-            loss = 0.01 * policy_loss + value_loss + reward_loss
+            loss = policy_loss + value_loss + reward_loss
 
         #: Gather trainable variables
         variables = [self.repr_network.trainable_variables,
@@ -226,9 +229,16 @@ class Learner:
                      self.dynamics_network.trainable_variables]
 
         grads = tape.gradient(loss, variables)
-
         for i in range(len(variables)):
-            self.optimizer.apply_gradients(zip(grads[i], variables[i]))
+            grads_i, _ = tf.clip_by_global_norm(grads[i], 40.0)
+            self.optimizer.apply_gradients(zip(grads_i, variables[i]))
+
+        #: Compute prioritit
+        vpreds = tf.reduce_sum(self.supports * vpred_0, axis=1).numpy()
+        vtargets = target_values_scalar[0].numpy().flatten()
+
+        priorities = [abs(vtarg - vpred) for vtarg, vpred
+                      in zip(vtargets, vpreds)]
 
         if self.update_count % self.target_update_period == 0:
             print("==== Target Update ====")
