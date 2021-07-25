@@ -415,7 +415,7 @@ def main(env_id="BreakoutDeterministic-v4",
 
             print("Tester Ready")
 
-            finished_tester = ray.wait([wip_tester], timeout=0)
+            finished_tester, _ = ray.wait([wip_tester], timeout=0)
 
             if finished_tester:
 
