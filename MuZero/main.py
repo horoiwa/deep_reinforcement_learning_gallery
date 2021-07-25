@@ -374,7 +374,7 @@ def main(env_id="BreakoutDeterministic-v4",
 
         buffer.add_samples(priorities, samples)
 
-        T = 1.0 if n < 5000 else 0.5 if n < 10000 else 0.25
+        T = 1.0 if n < 3000 else 0.5 if n < 7000 else 0.25
 
         wip_actors.extend(
             [actors[pid].sync_weights_and_rollout.remote(current_weights, T=T)])
