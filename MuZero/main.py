@@ -288,7 +288,7 @@ def main(env_id="BreakoutDeterministic-v4",
          n_episodes=20000, unroll_steps=3,
          n_frames=4, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
-         buffer_size=2**18, num_mcts_simulations=20,
+         buffer_size=2**17, num_mcts_simulations=20,
          batchsize=32, num_minibatchs=64, debug=False):
     """
 
@@ -415,13 +415,17 @@ def main(env_id="BreakoutDeterministic-v4",
 
             print("Tester Ready")
 
-            score, step = ray.get(wip_tester)
+            finished_tester = ray.wait([wip_tester], timeout=0)
 
-            wip_tester = tester.testplay.remote(current_weights)
+            if finished_tester:
 
-            with summary_writer.as_default():
-                tf.summary.scalar("Test Score", score, step=n)
-                tf.summary.scalar("Test Step", step, step=n)
+                score, step = ray.get(finished_tester[0])
+
+                wip_tester = tester.testplay.remote(current_weights)
+
+                with summary_writer.as_default():
+                    tf.summary.scalar("Test Score", score, step=n)
+                    tf.summary.scalar("Test Step", step, step=n)
 
 
 if __name__ == '__main__':

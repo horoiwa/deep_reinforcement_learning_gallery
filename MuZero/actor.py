@@ -285,6 +285,9 @@ class Actor:
 
             action_history.append(action)
 
+            if steps > 500 and total_rewards < 5:
+                break
+
         return total_rewards, steps
 
 
