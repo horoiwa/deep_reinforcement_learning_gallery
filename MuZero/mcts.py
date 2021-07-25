@@ -57,7 +57,7 @@ class AtariMCTS:
         s = root_state.ref()
 
         if s not in self.P:
-            root_value = self._expand(root_state)
+            root_value = self.expand(root_state)
 
         #: Adding Dirichlet noise to the prior probabilities in the root node
         if self.dirichlet_alpha is not None:
@@ -83,7 +83,7 @@ class AtariMCTS:
             next_state = self.S[s][a]
 
             #: cumulative reward with n-step bootstrapping
-            G = self.R[s][a] + self.gamma * self._evaluate(next_state)
+            G = self.R[s][a] + self.gamma * self.evaluate(next_state)
 
             self.Q[s][a] = (self.N[s][a] * self.Q[s][a] + G) / (self.N[s][a] + 1)
             self.N[s][a] = self.N[s][a] + 1
@@ -95,9 +95,13 @@ class AtariMCTS:
 
         mcts_policy = visit_counts ** (1 / T) / (visit_counts ** (1 / T)).sum()
 
-        return mcts_policy, root_value
+        action = np.random.choice(range(self.action_space), p=mcts_policy)
 
-    def _expand(self, state):
+        self.pruning(root_state, action)
+
+        return mcts_policy, action, root_value
+
+    def expand(self, state):
 
         s = state.ref()
 
@@ -116,13 +120,13 @@ class AtariMCTS:
 
         return nn_value
 
-    def _evaluate(self, state):
+    def evaluate(self, state):
 
         s = state.ref()
 
         if s not in self.P:
             #: 未展開ノードへの到達時
-            value = self._expand(state)
+            value = self.expand(state)
             return value
 
         else:
@@ -140,7 +144,7 @@ class AtariMCTS:
 
             next_state = self.S[s][a]
 
-            G = self.R[s][a] + self.gamma * self._evaluate(next_state)
+            G = self.R[s][a] + self.gamma * self.evaluate(next_state)
 
             self.Q[s][a] = (self.N[s][a] * self.Q[s][a] + G) / (self.N[s][a] + 1)
             self.N[s][a] = self.N[s][a] + 1
@@ -149,3 +153,27 @@ class AtariMCTS:
             self.q_max = max(self.q_max, self.Q[s][a])
 
             return G
+
+    def pruning(self, state, action):
+
+        s = state.ref()
+
+        redundunt_states = []
+
+        for a in range(self.action_space):
+
+            if a != action:
+                redundunt_states += self._recurrent_search(self.S[s][a].ref())
+
+        for rs in redundunt_states:
+            del self.P[rs],  self.N[rs], self.Q[rs], self.R[rs], self.S[rs]
+
+    def _recurrent_search(self, s):
+
+        if s in self.S:
+            redundunt_states = [s]
+            for a in range(self.action_space):
+                redundunt_states += self._recurrent_search(self.S[s][a].ref())
+            return redundunt_states
+        else:
+            return []

@@ -12,7 +12,7 @@ import lz4.frame as lz4f
 
 import util
 from buffer import PrioritizedReplay
-from actor import Actor, Tester
+from actor import Actor
 from networks import DynamicsNetwork, PVNetwork, RepresentationNetwork
 
 
@@ -63,9 +63,9 @@ class Learner:
 
         self.update_count = 0
 
-        self._build_network()
+        self.setup()
 
-    def _build_network(self):
+    def setup(self):
         """ initialize network parameter """
 
         env = gym.make(self.env_id)
@@ -331,11 +331,11 @@ def main(env_id="BreakoutDeterministic-v4",
                            dirichlet_alpha=0.25)
               for pid in range(num_actors)]
 
-    tester = Tester.remote(pid=0, env_id=env_id, n_frames=n_frames,
-                           unroll_steps=unroll_steps, td_steps=td_steps,
-                           num_mcts_simulations=num_mcts_simulations,
-                           V_min=V_min, V_max=V_max, gamma=gamma,
-                           dirichlet_alpha=0.25)
+    tester = Actor.remote(pid=0, env_id=env_id, n_frames=n_frames,
+                          unroll_steps=unroll_steps, td_steps=td_steps,
+                          num_mcts_simulations=num_mcts_simulations,
+                          V_min=V_min, V_max=V_max, gamma=gamma,
+                          dirichlet_alpha=0.25)
 
     wip_actors = [actor.sync_weights_and_rollout.remote(current_weights, T=1.0)
                   for actor in actors]
