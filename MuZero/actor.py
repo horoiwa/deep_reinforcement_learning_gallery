@@ -136,9 +136,8 @@ class Actor:
 
         while not done:
 
-            with tf.device("/cpu:0"):
-                hidden_state, obs = self.repr_network.predict(
-                    self.frame_history, self.action_history)
+            hidden_state, obs = self.repr_network.predict(
+                self.frame_history, self.action_history)
 
             mcts_policy, action, root_value = self.mcts.search(
                 hidden_state, self.num_mcts_simulations, T)
@@ -271,8 +270,7 @@ class Actor:
 
         while not done:
 
-            with tf.device("/cpu:0"):
-                hidden_state, obs = self.repr_network.predict(frame_history, action_history)
+            hidden_state, obs = self.repr_network.predict(frame_history, action_history)
 
             mcts_policy, action, root_value = mcts.search(
                 hidden_state, self.num_mcts_simulations, T=T)

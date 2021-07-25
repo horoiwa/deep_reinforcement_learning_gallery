@@ -357,7 +357,7 @@ def main(env_id="BreakoutDeterministic-v4",
     if debug:
         time.sleep(99999)
 
-    wip_tester = tester.play.remote(current_weights)
+    wip_tester = tester.testplay.remote(current_weights)
 
     minibatchs = [buffer.sample_minibatch(batchsize=batchsize)
                   for _ in range(num_minibatchs)]
@@ -417,7 +417,7 @@ def main(env_id="BreakoutDeterministic-v4",
 
             score, step = ray.get(wip_tester)
 
-            wip_tester = tester.play.remote(current_weights)
+            wip_tester = tester.testplay.remote(current_weights)
 
             with summary_writer.as_default():
                 tf.summary.scalar("Test Score", score, step=n)
@@ -425,4 +425,4 @@ def main(env_id="BreakoutDeterministic-v4",
 
 
 if __name__ == '__main__':
-    main(num_actors=20, debug=False)
+    main(num_actors=16, debug=False)

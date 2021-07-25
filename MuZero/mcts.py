@@ -105,9 +105,8 @@ class AtariMCTS:
 
         s = state.ref()
 
-        with tf.device("/cpu:0"):
-            nn_policy, nn_value = self.pv_network.predict(state)
-            next_states, rewards = self.dynamics_network.predict_all(state)
+        nn_policy, nn_value = self.pv_network.predict(state)
+        next_states, rewards = self.dynamics_network.predict_all(state)
 
         self.P[s] = nn_policy.tolist()
         self.N[s] = [0] * self.action_space
@@ -158,7 +157,7 @@ class AtariMCTS:
 
         s = state.ref()
 
-        redundunt_states = []
+        redundunt_states = [s]
 
         for a in range(self.action_space):
 
