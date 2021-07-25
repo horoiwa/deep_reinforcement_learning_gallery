@@ -288,7 +288,7 @@ def main(env_id="BreakoutDeterministic-v4",
          n_episodes=20000, unroll_steps=3,
          n_frames=4, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
-         buffer_size=2**17, num_mcts_simulations=20,
+         buffer_size=2**16, num_mcts_simulations=20,
          batchsize=32, num_minibatchs=64, debug=False):
     """
 
@@ -429,4 +429,4 @@ def main(env_id="BreakoutDeterministic-v4",
 
 
 if __name__ == '__main__':
-    main(num_actors=16, debug=False)
+    main(num_actors=18, debug=False)
