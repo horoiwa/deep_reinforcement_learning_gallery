@@ -11,6 +11,7 @@ mp4/
 # C extensions
 *.so
 checkpoints/
+checkpoints*/
 *memo.md
 
 memo.md
