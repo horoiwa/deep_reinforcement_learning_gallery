@@ -1,6 +1,7 @@
 import collections
 from dataclasses import dataclass
 import pickle
+import random
 
 import ray
 import gym
@@ -25,13 +26,13 @@ class Sample:
     dones: list
 
 
-@ray.remote(num_cpus=1, num_gpus=0)
+#@ray.remote(num_cpus=1, num_gpus=0)
 class Actor:
 
     def __init__(self, pid, env_id, n_frames,
                  num_mcts_simulations, unroll_steps,
                  gamma, V_max, V_min, td_steps,
-                 dirichlet_alpha):
+                 dirichlet_alpha, initial_randomize=True):
 
         self.pid = pid
 
@@ -63,6 +64,8 @@ class Actor:
 
         self.dynamics_network = DynamicsNetwork(action_space=self.action_space,
                                                 V_min=V_min, V_max=V_max)
+
+        self.initial_randomize = initial_randomize
 
         self.setup()
 
@@ -102,9 +105,30 @@ class Actor:
             gamma=self.gamma,
             dirichlet_alpha=self.dirichlet_alpha)
 
-        self.rewards = 0
+        self.episode_rewards = 0
 
-        self.steps = 0
+        self.episode_steps = 0
+
+        if self.initial_randomize:
+            """
+            Randomize first few frames to stable early learning
+            This code is tuned for and only valid for BreakoutDeterminitic-v4
+            """
+
+            for i in range(random.choice(range(10))):
+
+                if i == 0:
+                    action = 1  # FIRE
+                    frame, reward, done, info = self.env.step(action)
+                else:
+                    action = random.choice(range(self.action_space))
+                    frame, reward, done, info = self.env.step(action)
+
+                self.frame_history.append(self.preprocess_func(frame))
+                self.action_history.append(action)
+
+                self.episode_rewards += reward
+                self.episode_steps += 1
 
     def sync_weights_and_rollout(self, current_weights, T):
 
@@ -163,18 +187,18 @@ class Actor:
             mcts_policies.append(mcts_policy)
             root_values.append(root_value)
 
-            self.rewards += reward
+            self.episode_rewards += reward
 
-            self.steps += 1
+            self.episode_steps += 1
 
-            #: handle freeze
-            if self.steps > 500 and self.rewards < 5:
-                break
-            elif self.steps > 1500 and self.rewards < 15:
+            #: Handle freeze agent
+            if ((self.episode_steps > 500 and self.episode_rewards < 3) or
+                (self.episode_steps > 1500 and self.episode_rewards < 10)):
+                self.lives = 0
                 break
 
         game_history = (observations, actions, rewards,
-                        mcts_policies, root_values)
+                        mcts_policies, root_values, done)
 
         return game_history
 
@@ -278,7 +302,7 @@ class Actor:
             gamma=self.gamma,
             dirichlet_alpha=self.dirichlet_alpha)
 
-        total_rewards, steps = 0, 0
+        episode_rewards, episode_steps = 0, 0
 
         done = False
 
@@ -291,21 +315,21 @@ class Actor:
 
             frame, reward, done, info = env.step(action)
 
-            total_rewards += reward
+            episode_rewards += reward
 
-            steps += 1
+            episode_steps += 1
 
             frame_history.append(self.preprocess_func(frame))
 
             action_history.append(action)
 
             #: handle freeze
-            if steps > 500 and total_rewards < 5:
+            if episode_steps > 500 and episode_rewards < 3:
                 break
-            elif steps > 1500 and total_rewards < 15:
+            elif episode_steps > 1500 and episode_rewards < 10:
                 break
 
-        return total_rewards, steps
+        return episode_rewards, episode_steps
 
 
 if __name__ == "__main__":
