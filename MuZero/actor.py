@@ -119,11 +119,10 @@ class Actor:
 
                 if i == 0:
                     action = 1  # FIRE
-                    frame, reward, done, info = self.env.step(action)
                 else:
                     action = random.choice(range(self.action_space))
-                    frame, reward, done, info = self.env.step(action)
 
+                frame, reward, done, info = self.env.step(action)
                 self.frame_history.append(self.preprocess_func(frame))
                 self.action_history.append(action)
 
