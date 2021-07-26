@@ -192,7 +192,8 @@ class Actor:
 
             #: Handle freeze agent
             if ((self.episode_steps > 500 and self.episode_rewards < 3) or
-                (self.episode_steps > 1500 and self.episode_rewards < 10)):
+                (self.episode_steps > 1500 and self.episode_rewards < 10) or
+                (self.episode_steps > 10000)):
                 self.lives = 0
                 break
 
@@ -323,9 +324,10 @@ class Actor:
             action_history.append(action)
 
             #: handle freeze
-            if episode_steps > 500 and episode_rewards < 3:
-                break
-            elif episode_steps > 1500 and episode_rewards < 10:
+            if ((self.episode_steps > 500 and self.episode_rewards < 3) or
+                (self.episode_steps > 1500 and self.episode_rewards < 10) or
+                (self.episode_steps > 10000)):
+                self.lives = 0
                 break
 
         return episode_rewards, episode_steps
