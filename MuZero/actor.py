@@ -26,7 +26,7 @@ class Sample:
     dones: list
 
 
-#@ray.remote(num_cpus=1, num_gpus=0)
+@ray.remote(num_cpus=1, num_gpus=0)
 class Actor:
 
     def __init__(self, pid, env_id, n_frames,
