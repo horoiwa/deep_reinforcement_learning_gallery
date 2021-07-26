@@ -102,6 +102,10 @@ class Actor:
             gamma=self.gamma,
             dirichlet_alpha=self.dirichlet_alpha)
 
+        self.rewards = 0
+
+        self.steps = 0
+
     def sync_weights_and_rollout(self, current_weights, T):
 
         #: 最新のネットワークに同期
@@ -158,6 +162,16 @@ class Actor:
             rewards.append(reward)
             mcts_policies.append(mcts_policy)
             root_values.append(root_value)
+
+            self.rewards += reward
+
+            self.steps += 1
+
+            #: handle freeze
+            if self.steps > 500 and self.rewards < 5:
+                break
+            elif self.steps > 1500 and self.rewards < 15:
+                break
 
         game_history = (observations, actions, rewards,
                         mcts_policies, root_values)
@@ -285,7 +299,10 @@ class Actor:
 
             action_history.append(action)
 
+            #: handle freeze
             if steps > 500 and total_rewards < 5:
+                break
+            elif steps > 1500 and total_rewards < 15:
                 break
 
         return total_rewards, steps

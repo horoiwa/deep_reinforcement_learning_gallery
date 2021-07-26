@@ -285,7 +285,7 @@ class Learner:
 
 def main(env_id="BreakoutDeterministic-v4",
          num_actors=20,
-         n_episodes=20000, unroll_steps=3,
+         n_episodes=30000, unroll_steps=3,
          n_frames=4, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**16, num_mcts_simulations=20,
@@ -374,7 +374,7 @@ def main(env_id="BreakoutDeterministic-v4",
 
         buffer.add_samples(priorities, samples)
 
-        T = 1.0 if n < 3000 else 0.5 if n < 7000 else 0.25
+        T = 1.0 if n < 1000 else 0.5 if n < 3000 else 0.25
 
         wip_actors.extend(
             [actors[pid].sync_weights_and_rollout.remote(current_weights, T=T)])
