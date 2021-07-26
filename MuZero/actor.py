@@ -198,7 +198,7 @@ class Actor:
                 break
 
         game_history = (observations, actions, rewards,
-                        mcts_policies, root_values, done)
+                        mcts_policies, root_values)
 
         return game_history
 
