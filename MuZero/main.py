@@ -59,7 +59,7 @@ class Learner:
 
         self.preprocess_func = util.get_preprocess_func(self.env_id)
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.0004)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00025)
 
         self.update_count = 0
 
@@ -289,7 +289,7 @@ def main(env_id="BreakoutDeterministic-v4",
          n_frames=4, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**16, num_mcts_simulations=20,
-         batchsize=32, num_minibatchs=64, resume_step=None):
+         batchsize=32, num_minibatchs=64, resume=False):
     """
     Args:
         n_frames (int): num of stacked RGB frames. Defaults to 8. (original 32)
@@ -311,19 +311,17 @@ def main(env_id="BreakoutDeterministic-v4",
                              td_steps=td_steps, n_frames=n_frames,
                              V_min=V_min, V_max=V_max, gamma=gamma)
 
-    logdir = Path(__file__).parent / "log"
-
-    if resume_step:
+    if resume:
         learner.load.remote("checkpoints/repr_net",
                             "checkpoints/pv_net",
                             "checkpoints/dynamics_net")
-    else:
-        if logdir.exists():
-            shutil.rmtree(logdir)
+
+    logdir = Path(__file__).parent / "log"
+
+    if logdir.exists():
+        shutil.rmtree(logdir)
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
-
-    n = 0 if resume_step is None else resume_step
 
     current_weights = ray.put(ray.get(learner.get_weights.remote()))
 
@@ -345,7 +343,9 @@ def main(env_id="BreakoutDeterministic-v4",
     wip_actors = [actor.sync_weights_and_rollout.remote(current_weights, T=1.0)
                   for actor in actors]
 
-    for _ in range(20):
+    n = 0
+
+    for _ in range(100):
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
         pid, samples, priorities = ray.get(finished_actor[0])
         buffer.add_samples(priorities, samples)
@@ -414,20 +414,18 @@ def main(env_id="BreakoutDeterministic-v4",
             t = time.time()
             actor_count = 0
 
-        if n % 50 == 0:
+        finished_tester, _ = ray.wait([wip_tester], timeout=0)
 
-            finished_tester, _ = ray.wait([wip_tester], timeout=0)
+        if finished_tester:
 
-            if finished_tester:
+            score, step = ray.get(finished_tester[0])
 
-                score, step = ray.get(finished_tester[0])
+            wip_tester = tester.testplay.remote(current_weights)
 
-                wip_tester = tester.testplay.remote(current_weights)
-
-                with summary_writer.as_default():
-                    tf.summary.scalar("Test Score", score, step=n)
-                    tf.summary.scalar("Test Step", step, step=n)
+            with summary_writer.as_default():
+                tf.summary.scalar("Test Score", score, step=n)
+                tf.summary.scalar("Test Step", step, step=n)
 
 
 if __name__ == '__main__':
-    main(num_actors=18, resume=False)
+    main(num_actors=18, resume_step=1990)
