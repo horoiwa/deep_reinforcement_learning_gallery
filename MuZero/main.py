@@ -59,7 +59,7 @@ class Learner:
 
         self.preprocess_func = util.get_preprocess_func(self.env_id)
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.00025)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0004)
 
         self.update_count = 0
 
@@ -110,7 +110,7 @@ class Learner:
 
         indices_all, priorities_all, losses = [], [], []
 
-        with util.Timer("Leaner update:"):
+        with util.Timer("Learner update:"):
 
             for (indices, weights, samples) in minibatchs:
 
@@ -368,20 +368,22 @@ def main(env_id="BreakoutDeterministic-v4",
 
     while n <= n_episodes:
 
-        finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
+        finished_actors, wip_actors = ray.wait(wip_actors, timeout=0)
 
-        pid, samples, priorities = ray.get(finished_actor[0])
+        for i in range(len(finished_actors)):
 
-        buffer.add_samples(priorities, samples)
+            pid, samples, priorities = ray.get(finished_actor[i])
 
-        T = 1.0 if n < 1000 else 0.5 if n < 3000 else 0.25
+            buffer.add_samples(priorities, samples)
 
-        wip_actors.extend(
-            [actors[pid].sync_weights_and_rollout.remote(current_weights, T=T)])
+            T = 1.0 if n < 1000 else 0.5 if n < 3000 else 0.25
 
-        n += 1
+            wip_actors.extend(
+                [actors[pid].sync_weights_and_rollout.remote(current_weights, T=T)])
 
-        actor_count += 1
+            n += 1
+
+            actor_count += 1
 
         finished_learner, _ = ray.wait([wip_learner], timeout=0)
 
@@ -412,8 +414,6 @@ def main(env_id="BreakoutDeterministic-v4",
             actor_count = 0
 
         if n % 50 == 0:
-
-            print("Tester Ready")
 
             finished_tester, _ = ray.wait([wip_tester], timeout=0)
 

@@ -116,16 +116,11 @@ class Actor:
             """
 
             for i in range(random.choice(range(10))):
-
-                if i == 0:
-                    action = 1  # FIRE
-                else:
-                    action = random.choice(range(self.action_space))
-
+                action = random.choice(range(self.action_space))
                 frame, reward, done, info = self.env.step(action)
+
                 self.frame_history.append(self.preprocess_func(frame))
                 self.action_history.append(action)
-
                 self.episode_rewards += reward
                 self.episode_steps += 1
 
