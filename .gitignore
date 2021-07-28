@@ -13,6 +13,7 @@ mp4/
 checkpoints/
 checkpoints*/
 *memo.md
+*pkl
 
 memo.md
 *.out

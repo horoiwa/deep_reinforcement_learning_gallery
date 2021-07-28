@@ -289,9 +289,8 @@ def main(env_id="BreakoutDeterministic-v4",
          n_frames=4, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**16, num_mcts_simulations=20,
-         batchsize=32, num_minibatchs=64, debug=False):
+         batchsize=32, num_minibatchs=64, resume_step=None):
     """
-
     Args:
         n_frames (int): num of stacked RGB frames. Defaults to 8. (original 32)
         gamma (float): discount factor. Defaults to 0.997.
@@ -299,26 +298,32 @@ def main(env_id="BreakoutDeterministic-v4",
             assumed range of rescaled rewards,
             -30 ~ 30 corresponds to roughly score -1000 ~ 1000
             (original -300 ~ 300)
+        resume_step (int): num steps to resume learning from
 
     Changes from original paper:
-        - Use Grey scaled frame instead of RGB frame
+        - Use Greyscale image instead of RGB frame
         - Reduce the number of residual blocks for compuational efficiency.
     """
-
-    logdir = Path(__file__).parent / "log"
-    if logdir.exists():
-        shutil.rmtree(logdir)
-    summary_writer = tf.summary.create_file_writer(str(logdir))
 
     ray.init(local_mode=False)
 
     learner = Learner.remote(env_id=env_id, unroll_steps=unroll_steps,
                              td_steps=td_steps, n_frames=n_frames,
                              V_min=V_min, V_max=V_max, gamma=gamma)
-    if debug:
+
+    logdir = Path(__file__).parent / "log"
+
+    if resume_step:
         learner.load.remote("checkpoints/repr_net",
                             "checkpoints/pv_net",
                             "checkpoints/dynamics_net")
+    else:
+        if logdir.exists():
+            shutil.rmtree(logdir)
+
+    summary_writer = tf.summary.create_file_writer(str(logdir))
+
+    n = 0 if resume_step is None else resume_step
 
     current_weights = ray.put(ray.get(learner.get_weights.remote()))
 
@@ -340,7 +345,6 @@ def main(env_id="BreakoutDeterministic-v4",
     wip_actors = [actor.sync_weights_and_rollout.remote(current_weights, T=1.0)
                   for actor in actors]
 
-    n = 0
     for _ in range(20):
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
         pid, samples, priorities = ray.get(finished_actor[0])
@@ -353,9 +357,6 @@ def main(env_id="BreakoutDeterministic-v4",
                   for _ in range(num_minibatchs)]
 
     wip_learner = learner.update_network.remote(minibatchs)
-
-    if debug:
-        time.sleep(99999)
 
     wip_tester = tester.testplay.remote(current_weights)
 
@@ -429,4 +430,4 @@ def main(env_id="BreakoutDeterministic-v4",
 
 
 if __name__ == '__main__':
-    main(num_actors=18, debug=False)
+    main(num_actors=18, resume=False)
