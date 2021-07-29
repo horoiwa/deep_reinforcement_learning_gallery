@@ -59,7 +59,7 @@ class Learner:
 
         self.preprocess_func = util.get_preprocess_func(self.env_id)
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.0003)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.00025)
 
         self.update_count = 0
 
@@ -285,7 +285,7 @@ class Learner:
 
 def main(env_id="BreakoutDeterministic-v4",
          num_actors=20,
-         n_episodes=30000, unroll_steps=3,
+         n_episodes=30000, unroll_steps=4,
          n_frames=4, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**15, num_mcts_simulations=20,
