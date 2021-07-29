@@ -203,7 +203,8 @@ class DynamicsNetwork(tf.keras.Model):
         self.resblock2 = ResidualBlock(filters=256)
         self.resblock3 = ResidualBlock(filters=256)
         self.resblock4 = ResidualBlock(filters=256)
-        #self.resblock5 = ResidualBlock(filters=256)
+        self.resblock5 = ResidualBlock(filters=256)
+
         #self.resblock6 = ResidualBlock(filters=256)
         #self.resblock7 = ResidualBlock(filters=256)
         #self.resblock9 = ResidualBlock(filters=256)
@@ -213,10 +214,6 @@ class DynamicsNetwork(tf.keras.Model):
                                kernel_initializer="he_normal")
         self.bn1 = kl.BatchNormalization()
         self.flat = kl.Flatten()
-
-        #self.reward = kl.Dense(1,
-        #                       kernel_regularizer=l2(0.001),
-        #                       kernel_initializer="he_normal")
 
         self.logits = kl.Dense(self.n_supports,
                                kernel_regularizer=l2(0.001),
@@ -251,8 +248,8 @@ class DynamicsNetwork(tf.keras.Model):
         x = self.resblock2(x, training=training)
         x = self.resblock3(x, training=training)
         x = self.resblock4(x, training=training)
+        x = self.resblock5(x, training=training)
 
-        #x = self.resblock5(x, training=training)
         #x = self.resblock6(x, training=training)
         #x = self.resblock7(x, training=training)
         #x = self.resblock8(x, training=training)

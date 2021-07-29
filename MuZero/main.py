@@ -59,7 +59,7 @@ class Learner:
 
         self.preprocess_func = util.get_preprocess_func(self.env_id)
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.00025)
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0003)
 
         self.update_count = 0
 
@@ -288,7 +288,7 @@ def main(env_id="BreakoutDeterministic-v4",
          n_episodes=30000, unroll_steps=3,
          n_frames=4, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
-         buffer_size=2**16, num_mcts_simulations=20,
+         buffer_size=2**15, num_mcts_simulations=20,
          batchsize=32, num_minibatchs=64, resume=False):
     """
     Args:
@@ -377,7 +377,7 @@ def main(env_id="BreakoutDeterministic-v4",
 
             buffer.add_samples(priorities, samples)
 
-            T = 1.0 if n < 1000 else 0.5 if n < 2500 else 0.25
+            T = 1.0 if n < 800 else 0.5 if n < 2400 else 0.25
 
             wip_actors.extend(
                 [actors[pid].sync_weights_and_rollout.remote(current_weights, T=T)])
@@ -428,4 +428,4 @@ def main(env_id="BreakoutDeterministic-v4",
 
 
 if __name__ == '__main__':
-    main(num_actors=18, resume_step=1990)
+    main(num_actors=18)
