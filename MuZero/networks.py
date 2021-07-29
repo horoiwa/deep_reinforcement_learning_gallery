@@ -17,7 +17,7 @@ class RepresentationNetwork(tf.keras.Model):
 
         self.conv1 = kl.Conv2D(128, kernel_size=3, strides=2,
                                padding="same", activation="relu",
-                               use_bias=False, kernel_regularizer=l2(0.001),
+                               use_bias=False, kernel_regularizer=l2(0.0005),
                                kernel_initializer="he_normal")
 
         self.resblock1 = ResidualBlock(filters=128)
@@ -25,7 +25,7 @@ class RepresentationNetwork(tf.keras.Model):
 
         self.conv2 = kl.Conv2D(256, kernel_size=3, strides=2,
                                padding="same", activation="relu",
-                               use_bias=False, kernel_regularizer=l2(0.001),
+                               use_bias=False, kernel_regularizer=l2(0.0005),
                                kernel_initializer="he_normal")
 
         self.resblock3 = ResidualBlock(filters=256)
@@ -124,26 +124,22 @@ class PVNetwork(tf.keras.Model):
         self.supports = tf.range(V_min, V_max+1, dtype=tf.float32)
 
         self.conv_p = kl.Conv2D(2, kernel_size=1, strides=1, padding="valid",
-                                use_bias=False, kernel_regularizer=l2(0.001),
+                                use_bias=False, kernel_regularizer=l2(0.0005),
                                 kernel_initializer="he_normal")
         self.bn_p = kl.BatchNormalization()
         self.flat_p = kl.Flatten()
         self.logits_policy = kl.Dense(action_space,
-                                      kernel_regularizer=l2(0.001),
+                                      kernel_regularizer=l2(0.0005),
                                       kernel_initializer="he_normal")
 
         self.conv_v = kl.Conv2D(1, kernel_size=1, strides=1, padding="valid",
-                                use_bias=False, kernel_regularizer=l2(0.001),
+                                use_bias=False, kernel_regularizer=l2(0.0005),
                                 kernel_initializer="he_normal")
         self.bn_v = kl.BatchNormalization()
         self.flat_v = kl.Flatten()
 
-        #self.value = kl.Dense(1,
-        #                      kernel_regularizer=l2(0.001),
-        #                      kernel_initializer="he_normal")
-
         self.logits_value = kl.Dense(self.n_supports,
-                                     kernel_regularizer=l2(0.001),
+                                     kernel_regularizer=l2(0.0005),
                                      kernel_initializer="he_normal")
 
     @tf.function
@@ -196,27 +192,27 @@ class DynamicsNetwork(tf.keras.Model):
 
         self.conv1 = kl.Conv2D(256, kernel_size=3, strides=1,
                                padding="same", activation="relu",
-                               use_bias=False, kernel_regularizer=l2(0.001),
+                               use_bias=False, kernel_regularizer=l2(0.0005),
                                kernel_initializer="he_normal")
 
         self.resblock1 = ResidualBlock(filters=256)
         self.resblock2 = ResidualBlock(filters=256)
         self.resblock3 = ResidualBlock(filters=256)
         self.resblock4 = ResidualBlock(filters=256)
-        self.resblock5 = ResidualBlock(filters=256)
 
+        #self.resblock5 = ResidualBlock(filters=256)
         #self.resblock6 = ResidualBlock(filters=256)
         #self.resblock7 = ResidualBlock(filters=256)
         #self.resblock9 = ResidualBlock(filters=256)
 
         self.conv2 = kl.Conv2D(1, kernel_size=1, strides=1, padding="same",
-                               use_bias=False, kernel_regularizer=l2(0.001),
+                               use_bias=False, kernel_regularizer=l2(0.0005),
                                kernel_initializer="he_normal")
         self.bn1 = kl.BatchNormalization()
         self.flat = kl.Flatten()
 
         self.logits = kl.Dense(self.n_supports,
-                               kernel_regularizer=l2(0.001),
+                               kernel_regularizer=l2(0.0005),
                                kernel_initializer="he_normal")
 
     @tf.function
@@ -248,8 +244,8 @@ class DynamicsNetwork(tf.keras.Model):
         x = self.resblock2(x, training=training)
         x = self.resblock3(x, training=training)
         x = self.resblock4(x, training=training)
-        x = self.resblock5(x, training=training)
 
+        #x = self.resblock5(x, training=training)
         #x = self.resblock6(x, training=training)
         #x = self.resblock7(x, training=training)
         #x = self.resblock8(x, training=training)
@@ -313,11 +309,11 @@ class ResidualBlock(tf.keras.layers.Layer):
         super(ResidualBlock, self).__init__()
 
         self.conv1 = kl.Conv2D(filters, kernel_size=3, padding="same",
-                               use_bias=False, kernel_regularizer=l2(0.001),
+                               use_bias=False, kernel_regularizer=l2(0.0005),
                                kernel_initializer="he_normal")
         self.bn1 = kl.BatchNormalization()
         self.conv2 = kl.Conv2D(filters, kernel_size=3, padding="same",
-                               use_bias=False, kernel_regularizer=l2(0.001),
+                               use_bias=False, kernel_regularizer=l2(0.0005),
                                kernel_initializer="he_normal")
         self.bn2 = kl.BatchNormalization()
 
