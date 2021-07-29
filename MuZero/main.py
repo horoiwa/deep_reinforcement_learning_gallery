@@ -340,19 +340,23 @@ def main(env_id="BreakoutDeterministic-v4",
                           V_min=V_min, V_max=V_max, gamma=gamma,
                           dirichlet_alpha=0.25)
 
-    wip_actors = [actor.sync_weights_and_rollout.remote(current_weights, T=1.0)
-                  for actor in actors]
-
     n = 0 if resume is None else int(resume)
 
     n_init_iter = 100 if resume is None else 1000
+
+    T = 1.0 if n < 800 else 0.5 if n < 2400 else 0.25
+
+    wip_actors = [actor.sync_weights_and_rollout.remote(current_weights, T=T)
+                  for actor in actors]
 
     for _ in range(n_init_iter):
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
         pid, samples, priorities = ray.get(finished_actor[0])
         buffer.add_samples(priorities, samples)
+
         wip_actors.extend(
-            [actors[pid].sync_weights_and_rollout.remote(current_weights, T=1.0)])
+            [actors[pid].sync_weights_and_rollout.remote(current_weights, T=T)])
+
         n += 1
 
     minibatchs = [buffer.sample_minibatch(batchsize=batchsize)
