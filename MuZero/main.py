@@ -345,7 +345,9 @@ def main(env_id="BreakoutDeterministic-v4",
 
     n = 0 if resume is None else int(resume)
 
-    for _ in range(100):
+    n_init_iter = 100 if resume is None else 1000
+
+    for _ in range(n_init_iter):
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
         pid, samples, priorities = ray.get(finished_actor[0])
         buffer.add_samples(priorities, samples)
