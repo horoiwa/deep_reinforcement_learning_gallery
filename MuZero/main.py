@@ -289,7 +289,7 @@ def main(env_id="BreakoutDeterministic-v4",
          n_frames=4, gamma=0.997, td_steps=5,
          V_min=-30, V_max=30, dirichlet_alpha=0.25,
          buffer_size=2**15, num_mcts_simulations=20,
-         batchsize=32, num_minibatchs=64, resume=False):
+         batchsize=32, num_minibatchs=64, resume=None):
     """
     Args:
         n_frames (int): num of stacked RGB frames. Defaults to 8. (original 32)
@@ -311,15 +311,15 @@ def main(env_id="BreakoutDeterministic-v4",
                              td_steps=td_steps, n_frames=n_frames,
                              V_min=V_min, V_max=V_max, gamma=gamma)
 
+    logdir = Path(__file__).parent / "log"
+
     if resume:
         learner.load.remote("checkpoints/repr_net",
                             "checkpoints/pv_net",
                             "checkpoints/dynamics_net")
-
-    logdir = Path(__file__).parent / "log"
-
-    if logdir.exists():
-        shutil.rmtree(logdir)
+    else:
+        if logdir.exists():
+            shutil.rmtree(logdir)
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
@@ -343,7 +343,7 @@ def main(env_id="BreakoutDeterministic-v4",
     wip_actors = [actor.sync_weights_and_rollout.remote(current_weights, T=1.0)
                   for actor in actors]
 
-    n = 0
+    n = 0 if resume is None else int(resume)
 
     for _ in range(100):
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
@@ -428,4 +428,4 @@ def main(env_id="BreakoutDeterministic-v4",
 
 
 if __name__ == '__main__':
-    main(num_actors=18)
+    main(num_actors=18, resume=None)
