@@ -375,11 +375,11 @@ def main(env_id="BreakoutDeterministic-v4",
 
     while n <= n_episodes:
 
-        finished_actors, wip_actors = ray.wait(wip_actors, timeout=0)
+        finished_actors, wip_actors = ray.wait(wip_actors, num_returns=1, timeout=0)
 
-        for i in range(len(finished_actors)):
+        if finished_actors:
 
-            pid, samples, priorities = ray.get(finished_actor[i])
+            pid, samples, priorities = ray.get(finished_actors[0])
 
             buffer.add_samples(priorities, samples)
 
