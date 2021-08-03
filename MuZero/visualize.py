@@ -57,7 +57,7 @@ def visualize(env_id="BreakoutDeterministic-v4",
         hidden_state, obs = repr_network.predict(frame_history, action_history)
 
         mcts_policy, action, root_value = mcts.search(
-            hidden_state, 10, T=0.25)
+            hidden_state, 20, T=0.1)
 
         next_hidden_state, reward_pred = dynamics_network.predict(hidden_state, action)
         reward_pred = reward_pred.numpy()[0][0]
