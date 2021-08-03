@@ -103,3 +103,8 @@ Deep reinforcement learning methods implemented in tensorflow2
 [A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play](https://science.sciencemag.org/content/362/6419/1140.full?ijkey=XGd77kI6W4rSc&keytype=ref&siteid=sci)
 
 [Mastering the game of Go without human knowledge](https://www.nature.com/articles/nature24270)
+
+
+### MuZero
+
+[Mastering Atari, Go, Chess and Shogi by Planning with a Learned Model](https://arxiv.org/abs/1911.08265)
