@@ -57,7 +57,7 @@ def visualize(env_id="BreakoutDeterministic-v4",
         hidden_state, obs = repr_network.predict(frame_history, action_history)
 
         mcts_policy, action, root_value = mcts.search(
-            hidden_state, 20, T=0.25)
+            hidden_state, 10, T=0.25)
 
         next_hidden_state, reward_pred = dynamics_network.predict(hidden_state, action)
         reward_pred = reward_pred.numpy()[0][0]
@@ -79,10 +79,9 @@ def visualize(env_id="BreakoutDeterministic-v4",
         pl = 30
         pb = 30
 
-        if episode_steps % 2 == 0:
-            v = str(round(root_value, 2))
-            p = str([round(prob, 2) for prob in mcts_policy])
-            r = str(round(reward_pred, 2))
+        v = str(round(root_value, 2))
+        p = str([round(prob, 2) for prob in mcts_policy])
+        r = str(round(reward_pred, 2))
 
         draw = ImageDraw.Draw(img_desc)
         draw.text((pl, 20), f"V(s): {v}", font=fnt, fill="white")
@@ -101,9 +100,6 @@ def visualize(env_id="BreakoutDeterministic-v4",
 
         images.append(img_bg)
 
-        if episode_steps == 100:
-            break
-
         episode_rewards += reward
 
         episode_steps += 1
@@ -120,7 +116,7 @@ def visualize(env_id="BreakoutDeterministic-v4",
     images[0].save(
         'tmp/muzero.gif',
         save_all=True, append_images=images[1:],
-        optimize=False, duration=80, loop=1)
+        optimize=False, duration=60, loop=0)
 
     return episode_rewards, episode_steps
 
