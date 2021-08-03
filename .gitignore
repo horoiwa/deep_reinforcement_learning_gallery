@@ -11,7 +11,9 @@ mp4/
 # C extensions
 *.so
 checkpoints/
+checkpoints*/
 *memo.md
+*pkl
 
 memo.md
 *.out
@@ -60,6 +62,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+tmp*
 
 *bkup/
 # Translations
