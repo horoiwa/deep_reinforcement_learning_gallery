@@ -1,43 +1,85 @@
 # Distributed Reinforcement learning on GKE
 
-Hands on tutorial of implementing Actor-Learner architecture (Ape-X architecture) on Google Kubernetes Engine
+Hands-on tutorial of Actor-Learner architecture (Ape-X architecture) with ray on Google Kubernetes Engine
 
 
-## 1. Implementing Ape-X for single node with ray
+## 1. Simple Ape-X implementation with ray
 
 `code/` is simple implmentation of Ape-X for `CartPole-v1` env.
 
 ```
-# Example
+#: Run on local machine
 pip install -f requirements.txt
-python main.py --num-actors=4
+python main.py --num-actors=4 --logdir=log
 ```
 
-## 2. Settingup GCP
+<br>
 
-a. install Google Cloud SDK
+## 2. Setup
 
-b. Create GCP Project
+#### Install Cloud SDK, docker, kubectl on your local machine
 
-c. Basic settings
+Cloud SDK:
+https://cloud.google.com/sdk/docs/install
 
-`gcoud auth login`
+docker:
+https://docs.docker.com/get-docker/
 
-`gcloud config project`
+kubectl:
+https://kubernetes.io/ja/docs/tasks/tools/install-kubectl/
 
-(e.g. us-central1)
-`gcloud config set compute/region <regionName>`
+<br>
 
-(e.g. us-central1-a)
-`gcloud config set compute/zone <zoneName>`
+#### Create new GCP project
+
+Create GCP account:<br>
+https://cloud.google.com/apigee/docs/hybrid/v1.1/precog-gcpaccount
+
+<br>
+
+```
+gcloud gcloud auth login --no-launch-browser
+
+#: gcloud projects create <ProjectID> --name <ProjectName>
+gcloud projects create distrl-project --name distrl
+```
+
+<br>
+
+From GCP web console, add billing information to the project and enable `ComputeEngine API` and `Kubernetes Engine API`
+
+<br>
+
+#### Project config
+
+```
+#: gcloud config set project <ProjectID>
+gcloud config set project distrl-project
+
+#: gcloud config set compute/region <RegionName>
+gcloud config set compute/region northamerica-northeast1
+
+#: gcloud config set compute/zone <zoneName>
+gcloud config set compute/zone northamerica-northeast1-a
+
+
+gcloud config list
+```
+
+<br>
 
 ## 3. Build and register docker image to GCR
 
 ベースイメージが異なる
 
-Bulid docker image for actor
+Bulid docker image for cpu-actor
+```
+docker build -f Dockerfile_actor -t gcr.io/distrl-project/actor .
+docker push gcr.io/distrl-project/actor
+```
 
-Bulid docker image for learner
+
+Bulid docker image for gpu-learner
 
 
 
