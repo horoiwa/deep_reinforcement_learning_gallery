@@ -45,7 +45,7 @@ class Actor:
             self.buffer.append(transition)
 
             if done:
-                print(self.episode_rewards)
+                #print(self.episode_rewards)
                 self.state = self.env.reset()
                 self.episode_rewards = 0
             else:
@@ -120,6 +120,7 @@ class Learner:
 
         indices_all = []
         td_errors_all = []
+        losses = []
 
         for (indices, weights, transitions) in minibatchs:
 
@@ -152,7 +153,9 @@ class Learner:
 
             indices_all += indices
             td_errors_all += td_errors.numpy().flatten().tolist()
+            losses.append(loss)
 
+        loss_info = np.array(losses).mean()
         current_weights = self.q_network.get_weights()
 
-        return current_weights, indices_all, td_errors_all
+        return current_weights, indices_all, td_errors_all, loss_info

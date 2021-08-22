@@ -1,5 +1,6 @@
 import pathlib
 import shutil
+import time
 
 import ray
 import tensorflow as tf
@@ -12,13 +13,12 @@ from workers import Actor, Learner
 
 @click.command()
 @click.option('--env_name', type=str, default="CartPole-v1")
-@click.option('--num_actors', type=int)
-@click.option('--num_iters', type=int)
-@click.option("--logdir", type=click.Path(file_okay=False))
+@click.option('--num_actors', type=int, default=4)
+@click.option('--num_iters', type=int, default=10000)
+@click.option("--logdir", type=click.Path(file_okay=False), default="log")
 def main(env_name, num_actors, num_iters, logdir):
 
     logdir = pathlib.Path(logdir)
-
     if logdir.exists():
         shutil.rmtree(logdir)
 
@@ -26,7 +26,7 @@ def main(env_name, num_actors, num_iters, logdir):
 
     ray.init()
 
-    epsilons = np.linspace(0.01, 0.6, num_actors)
+    epsilons = np.linspace(0.01, 0.8, num_actors)
 
     actors = [Actor.remote(pid=i, env_name=env_name, epsilon=epsilons[i])
               for i in range(num_actors)]
@@ -56,9 +56,10 @@ def main(env_name, num_actors, num_iters, logdir):
 
     minibatchs = [replaybuffer.sample_minibatch(batch_size=512) for _ in range(16)]
 
-    wip_tester = tester.test_play.remote(current_weights, epsilon=0.01)
+    wip_tester = tester.test_play.remote(current_weights)
 
-    count = 0
+    t = time.time()
+    lap_count = 0
 
     while n <= num_iters:
 
@@ -69,7 +70,7 @@ def main(env_name, num_actors, num_iters, logdir):
             replaybuffer.add(td_errors, transitions)
             wip_actors.extend([actors[pid].rollout.remote(current_weights)])
             n += 1
-            count += 1
+            lap_count += 1
 
         finished_learner, _ = ray.wait([wip_learner], num_returns=1, timeout=0)
 
@@ -88,9 +89,11 @@ def main(env_name, num_actors, num_iters, logdir):
             with summary_writer.as_default():
                 tf.summary.scalar("Buffer", len(replaybuffer), step=n)
                 tf.summary.scalar("loss", loss_info, step=n)
-                tf.summary.scalar("actor_count", count, step=n)
+                tf.summary.scalar("lap_count", lap_count, step=n)
+                tf.summary.scalar("lap_time", time.time() - t, step=n)
 
-            count = 0
+            t = time.time()
+            lap_count = 0
 
         if n % 200 == 0:
             test_score = ray.get(wip_tester)

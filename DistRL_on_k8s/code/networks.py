@@ -18,7 +18,6 @@ class QNetwork(tf.keras.Model):
         self.output_layer = kl.Dense(
             action_space, kernel_initializer="he_normal")
 
-    @tf.function
     def call(self, x):
         x = self.input_layer(x)
         x = self.hidden_layer(x)

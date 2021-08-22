@@ -1,4 +1,5 @@
 import random
+import numpy as np
 
 
 class ReplayBuffer:
@@ -14,6 +15,9 @@ class ReplayBuffer:
 
         self.count = 0
         self.is_full = False
+
+    def __len__(self):
+        return self.count if not self.is_full else self.buffer_size
 
     def add(self, td_errors, transitions):
         assert len(td_errors) == len(transitions)
