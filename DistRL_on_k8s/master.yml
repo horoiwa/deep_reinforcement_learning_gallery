@@ -2,23 +2,42 @@ apiVersion: v1
 kind: Service
 metadata:
   name: master-svc
-  namespace: distrl
+  namespace: default
 spec:
+  type: LoadBalancer
   ports:
   - port: 80
     targetPort: 6006
   selector:
-    type: tf-board
+    app: tensorboard
 
 ---
-apiVersion: v1
-kind: Pod
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: master
-  namespace: dsitrl
+  name: tensorboard
+  namespace: default
   labels:
-    type: master
+    app: tensorboard
 spec:
-  containers:
-    name: tfboard
-    image:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tensorboard
+  template:
+    metadata:
+      name: tensorboard
+      namespace: default
+      labels:
+        app: tensorboard
+    spec:
+      containers:
+      - name: tensorboard
+        image: tensorflow/tensorflow:2.3.0
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            pip install tensorboard
+            tensorboard --logdir /log --bind_all
+        ports:
+          - containerPort: 6006

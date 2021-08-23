@@ -38,7 +38,7 @@ https://cloud.google.com/apigee/docs/hybrid/v1.1/precog-gcpaccount
 <br>
 
 ```
-gcloud gcloud auth login --no-launch-browser
+gcloud auth login
 
 #: gcloud projects create <ProjectID> --name <ProjectName>
 gcloud projects create distrl-project --name distrl
@@ -46,7 +46,7 @@ gcloud projects create distrl-project --name distrl
 
 <br>
 
-From GCP web console, add billing information to the project and enable `ComputeEngine API` and `Kubernetes Engine API`
+From GCP web console, add billing information to the project and enable `ComputeEngine API`, `ContainerRegistry API` and `Kubernetes Engine API`
 
 <br>
 
@@ -70,8 +70,8 @@ gcloud config list
 
 ## 3. Build and register docker image to GCR
 
+Bulid docker image and push to GCR
 
-Bulid docker image for cpu-actor
 ```
 gcloud auth configure-docker
 
@@ -80,7 +80,9 @@ docker build -t gcr.io/distrl-project/distrl .
 docker push gcr.io/distrl-project/distrl
 ```
 
-Bulid docker image for gpu-learner
 
 
 
+## References
+
+https://cloud.google.com/tpu/docs/tutorials/kubernetes-engine-resnet
