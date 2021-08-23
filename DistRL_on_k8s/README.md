@@ -70,14 +70,15 @@ gcloud config list
 
 ## 3. Build and register docker image to GCR
 
-ベースイメージが異なる
 
 Bulid docker image for cpu-actor
 ```
-docker build -f Dockerfile_actor -t gcr.io/distrl-project/actor .
-docker push gcr.io/distrl-project/actor
-```
+gcloud auth configure-docker
 
+docker build -t gcr.io/distrl-project/distrl .
+
+docker push gcr.io/distrl-project/distrl
+```
 
 Bulid docker image for gpu-learner
 
