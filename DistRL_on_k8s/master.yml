@@ -6,32 +6,49 @@ metadata:
 spec:
   type: LoadBalancer
   ports:
-  - port: 80
+  - port: 6006
     targetPort: 6006
+    name: tebsorboard
+  - port: 8265
+    targetPort: 8265
+    name: ray-dashboard
   selector:
-    app: tensorboard
+    app: master
 
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: tensorboard
+  name: master-deploy
   namespace: default
   labels:
-    app: tensorboard
+    app: master
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: tensorboard
+      app: master
   template:
     metadata:
-      name: tensorboard
+      name: master
       namespace: default
       labels:
-        app: tensorboard
+        app: master
     spec:
       containers:
+      - name: master-proc
+        image: gcr.io/distrl-project/distrl
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            ray start --head --port=6379 --dashboard-host "0.0.0.0"
+            while true
+            do
+              sleep 5
+            done
+        ports:
+          - containerPort: 6379
+          - containerPort: 8265
       - name: tensorboard
         image: tensorflow/tensorflow:2.3.0
         command: ["/bin/sh", "-c"]

@@ -81,8 +81,35 @@ docker push gcr.io/distrl-project/distrl
 ```
 
 
+## 4. Launch GKE cluster
 
+step1. 1nodeで6CPU
+step2. 1nodeで6CPU PVC(delete)
+step3. 2nodeで6CPU, 1GPU, PVC(delete)
+step4. 1GPUnode + autoscale nodeで 2CPU/1GPU, 64CPU, PVC(delete)
+
+クラスタオートスケール（ノード数の自動スケール）なのかノード自動プロビジョニング（ノードプール）なのかはわからん
+
+```
+gcloud container clusters create rl-cluster --pre-emptible --autoscale
+
+kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
+```
+
+`ray start --head --dashboard-host "0.0.0.0"`
+
+## Monitoring
+
+`kubectl get svc master-svc`
+
+tensorboard: `EXTERNAL-IP:6006`
+
+ray-dashboard: `EXTERNAL-IP:8265`
 
 ## References
 
 https://cloud.google.com/tpu/docs/tutorials/kubernetes-engine-resnet
+
+https://cloud.google.com/kubernetes-engine/docs/how-to/node-auto-provisioning#gcloud
+
+https://docs.ray.io/en/latest/cluster/cloud.html#starting-ray-on-each-machine
