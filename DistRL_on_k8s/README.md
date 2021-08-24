@@ -83,28 +83,45 @@ docker push gcr.io/distrl-project/distrl
 
 ## 4. Launch GKE cluster
 
-step1. 1nodeで6CPU
-step2. 1nodeで6CPU PVC(delete)
-step3. 2nodeで6CPU, 1GPU, PVC(delete)
-step4. 1GPUnode + autoscale nodeで 2CPU/1GPU, 64CPU, PVC(delete)
-
-クラスタオートスケール（ノード数の自動スケール）なのかノード自動プロビジョニング（ノードプール）なのかはわからん
-
 ```
+#: Create CPU node-pool (8 vCPU 12 Gib RAM, autoscaling)
 gcloud container clusters create rl-cluster --pre-emptible --autoscale
 
+#: Create GPU node-pool (1 node only)
+gcloud container node-pool
+
+#: Install GPU driver
 kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
 ```
 
-`ray start --head --dashboard-host "0.0.0.0"`
+## 検証
 
-## Monitoring
+1nodeで6CPU
+rayの動作検証：cliでray start, ray init(adree="auto")でOKっぽい
+
+---
+1. 大きめのプリエンティブルクラスタ作成
+2. debug-podからnginxを名前解決できるか確認(curl http://master-svc)
+3. 1node-1podで6CPU PVC(delete)
+4. Nnode-Npodで6CPU PVC(delete) → CPUのみ小規模テスト実行
+
+5. GPU node → GPUあり小規模テスト実行
+6. CPUノードプールのオートスケール 本番実行
+
+redispassはデフォルトで同じ
+ray start --address='10.8.0.11:6379' --redis-password='5241590000000000'
+
+## 5. Monitoring
 
 `kubectl get svc master-svc`
 
 tensorboard: `EXTERNAL-IP:6006`
 
 ray-dashboard: `EXTERNAL-IP:8265`
+
+## 6. Delete cluster
+
+`gcloud container clusters delete rl-cluster`
 
 ## References
 

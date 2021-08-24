@@ -8,53 +8,72 @@ spec:
   ports:
   - port: 6006
     targetPort: 6006
-    name: tebsorboard
+    name: tensorboard
   - port: 8265
     targetPort: 8265
     name: ray-dashboard
+  - port: 80
+    targetPort: 80
+    name: http
   selector:
     app: master
 
 ---
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: v1
+kind: Pod
 metadata:
-  name: master-deploy
+  name: master
   namespace: default
   labels:
     app: master
 spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: master
-  template:
-    metadata:
-      name: master
-      namespace: default
-      labels:
-        app: master
-    spec:
-      containers:
-      - name: master-proc
-        image: gcr.io/distrl-project/distrl
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            ray start --head --port=6379 --dashboard-host "0.0.0.0"
-            while true
-            do
-              sleep 5
-            done
-        ports:
-          - containerPort: 6379
-          - containerPort: 8265
-      - name: tensorboard
-        image: tensorflow/tensorflow:2.3.0
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            pip install tensorboard
-            tensorboard --logdir /log --bind_all
-        ports:
-          - containerPort: 6006
+  containers:
+  - name: master-proc
+    image: gcr.io/distrl-project/distrl
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        ray start --head --port=6379 --dashboard-host "0.0.0.0"
+        #sleep 120
+        #python code/main.py --num_actors 8 --logdir log --k8s True
+        apt-get install -y vim
+        while true
+        do
+          sleep 5
+        done
+    ports:
+      - containerPort: 6379
+      - containerPort: 8265
+  - name: tensorboard
+    image: tensorflow/tensorflow:2.3.0
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        pip install tensorboard
+        tensorboard --logdir /log --bind_all
+    ports:
+      - containerPort: 6006
+  - name: nginx
+    image: nginx-1.17.2-alpine
+    ports:
+      - containerPort: 80
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: debug
+  namespace: default
+  labels:
+    app: debug
+spec:
+  containers:
+    - name: debug
+      image: centos:7
+      command: ["sh", "-c"]
+      args:
+        - |
+          while true
+          do
+            sleep 5
+          done

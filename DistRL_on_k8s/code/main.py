@@ -16,7 +16,8 @@ from workers import Actor, Learner
 @click.option('--num_actors', type=int, default=4)
 @click.option('--num_iters', type=int, default=10000)
 @click.option("--logdir", type=click.Path(file_okay=False), default="log")
-def main(env_name, num_actors, num_iters, logdir):
+@click.option("--k8s", type=bool, default=False)
+def main(env_name, num_actors, num_iters, logdir, k8s):
 
     logdir = pathlib.Path(logdir)
     if logdir.exists():
@@ -24,7 +25,10 @@ def main(env_name, num_actors, num_iters, logdir):
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
-    ray.init()
+    if k8s:
+        ray.init(address="auto")
+    else:
+        ray.init()
 
     epsilons = np.linspace(0.01, 0.8, num_actors)
 
