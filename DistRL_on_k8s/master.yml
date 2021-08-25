@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: master-svc
+  name: entrypoint
   namespace: default
 spec:
   type: LoadBalancer
@@ -12,9 +12,17 @@ spec:
   - port: 8265
     targetPort: 8265
     name: ray-dashboard
-  - port: 80
-    targetPort: 80
-    name: http
+  selector:
+    app: master
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ray-headless-svc
+  namespace: default
+spec:
+  clusterIP: None
   selector:
     app: master
 
@@ -28,12 +36,12 @@ metadata:
     app: master
 spec:
   containers:
-  - name: master-proc
+  - name: ray-master
     image: gcr.io/distrl-project/distrl
     command: ["/bin/sh", "-c"]
     args:
       - |
-        ray start --head --port=6379 --dashboard-host "0.0.0.0"
+        ray start --head --port=6379 --dashboard-host "0.0.0.0" --num-cpus 4
         #sleep 120
         #python code/main.py --num_actors 8 --logdir log --k8s True
         apt-get install -y vim
@@ -54,7 +62,7 @@ spec:
     ports:
       - containerPort: 6006
   - name: nginx
-    image: nginx-1.17.2-alpine
+    image: nginx:1.17.2-alpine
     ports:
       - containerPort: 80
 
@@ -73,6 +81,7 @@ spec:
       command: ["sh", "-c"]
       args:
         - |
+          yum install bind-utils -y
           while true
           do
             sleep 5

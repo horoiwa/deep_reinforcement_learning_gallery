@@ -16,8 +16,8 @@ from workers import Actor, Learner
 @click.option('--num_actors', type=int, default=4)
 @click.option('--num_iters', type=int, default=10000)
 @click.option("--logdir", type=click.Path(file_okay=False), default="log")
-@click.option("--k8s", type=bool, default=False)
-def main(env_name, num_actors, num_iters, logdir, k8s):
+@click.option("--cluster", is_flag=True)
+def main(env_name, num_actors, num_iters, logdir, cluster):
 
     logdir = pathlib.Path(logdir)
     if logdir.exists():
@@ -25,22 +25,23 @@ def main(env_name, num_actors, num_iters, logdir, k8s):
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
-    if k8s:
-        ray.init(address="auto")
-    else:
+    if not cluster:
         ray.init()
 
     epsilons = np.linspace(0.01, 0.8, num_actors)
 
+    print("==== ACTOR ====")
     actors = [Actor.remote(pid=i, env_name=env_name, epsilon=epsilons[i])
               for i in range(num_actors)]
 
     replaybuffer = ReplayBuffer(buffer_size=2**15)
 
+    print("==== LEARNER ====")
     learner = Learner.remote(env_name=env_name)
 
     current_weights = ray.put(ray.get(learner.get_weights.remote()))
 
+    print("==== TESTER ====")
     tester = Actor.remote(pid=None, env_name=env_name, epsilon=0.0)
 
     wip_actors = [actor.rollout.remote(current_weights) for actor in actors]
@@ -48,6 +49,7 @@ def main(env_name, num_actors, num_iters, logdir, k8s):
     n = 0
 
     for _ in range(50):
+        print("INIT ITER:", _)
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
         td_errors, transitions, pid = ray.get(finished_actor[0])
         replaybuffer.add(td_errors, transitions)
