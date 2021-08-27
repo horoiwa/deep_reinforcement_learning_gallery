@@ -30,26 +30,26 @@ def main(env_name, num_actors, num_iters, logdir, cluster):
 
     epsilons = np.linspace(0.01, 0.8, num_actors)
 
-    print("==== ACTOR ====")
+    print("==== ACTORS launch ====")
     actors = [Actor.remote(pid=i, env_name=env_name, epsilon=epsilons[i])
               for i in range(num_actors)]
 
     replaybuffer = ReplayBuffer(buffer_size=2**15)
 
-    print("==== LEARNER ====")
+    print("==== LEARNER launch ====")
     learner = Learner.remote(env_name=env_name)
 
     current_weights = ray.put(ray.get(learner.get_weights.remote()))
 
-    print("==== TESTER ====")
+    print("==== TESTER launch ====")
     tester = Actor.remote(pid=None, env_name=env_name, epsilon=0.0)
 
     wip_actors = [actor.rollout.remote(current_weights) for actor in actors]
 
     n = 0
 
+    print("==== Initialize buffer ====")
     for _ in range(50):
-        print("INIT ITER:", _)
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
         td_errors, transitions, pid = ray.get(finished_actor[0])
         replaybuffer.add(td_errors, transitions)

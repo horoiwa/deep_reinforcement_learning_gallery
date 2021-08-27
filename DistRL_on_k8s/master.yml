@@ -30,7 +30,7 @@ spec:
 apiVersion: v1
 kind: Pod
 metadata:
-  name: master
+  name: master-pod
   namespace: default
   labels:
     app: master
@@ -41,30 +41,41 @@ spec:
     command: ["/bin/sh", "-c"]
     args:
       - |
-        ray start --head --port=6379 --dashboard-host "0.0.0.0" --num-cpus 4
-        #sleep 120
-        #python code/main.py --num_actors 8 --logdir log --k8s True
+        ray start --head --port=6379 --dashboard-host "0.0.0.0"
         apt-get install -y vim
         while true
         do
           sleep 5
         done
+        #python code/main.py --num_actors 10 --logdir log/tfboard --cluster
     ports:
       - containerPort: 6379
       - containerPort: 8265
+    volumeMounts:
+      - mountPath: "/log"
+        name: log-volume
+    resources:
+      requests:
+        cpu: "2"
+        memory: "16Gi"
   - name: tensorboard
     image: tensorflow/tensorflow:2.3.0
     command: ["/bin/sh", "-c"]
     args:
       - |
         pip install tensorboard
-        tensorboard --logdir /log --bind_all
+        tensorboard --logdir /log/tfboard --bind_all
     ports:
       - containerPort: 6006
-  - name: nginx
-    image: nginx:1.17.2-alpine
-    ports:
-      - containerPort: 80
+    volumeMounts:
+      - mountPath: "/log"
+        name: log-volume
+    resources:
+      requests:
+        cpu: "1"
+  volumes:
+    - name: log-volume
+      emptyDir: {}
 
 ---
 apiVersion: v1

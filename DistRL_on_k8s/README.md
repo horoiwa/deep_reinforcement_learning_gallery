@@ -89,13 +89,15 @@ https://cloud.google.com/sdk/gcloud/reference/container/clusters/create
 #: Create CPU node-pool for actor processes.
 gcloud container clusters create rl-cluster \
     --preemptible --num-nodes 3 \
-    --machine-type "e2-standard-8" \
+    --machine-type "custom-16-32768" \
     --enable-autoscaling --min-nodes 3 --max-nodes 30 \
 
 #: Create GPU node-pool (1 node only) for buffer and learner process.
 
 gcloud container node-pool create gpu-pool \
     --accelerator nividia-tesla-p4  \
+
+gcloud container clusters get-credentials rl-cluster
 
 #: Install GPU driver
 kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
@@ -106,24 +108,38 @@ kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container
 1nodeで6CPU
 rayの動作検証：cliでray start, ray init(adree="auto")でOKっぽい
 
----
 1. 大きめのプリエンティブルクラスタ作成 -> OK
 2. debug-podからnginxを名前解決できるか確認
    curl http://master-svc
    -> OK, ただしnslookup master-svc はロードバランサのIPを返す
    -> ロードバランサとは別にheadless svcを立てるとpodのIPに一致し、curl http://(IP=nslookup ray-svc) で通る
    nslookup ray-headless-svc | grep Address | tail -n +2 | cut -f2 -d ' '
+3. 1node-1podで6CPU volume
+    ->OK, PVCでなくemptydirで対応
+    -> resources.limitを指定しないとCPUを認識しない
 
-3. 1node-1podで6CPU PVC(delete)
-4. Nnode-Npodで6CPU PVC(delete) → CPUのみ小規模テスト実行
-    -> うまくCPUを認識しないので明示的にstart時に与える必要があった。
-    ray.init()はコマンドラインでray startしてれば不要
+4. 1node-Npod PVC volume
+    -> OK. コンテナの持続は忘れずに
+
+
+---
+
+4. Nnode-Npodで6CPU PVC(delete) → CPUのみでの小規模テスト実行
+    -> ray.init()はコマンドラインでray startしてれば不要?
+    dashboardでは１コアとしかでないがGCPのモニターの感じだと３CPUくらいつかっている
+    １nodeでふつうに実行しても1CPUしか認識されない
 
 5. GPU node → GPUあり小規模テスト実行
-6. CPUノードプールのオートスケール 本番実行
+6. CPUノードプールのオートスケール
+7. configでハードコーディングを減らす
+
 
 redispassはデフォルトで同じ
 ray start --address='10.8.0.11:6379' --redis-password='5241590000000000'
+
+立ち上げ順序があるからymlを複数にしたほうがよい
+
+
 
 ## 5. Monitoring
 
