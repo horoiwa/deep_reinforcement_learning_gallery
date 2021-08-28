@@ -80,22 +80,26 @@ docker build -t gcr.io/distrl-project/distrl .
 docker push gcr.io/distrl-project/distrl
 ```
 
+<br>
 
 ## 4. Launch GKE cluster
 
 https://cloud.google.com/sdk/gcloud/reference/container/clusters/create
 
 ```
-#: Create CPU node-pool for actor processes.
+#: Create GPU node-pool (1 node only)
 gcloud container clusters create rl-cluster \
+    --accelerator type=nvidia-tesla-p4, count=1 \
+    --preemptible --num-nodes 1 \
+    --machine-type "custom-16-32768"
+
+#: Create CPU node-pools for actor processes.
+gcloud container clusters node-pools create cpu-node-pool \
+    --cluster rl-cluster \
     --preemptible --num-nodes 3 \
     --machine-type "custom-16-32768" \
-    --enable-autoscaling --min-nodes 3 --max-nodes 30 \
+    --enable-autoscaling --min-nodes 0 --max-nodes 30 \
 
-#: Create GPU node-pool (1 node only) for buffer and learner process.
-
-gcloud container node-pool create gpu-pool \
-    --accelerator nividia-tesla-p4  \
 
 gcloud container clusters get-credentials rl-cluster
 
@@ -103,43 +107,15 @@ gcloud container clusters get-credentials rl-cluster
 kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
 ```
 
-## 検証
+Login to master container & start learning
 
-1nodeで6CPU
-rayの動作検証：cliでray start, ray init(adree="auto")でOKっぽい
+`kubectl apply -f apex-cluster.yml`
 
-1. 大きめのプリエンティブルクラスタ作成 -> OK
-2. debug-podからnginxを名前解決できるか確認
-   curl http://master-svc
-   -> OK, ただしnslookup master-svc はロードバランサのIPを返す
-   -> ロードバランサとは別にheadless svcを立てるとpodのIPに一致し、curl http://(IP=nslookup ray-svc) で通る
-   nslookup ray-headless-svc | grep Address | tail -n +2 | cut -f2 -d ' '
-3. 1node-1podで6CPU volume
-    ->OK, PVCでなくemptydirで対応
-    -> resources.limitを指定しないとCPUを認識しない
+`kubectl exec -it master bash`
 
-4. 1node-Npod PVC volume
-    -> OK. コンテナの持続は忘れずに
+`python /code/main.py --logdir log/tfboard --cluster --num_actors 100 --num_iters 30000`
 
-
----
-
-4. Nnode-Npodで6CPU PVC(delete) → CPUのみでの小規模テスト実行
-    -> ray.init()はコマンドラインでray startしてれば不要?
-    dashboardでは１コアとしかでないがGCPのモニターの感じだと３CPUくらいつかっている
-    １nodeでふつうに実行しても1CPUしか認識されない
-
-5. GPU node → GPUあり小規模テスト実行
-6. CPUノードプールのオートスケール
-7. configでハードコーディングを減らす
-
-
-redispassはデフォルトで同じ
-ray start --address='10.8.0.11:6379' --redis-password='5241590000000000'
-
-立ち上げ順序があるからymlを複数にしたほうがよい
-
-
+<br>
 
 ## 5. Monitoring
 
@@ -149,14 +125,10 @@ tensorboard: `EXTERNAL-IP:6006`
 
 ray-dashboard: `EXTERNAL-IP:8265`
 
+<br>
+
 ## 6. Delete cluster
 
 `gcloud container clusters delete rl-cluster`
 
-## References
-
-https://cloud.google.com/tpu/docs/tutorials/kubernetes-engine-resnet
-
-https://cloud.google.com/kubernetes-engine/docs/how-to/node-auto-provisioning#gcloud
-
-https://docs.ray.io/en/latest/cluster/cloud.html#starting-ray-on-each-machine
+<br>

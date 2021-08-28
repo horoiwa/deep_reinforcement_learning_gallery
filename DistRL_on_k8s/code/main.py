@@ -14,7 +14,7 @@ from workers import Actor, Learner
 @click.command()
 @click.option('--env_name', type=str, default="CartPole-v1")
 @click.option('--num_actors', type=int, default=4)
-@click.option('--num_iters', type=int, default=10000)
+@click.option('--num_iters', type=int, default=30000)
 @click.option("--logdir", type=click.Path(file_okay=False), default="log")
 @click.option("--cluster", is_flag=True)
 def main(env_name, num_actors, num_iters, logdir, cluster):

@@ -1,0 +1,142 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: entrypoint
+  namespace: default
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 6006
+    targetPort: 6006
+    name: tensorboard
+  - port: 8265
+    targetPort: 8265
+    name: ray-dashboard
+  selector:
+    app: master
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ray-headless-svc
+  namespace: default
+spec:
+  clusterIP: None
+  selector:
+    app: master
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: master
+  namespace: default
+  labels:
+    app: master
+spec:
+  containers:
+  - name: ray-master
+    image: gcr.io/distrl-project/distrl
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        ray start --head --port=6379 --dashboard-host "0.0.0.0"
+        while true; do sleep 30; done;
+        #python code/main.py --num_actors 100 --logdir log/tfboard --cluster
+    ports:
+      - containerPort: 6379
+      - containerPort: 8265
+    volumeMounts:
+      - mountPath: "/log"
+        name: log-volume
+    resources:
+      requests:
+        nvidia.com/gpu: "1"
+        cpu: "4"
+        memory: "24Gi"
+      limits:
+        nvidia.com/gpu: "1"
+  - name: tensorboard
+    image: tensorflow/tensorflow:2.3.0
+    command: ["/bin/sh", "-c"]
+    args:
+      - |
+        pip install tensorboard
+        tensorboard --logdir /log/tfboard --bind_all
+    ports:
+      - containerPort: 6006
+    volumeMounts:
+      - mountPath: "/log"
+        name: log-volume
+    resources:
+      requests:
+        cpu: "1"
+  volumes:
+    - name: log-volume
+      emptyDir: {}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: worker-config
+  namespace: default
+data:
+  conncheck.py : |
+    import time
+    import socket
+    import sys
+
+    host, port = str(sys.argv[1]), int(sys.argv[2])
+    print(f"Trying connection, {host}:{port}")
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    while True:
+        try:
+            s.connect((host, port))
+            s.close()
+            print("Connection OK")
+            break
+        except:
+            print("Connection Failed")
+            time.sleep(5)
+
+---
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: actor
+  namespace: default
+  labels:
+    app: actor
+spec:
+  replicas: 7
+  selector:
+    matchLabels:
+      app: actor
+  template:
+    metadata:
+      name: actor-pod
+      namespace: default
+      labels:
+        app: actor
+    spec:
+      containers:
+      - name: ray-cpu-actor
+        image: gcr.io/distrl-project/distrl
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            python conncheck.py ray-headless-svc 6379
+            ray start --address='ray-headless-svc:6379'
+            while true; do sleep 30; done
+        resources:
+          requests:
+            cpu: "15"
+        volumeMounts:
+        - name: connection-check-script
+          mountPath: /script
+      volumes:
+      - name: connection-check-script
+        configMap:
+          name: worker-config
