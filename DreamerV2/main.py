@@ -4,7 +4,7 @@ import tensorflow as tf
 import gym
 
 from buffer import Experience, SequenceReplayBuffer
-from networks import PolicyNetwork, ValueNetwork
+from networks import PolicyNetwork, ValueNetwork, WorldModel
 import util
 
 
@@ -12,14 +12,14 @@ import util
 class Config:
 
     num_episodes: int = 10         # Num of total rollouts
-    batch_size: int = 50           # Batch size, B
+    batch_size: int = 48           # Batch size, B
     sequence_length: int = 50      # Sequence Lenght, L
-    buffer_size: int = 2e6         # Replay buffer size (FIFO)
+    buffer_size: int = int(1e6)    # Replay buffer size (FIFO)
 
     kl_scale: float = 0.1           # KL loss scale, β
     kl_alpha: float = 0.8          # KL balancing
     latent_dim: int = 32           # discrete latent dimensions
-    latent_classes: int = 32       # discrete latent classes
+    n_atoms: int = 32       # discrete latent classes
     lr_world: float = 2e-4         # learning rate of world model
 
     imagination_horizon: int = 10  # Imagination horizon, H
@@ -34,7 +34,7 @@ class Config:
     grad_clip: float = 100.
 
 
-class DreamerV2:
+class DreamerV2Agent:
 
     def __init__(self, env_id: str, config: Config,
                  summary_writer: int = None):
@@ -50,10 +50,15 @@ class DreamerV2:
         self.preprocess_func = util.get_preprocess_func(env_name=self.env_id)
 
         self.buffer = SequenceReplayBuffer(
-            size=config.buffer_size,
+            buffer_size=config.buffer_size,
             seq_len=config.sequence_length,
-            batch_size=config.batch_size
+            batch_size=config.batch_size,
+            action_space=self.action_space,
             )
+
+        self.world_model = WorldModel(config)
+
+        self.wm_optimizer = tf.keras.optimizers.Adam(lr=2e-4)
 
         self.policy = PolicyNetwork(action_space=self.action_space)
 
@@ -63,7 +68,7 @@ class DreamerV2:
 
         self.value_optimizer = tf.keras.optimizers.Adam()
 
-        self.total_steps = 0
+        self.global_steps = 0
 
     @property
     def epsilon(self):
@@ -75,27 +80,46 @@ class DreamerV2:
 
         obs = self.preprocess_func(env.reset())
 
-        total_rewards = 0
+        episode_steps, episode_rewards = 0, 0
+
+        prev_z, prev_h = self.world_model.get_initial_state(batch_size=1)
+
+        prev_a = tf.one_hot([0], self.action_space)
 
         done = False
 
         while not done:
 
-            state = self.encoder(obs)
+            h = self.world_model.step_h(prev_z, prev_h, prev_a)
 
-            action, latent_state = self.policy.sample(state, self.epsilon)
+            feat = self.world_model.get_feature(obs, h)
 
-            next_frame, reward, done, info = env.step(action)
+            action = self.policy.sample(feat, self.epsilon)
 
-            exp = Experience(obs, action, reward, done)
+            action_onehot = tf.one_hot([action], self.action_space)
 
-            self.buffer.append(exp)
+            next_frame, reward, is_done, info = env.step(action)
 
+            #: Send transition to replaybuffer
+            is_first = True if episode_steps == 0 else False
+
+            gamma = 0 if done else 1.0 if episode_steps == 0 else self.config.gamma
+
+            self.buffer.add(obs, action_onehot, reward, is_first, is_done)
+
+            #: Update states
             obs = self.preprocess_func(next_frame)
 
-            self.total_steps += 1
+            prev_z, prev_h, prev_a = z, h, action_onehot
 
-            total_rewards += reward
+            #: Stats
+            self.global_steps += 1
+
+            episode_steps += 1
+
+            episode_rewards += reward
+
+        return episode_steps, episode_rewards
 
     def rollout_imagine(self):
         pass
@@ -150,7 +174,7 @@ def main():
 
     config = Config()
 
-    agent = DreamerV2(env_id=env_id, config=config)
+    agent = DreamerV2Agent(env_id=env_id, config=config)
 
     for _ in range(5):
         agent.rollout()
@@ -162,11 +186,7 @@ def main():
 
     while n < config.num_episodes:
 
-        for update_step in range(config.collect_interval):
-
-            agent.update()
-
-        agent.rollout()
+        steps, score = agent.rollout()
 
 
 if __name__ == "__main__":

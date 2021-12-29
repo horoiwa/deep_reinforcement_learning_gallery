@@ -20,9 +20,9 @@ class Experience:
 
 class SequenceReplayBuffer:
 
-    def __init__(self, size, seq_len, batch_size, action_space):
+    def __init__(self, buffer_size, seq_len, batch_size, action_space):
 
-        self.buffer_size = size
+        self.buffer_size = buffer_size
 
         self.L = seq_len
 
@@ -86,7 +86,7 @@ class SequenceReplayBuffer:
             is_first: bool, is_done: bool):
 
         obs = tf.convert_to_tensor(obs, dtype=tf.float32)
-        action = tf.one_hot(action, self.action_space, dtype=tf.float32)
+        action = tf.one_hot(action, dtype=tf.float32)
         reward = tf.convert_to_tensor(reward, dtype=tf.float32)
         is_first = tf.convert_to_tensor(is_first, dtype=tf.float32)
         is_done = tf.convert_to_tensor(is_done, dtype=tf.float32)
