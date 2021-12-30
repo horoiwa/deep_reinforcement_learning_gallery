@@ -82,11 +82,11 @@ class SequenceReplayBuffer:
 
             yield sequence
 
-    def add(self, obs: np.array, action: int, reward: int,
+    def add(self, obs: np.array, action_onehot: int, reward: int,
             is_first: bool, is_done: bool):
 
         obs = tf.convert_to_tensor(obs, dtype=tf.float32)
-        action = tf.one_hot(action, dtype=tf.float32)
+        action = tf.convert_to_tensor(action_onehot, dtype=tf.float32)
         reward = tf.convert_to_tensor(reward, dtype=tf.float32)
         is_first = tf.convert_to_tensor(is_first, dtype=tf.float32)
         is_done = tf.convert_to_tensor(is_done, dtype=tf.float32)

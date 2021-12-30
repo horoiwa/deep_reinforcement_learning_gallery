@@ -25,9 +25,9 @@ class WorldModel(tf.keras.Model):
 
         self.rssm = RecurrentStateSpaceModel(self.latent_dim, self.n_atoms)
 
-        self.reward_head = MLPHead()
+        self.reward_head = MLPHead(out_shape=1)
 
-        self.discount_head = MLPHead()
+        self.discount_head = MLPHead(out_shape=1)
 
     def call(self, obs, prev_z, prev_h, prev_a):
         """ ! Redundunt method
@@ -53,6 +53,7 @@ class WorldModel(tf.keras.Model):
             )
         return z_init, h_init
 
+    @tf.function
     def step_h(self, prev_z, prev_h, prev_a):
         """ Step deterministic latent H of reccurent state space model
         """
@@ -60,12 +61,13 @@ class WorldModel(tf.keras.Model):
 
         return h
 
+    @tf.function
     def get_feature(self, obs, h):
         embed = self.encoder(obs)
         z = self.rssm.sample_z(h, embed)
         z = tf.reshape(z, [z.shape[0], -1])
         feat = tf.concat([z, h], axis=-1)
-        return feat
+        return feat, z
 
 
 class Encoder(tf.keras.Model):
@@ -96,7 +98,24 @@ class Decoder(tf.keras.Model):
 
         super(Decoder, self).__init__()
 
-    def call(self, x):
+        self.dense1 = kl.Dense(1536, activation="elu")
+        self.convT1 = kl.Conv2DTranspose(192, 5, strides=2, activation="elu")
+        self.convT2 = kl.Conv2DTranspose(98, 5, strides=2, activation="elu")
+        self.convT3 = kl.Conv2DTranspose(48, 6, strides=2, activation="elu")
+        self.convT4 = kl.Conv2DTranspose(1, 6, strides=2)
+
+    def call(self, feat):
+        """
+            feat: (batch_size, 1624)
+            out: (batch_size, 64, 64, 1)
+        """
+        x = self.dense1(feat)                # (bs, 1536)
+        x = tf.reshape(x, [-1, 1, 1, 1536])  # (bs, 1, 1, 1536)
+        x = self.convT1(x)                   # (bs, 5, 5, 192)
+        x = self.convT2(x)                   # (bs, 13, 13, 98)
+        x = self.convT3(x)                   # (bs, 30, 30, 48)
+        x = self.convT4(x)                   # (bs, 64, 64, 1)
+
         return x
 
 
@@ -161,12 +180,24 @@ class RecurrentStateSpaceModel(tf.keras.Model):
 
 class MLPHead(tf.keras.Model):
 
-    def __init__(self):
+    def __init__(self, out_shape):
 
-        super(Head, self).__init__()
+        super(MLPHead, self).__init__()
+
+        self.d1 = kl.Dense(400, activation='elu')
+        self.d2 = kl.Dense(400, activation='elu')
+        self.d3 = kl.Dense(400, activation='elu')
+        self.d4 = kl.Dense(400, activation='elu')
+
+        self.out = kl.Dense(out_shape)
 
     def call(self, x):
-        return x
+        x = self.d1(x)
+        x = self.d2(x)
+        x = self.d3(x)
+        x = self.d4(x)
+        out = self.out(x)
+        return out
 
 
 class PolicyNetwork(tf.keras.Model):
@@ -180,21 +211,22 @@ class PolicyNetwork(tf.keras.Model):
 
         self.action_space = action_space
 
-        self.logits = kl.Dense(self.action_space)
+        self.mlp = MLPHead(out_shape=self.action_space)
 
-    def call(self, state):
+    def call(self, feat):
+        logits = self.mlp(feat)
+        probs = tf.nn.softmax(logits, axis=1)
+        return logits, probs
 
-        logits = self.logits(state)
+    def sample_action(self, feat, epsilon=0.):
 
-        return logits
-
-    def sample(self, state, epsilon=0.):
+        assert feat.shape[0] == 1
 
         if random.random() > epsilon:
-            logits = self.call(state)
-            action_probs = tf.nn.softmax(logits)
-            cdist = tfp.distributions.Categorical(probs=action_probs)
-            action = cdist.sample()
+            logits, probs = self(feat)
+            dist = tfd.OneHotCategorical(probs=probs)
+            action_onehot = dist.sample()
+            action = np.argmax(action_onehot)
         else:
             #: random action
             action = random.randint(0, self.action_space-1)
@@ -203,12 +235,21 @@ class PolicyNetwork(tf.keras.Model):
 
 
 class ValueNetwork(tf.keras.Model):
+    """ Policy network for Discrete action space
+        predicts the logits of a categorical distribution
+    """
 
-    def __init__(self):
+    def __init__(self, action_space):
+
         super(ValueNetwork, self).__init__()
 
-    def call(self):
-        pass
+        self.mlp = MLPHead(out_shape=1)
+
+    def call(self, feat):
+
+        value = self.mlp_value(feat)
+
+        return value
 
 
 if __name__ == '__main__':

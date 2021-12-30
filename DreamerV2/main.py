@@ -15,11 +15,15 @@ class Config:
     batch_size: int = 48           # Batch size, B
     sequence_length: int = 50      # Sequence Lenght, L
     buffer_size: int = int(1e6)    # Replay buffer size (FIFO)
+    gamma: float = 0.997
+    anneal_stpes: int = 1000000
+    update_interval: int = 4
 
-    kl_scale: float = 0.1           # KL loss scale, β
+    kl_loss_scale: float = 0.1     # KL loss scale, β
     kl_alpha: float = 0.8          # KL balancing
+    ent_loss_scale: float = 1e-3
     latent_dim: int = 32           # discrete latent dimensions
-    n_atoms: int = 32       # discrete latent classes
+    n_atoms: int = 32              # discrete latent classes
     lr_world: float = 2e-4         # learning rate of world model
 
     imagination_horizon: int = 10  # Imagination horizon, H
@@ -60,19 +64,18 @@ class DreamerV2Agent:
 
         self.wm_optimizer = tf.keras.optimizers.Adam(lr=2e-4)
 
-        self.policy = PolicyNetwork(action_space=self.action_space)
+        self.actor = PolicyNetwork(action_space=self.action_space)
+        self.actor_optimizer = tf.keras.optimizers.Adam()
 
-        self.policy_optimizer = tf.keras.optimizers.Adam()
-
-        self.value = ValueNetwork()
-
-        self.value_optimizer = tf.keras.optimizers.Adam()
+        self.critic = ValueNetwork(action_space=self.action_space)
+        self.critic_optimizer = tf.keras.optimizers.Adam()
 
         self.global_steps = 0
 
     @property
     def epsilon(self):
-        return 0.4
+        eps = max(0.0, 0.6 * (self.config.anneal_stpes - self.global_steps) / self.config.anneal_stpes)
+        return eps
 
     def rollout(self, training=False):
 
@@ -92,25 +95,26 @@ class DreamerV2Agent:
 
             h = self.world_model.step_h(prev_z, prev_h, prev_a)
 
-            feat = self.world_model.get_feature(obs, h)
+            feat, z = self.world_model.get_feature(obs, h)
 
-            action = self.policy.sample(feat, self.epsilon)
+            action = self.actor.sample_action(feat, self.epsilon)
 
             action_onehot = tf.one_hot([action], self.action_space)
 
-            next_frame, reward, is_done, info = env.step(action)
+            next_frame, reward, done, info = env.step(action)
 
             #: Send transition to replaybuffer
             is_first = True if episode_steps == 0 else False
 
-            gamma = 0 if done else 1.0 if episode_steps == 0 else self.config.gamma
-
-            self.buffer.add(obs, action_onehot, reward, is_first, is_done)
+            self.buffer.add(obs, action_onehot, reward, is_first, done)
 
             #: Update states
             obs = self.preprocess_func(next_frame)
 
             prev_z, prev_h, prev_a = z, h, action_onehot
+
+            if self.global_steps % self.config.update_interval == 0:
+                self.update_networks()
 
             #: Stats
             self.global_steps += 1
@@ -124,7 +128,7 @@ class DreamerV2Agent:
     def rollout_imagine(self):
         pass
 
-    def update(self, batch_size, sequence_length):
+    def update_networks(self, batch_size, sequence_length):
 
         minibatch = self.buffer.make_minibatch(batch_size, sequence_length)
 
