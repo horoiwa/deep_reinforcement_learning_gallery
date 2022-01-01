@@ -53,6 +53,7 @@ class WorldModel(tf.keras.Model):
 
     def get_initial_state(self, batch_size):
         z_init = tf.zeros([batch_size, self.latent_dim, self.n_atoms])
+        z_init = tf.reshape(z_init, [z_init.shape[0], -1])
         h_init = self.rssm.gru_cell.get_initial_state(
             batch_size=batch_size, dtype=tf.float32
             )
@@ -69,10 +70,10 @@ class WorldModel(tf.keras.Model):
     @tf.function
     def get_feature(self, obs, h):
         embed = self.encoder(obs)
-        z = self.rssm.sample_z_post(h, embed)
-        z = tf.reshape(z, [z.shape[0], -1])
-        feat = tf.concat([z, h], axis=-1)
-        return feat, z
+        z_post, z_post_probs = self.rssm.sample_z_post(h, embed)
+        z_post = tf.reshape(z_post, [z_post.shape[0], -1])
+        feat = tf.concat([z_post, h], axis=-1)
+        return feat, z_post
 
 
 class Encoder(tf.keras.Model):

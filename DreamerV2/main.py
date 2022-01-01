@@ -6,7 +6,7 @@ import tensorflow_probability as tfp
 from tensorflow_probability import distributions as tfd
 import gym
 
-from buffer import Experience, SequenceReplayBuffer
+from buffer import SequenceReplayBuffer
 from networks import PolicyNetwork, ValueNetwork, WorldModel
 import util
 
@@ -64,13 +64,13 @@ class DreamerV2Agent:
             )
 
         self.world_model = WorldModel(config)
-        self.wm_optimizer = tf.keras.optimizers.Adam(lr=2e-4)
+        self.wm_optimizer = tf.keras.optimizers.Adam(lr=self.config.lr_world)
 
         self.actor = PolicyNetwork(action_space=self.action_space)
-        self.actor_optimizer = tf.keras.optimizers.Adam()
+        self.actor_optimizer = tf.keras.optimizers.Adam(lr=self.config.lr_actor)
 
         self.critic = ValueNetwork(action_space=self.action_space)
-        self.critic_optimizer = tf.keras.optimizers.Adam()
+        self.critic_optimizer = tf.keras.optimizers.Adam(lr=self.config.lr_critic)
 
         self.global_steps = 0
 
@@ -117,7 +117,7 @@ class DreamerV2Agent:
             else:
                 _done = done
 
-            self.buffer.add(obs, action_onehot, _reward, _done, prev_z, prev_h)
+            self.buffer.add(obs, action_onehot, _reward, _done, prev_z, prev_h, prev_a)
 
             #: Update states
             obs = self.preprocess_func(next_frame)
@@ -167,34 +167,61 @@ class DreamerV2Agent:
 
         prev_z, prev_h, prev_a = prev_z[0], prev_h[0], prev_a[0]
 
-        L, B = observations.shape[0], observations.shape[1]
+        L = observations.shape[0]
 
-        with tf.GradeientTape as tape:
+        with tf.GradientTape() as tape:
 
-            loss = 0
+            z_prior_probs, z_post_probs, feats = [], [], []
 
-            for idx in tf.range(L):
+            img_outs, r_preds, terminal_preds = [], [], []
 
-                _outputs = self.world_model(observations[idx], prev_z, prev_h, prev_a)
+            for t in tf.range(L):
 
-                (h, z_prior, z_prior_probs, z_post, z_post_probs,
-                 feat, img_decoded, reward_pred, discount_pred) = _outputs
+                _outputs = self.world_model(observations[t], prev_z, prev_h, prev_a)
 
-                kl_loss = self._compute_kl_loss(z_prior_probs, z_post_probs)
+                (h, z_prior, z_prior_prob, z_post, z_post_prob,
+                 feat, img_out, reward_pred, terminal_pred) = _outputs
 
-                img_log_loss = None
+                feats.append(feat)
 
-                reward_log_loss = None
+                z_prior_probs.append(z_prior_prob)
 
-                discount_log_loss = None
+                z_post_probs.append(z_post_prob)
 
-                prev_z, prev_h, prev_a = z_post, h, actions[idx]
+                img_outs.append(img_out)
 
-            image_log_loss = self._compute_image_log_loss(features)
+                r_preds.append(reward_pred)
 
-            reward_log_loss, discount_log_loss = self.compute_log_loss(features)
+                terminal_preds.append(terminal_pred)
 
-            loss = - image_log_loss + kl_loss
+                prev_z, prev_h, prev_a = z_post, h, actions[t]
+
+            #: Reshape outputs
+            #: [(B, ...), (B, ...), ...] -> (L, B, ...)
+            z_prior_probs = tf.stack(z_prior_probs, axis=0)
+
+            z_post_probs = tf.stack(z_post_probs, axis=0)
+
+            feats = tf.stack(feats, axis=0)
+
+            img_outs = tf.stack(img_outs, axis=0)
+
+            r_preds = tf.stack(r_preds, axis=0)
+
+            terminal_preds = tf.stack(terminal_preds, axis=0)
+
+            #: Compute loss terms
+            kl_loss = self._compute_kl_loss(z_prior_probs, z_post_probs)
+
+            img_log_loss = self._compute_img_log_loss(observations, img_outs)
+
+            reward_log_loss = self._compute_log_loss(rewards)
+
+            discount_log_loss = None
+
+            loss = - img_log_loss - reward_log_loss - discount_log_loss + kl_loss
+
+            loss *= 1. / L
 
         grads = tape.gradient(loss, self.world_model.trainable_variables)
         grads, norm = tf.clip_by_global_norm(grads, 100.)
@@ -203,19 +230,71 @@ class DreamerV2Agent:
         return minibatch
 
     @tf.function
-    def _unroll(self, observations, actions, z_init, h_init, a_init):
+    def _compute_kl_loss(self, post_probs, prior_probs):
+        """ Compute KL divergence between two OnehotCategorical Distributions
 
-        prev_z, prev_h, prev_a = z_init, h_init, a_init
+        Notes:
+                KL[ Q(z_post) || P(z_prior) ]
+                    Q(z_prior) := Q(z | h, o)
+                    P(z_prior) := P(z | h)
 
-        for i in range():
+        Scratch Impl.:
+                qlogq = post_probs * tf.math.log(post_probs)
+                qlogp = post_probs * tf.math.log(prior_probs)
+                kl_div = tf.reduce_sum(qlogq - qlogp, [1, 2])
 
-        self.world_model
+        Inputs:
+            prior_probs (L, B, latent_dim, n_atoms)
+            post_probs (L, B, latent_dim, n_atoms)
+        """
 
-    def _compute_kl(self, left, right, dist_type=tfd.OneHotCategorical):
-        pass
+        #: KL Balancing: See 2.2 BEHAVIOR LEARNING Algorithm 2
+        kl_div1 = tfd.kl_divergence(
+            tfd.Independent(
+                tfd.OneHotCategorical(probs=tf.stop_gradient(post_probs)),
+                reinterpreted_batch_ndims=1),
+            tfd.Independent(
+                tfd.OneHotCategorical(probs=prior_probs),
+                reinterpreted_batch_ndims=1)
+                )
 
-    def rollout_in_dream(self):
-        return None
+        kl_div2 = tfd.kl_divergence(
+            tfd.Independent(
+                tfd.OneHotCategorical(probs=post_probs),
+                reinterpreted_batch_ndims=1),
+            tfd.Independent(
+                tfd.OneHotCategorical(probs=tf.stop_gradient(prior_probs)),
+                reinterpreted_batch_ndims=1)
+                )
+
+        alpha = self.config.kl_alpha
+
+        kl_loss = alpha * kl_div1 + (1. - alpha) * kl_div2
+
+        #: Batch mean
+        kl_loss = tf.reduce_mean(kl_loss)
+
+        return kl_loss
+
+    def _compute_img_log_loss(self, img_in, img_out):
+        """
+        Inputs:
+            img_in: (L, B, 64, 64, 1)
+            img_out: (L, B, 64, 64, 1)
+        """
+        L, B, H, W, C = img_in.shape
+
+        img_in = tf.reshape(img_in, (L * B, H * W * C))
+
+        img_out = tf.reshape(img_out, (L * B, H * W * C))
+
+        dist = tfd.Independent(tfd.Normal(img_out, 1.))
+
+        log_prob = dist.log_prob(img_in)
+
+        log_prob = tf.reduce_mean(log_prob)
+
+        return log_prob
 
     def update_actor_critic(self, minibatch):
         """

@@ -17,6 +17,7 @@ class Experience:
     done: tf.float32
     prev_z: tf.float32
     prev_h: tf.float32
+    prev_a: tf.float32
 
 
 class SequenceReplayBuffer:
@@ -89,12 +90,13 @@ class SequenceReplayBuffer:
                 "done": tf.concat([e.done for e in sequence], axis=0),
                 "prev_z": sequence[0].prev_z,
                 "prev_h": sequence[0].prev_h,
+                "prev_a": sequence[0].prev_a,
             }
 
             yield sequence
 
     def add(self, obs: np.array, action_onehot: int,
-            reward: int, done: bool, prev_z, prev_h):
+            reward: int, done: bool, prev_z, prev_h, prev_a_onehot):
         """
         Note:
             Assumed that transition information is sent from single env.
@@ -105,7 +107,7 @@ class SequenceReplayBuffer:
         reward = tf.convert_to_tensor(reward, dtype=tf.float32)
         done = tf.convert_to_tensor(done, dtype=tf.float32)
 
-        exp = Experience(obs, action, reward, done, prev_z, prev_h)
+        exp = Experience(obs, action, reward, done, prev_z, prev_h, prev_a_onehot)
         exp = lz4f.compress(pickle.dumps(exp))
 
         self.tmp_buffer.append(exp)
