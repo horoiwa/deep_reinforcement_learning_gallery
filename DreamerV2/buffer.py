@@ -68,25 +68,27 @@ class SequenceReplayBuffer:
             for i in range(seqlen//2, seqlen):
                 if sequence[i].done:
                     sequence = sequence[i+1-self.L:i+1]
-                    assert sequence[-1].is_done, "Error #01"
+                    assert sequence[-1].done, "Error #01"
                     break
             else:
                 sequence = sequence[-self.L:]
 
-            assert len(sequence) == self.L, "Error #02"
-            assert np.all([not e.done for e in sequence[:-1]]), "Error #03"
-            assert np.array([e.done for e in sequence]).sum() < 2, "Error #04"
+            try:
+                assert len(sequence) == self.L, "Error #02"
+                assert np.all([not e.done for e in sequence[:-1]]), "Error #03"
+                assert np.array([e.done for e in sequence]).sum() < 2, "Error #04"
+            except:
+                print("Debug #02 #03 #04")
+                import pdb; pdb.set_trace()
 
-            #: prev_h, prev_zは先頭だけでOK
-            import pdb; pdb.set_trace()
-
+            #: prev_h, prev_zはsequenceの先頭だけでOK
             sequence = {
                 "obs": tf.concat([e.obs for e in sequence], axis=0),           #: (self.L, 64, 64, 1)
                 "action": tf.concat([e.action for e in sequence], axis=0),
                 "reward": tf.concat([e.reward for e in sequence], axis=0),
                 "done": tf.concat([e.done for e in sequence], axis=0),
-                "prev_z": tf.concat([e.prev_z for e in sequence], axis=0),
-                "prev_h": tf.concat([e.prev_h for e in sequence], axis=0),
+                "prev_z": sequence[0].prev_z,
+                "prev_h": sequence[0].prev_h,
             }
 
             yield sequence
@@ -109,8 +111,13 @@ class SequenceReplayBuffer:
         self.tmp_buffer.append(exp)
 
         if done:
-            for exp in self.tmp_buffer:
-                self.buffer.append(exp)
+
+            if len(self.tmp_buffer) > self.L:
+                for exp in self.tmp_buffer:
+                    self.buffer.append(exp)
+            else:
+                print("Episode discarded")
+
             self.tmp_buffer = []
 
     def get_minibatch(self):

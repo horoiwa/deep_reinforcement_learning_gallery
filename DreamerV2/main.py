@@ -2,6 +2,8 @@ from dataclasses import dataclass
 import math
 
 import tensorflow as tf
+import tensorflow_probability as tfp
+from tensorflow_probability import distributions as tfd
 import gym
 
 from buffer import Experience, SequenceReplayBuffer
@@ -14,7 +16,7 @@ class Config:
 
     num_episodes: int = 10         # Num of total rollouts
     batch_size: int = 48           # Batch size, B
-    sequence_length: int = 30      # Sequence Lenght, L
+    sequence_length: int = 15      # Sequence Lenght, L
     buffer_size: int = int(1e6)    # Replay buffer size (FIFO)
     gamma: float = 0.997
     anneal_stpes: int = 1000000
@@ -138,19 +140,79 @@ class DreamerV2Agent:
 
         minibatch = self.buffer.get_minibatch()
 
-        import pdb; pdb.set_trace()
-
         minibatch = self.update_worldmodel(minibatch)
 
         self.update_actor_critic(minibatch)
 
     def update_worldmodel(self, minibatch):
         """
-            1. Conmpute latent states from raw observations
-            2. Update representaion model and transition model
-            3. Append latent states to minibatch
+        Inputs:
+            minibatch = {
+                "obs":     (L, B, 64, 64, 1)
+                "action":  (L, B, action_space)
+                "reward":  (L, B)
+                "done":    (L, B)
+                "prev_z":  (1, B, latent_dim * n_atoms)
+                "prev_h":  (1, B, 600)
+                "prev_a":  (1, B, action_space)
+            }
+
+        Note:
+            1. re-compute post and prior z by unrolling sequences
+               from initial states, obs, prev_z, prev_h and prev_action
+            2. Conmpute KL loss (post_z, prior_z)
+            3. Reconstrunction loss, reward, discount loss
         """
+        (observations, actions, rewards, dones, prev_z, prev_h, prev_a) = minibatch.values()
+
+        prev_z, prev_h, prev_a = prev_z[0], prev_h[0], prev_a[0]
+
+        L, B = observations.shape[0], observations.shape[1]
+
+        with tf.GradeientTape as tape:
+
+            loss = 0
+
+            for idx in tf.range(L):
+
+                _outputs = self.world_model(observations[idx], prev_z, prev_h, prev_a)
+
+                (h, z_prior, z_prior_probs, z_post, z_post_probs,
+                 feat, img_decoded, reward_pred, discount_pred) = _outputs
+
+                kl_loss = self._compute_kl_loss(z_prior_probs, z_post_probs)
+
+                img_log_loss = None
+
+                reward_log_loss = None
+
+                discount_log_loss = None
+
+                prev_z, prev_h, prev_a = z_post, h, actions[idx]
+
+            image_log_loss = self._compute_image_log_loss(features)
+
+            reward_log_loss, discount_log_loss = self.compute_log_loss(features)
+
+            loss = - image_log_loss + kl_loss
+
+        grads = tape.gradient(loss, self.world_model.trainable_variables)
+        grads, norm = tf.clip_by_global_norm(grads, 100.)
+        self.wm_optimizer.apply_gradients(self.world_model.trainable_variables)
+
         return minibatch
+
+    @tf.function
+    def _unroll(self, observations, actions, z_init, h_init, a_init):
+
+        prev_z, prev_h, prev_a = z_init, h_init, a_init
+
+        for i in range():
+
+        self.world_model
+
+    def _compute_kl(self, left, right, dist_type=tfd.OneHotCategorical):
+        pass
 
     def rollout_in_dream(self):
         return None
@@ -195,7 +257,7 @@ def main():
 
     while n < config.num_episodes:
 
-        training = n > 5
+        training = n > 2
 
         steps, score = agent.rollout(training)
 

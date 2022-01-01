@@ -29,23 +29,27 @@ class WorldModel(tf.keras.Model):
 
         self.discount_head = MLPHead(out_shape=1)
 
+    @tf.function
     def call(self, obs, prev_z, prev_h, prev_a):
         """ ! Redundunt method
         """
 
         embed = self.encoder(obs)
+
         h = self.rssm.step_h(prev_z, prev_h, prev_a)
-        z_prior = self.rssm.sample_z_prior(h)
-        z_post = self.rssm.sample_z_post(h, embed)
+
+        z_prior, z_prior_probs = self.rssm.sample_z_prior(h)
+        z_post, z_post_probs = self.rssm.sample_z_post(h, embed)
         _z_post = tf.reshape(z_post, [z_post.shape[0], -1])
 
         feat = tf.concat([_z_post, h], axis=-1)
 
         img_decoded = self.decoder(feat)
         reward = self.reward_head(feat)
-        gamma = self.discount_head(feat)
+        discount = self.discount_head(feat)
 
-        return h, z_prior, z_post, feat, img_decoded, reward, gamma
+        return (h, z_prior, z_prior_probs, z_post, z_post_probs,
+                feat, img_decoded, reward, discount)
 
     def get_initial_state(self, batch_size):
         z_init = tf.zeros([batch_size, self.latent_dim, self.n_atoms])
@@ -82,6 +86,7 @@ class Encoder(tf.keras.Model):
         self.conv3 = kl.Conv2D(2 ** 2 * 48, 4, strides=2, activation="elu")
         self.conv4 = kl.Conv2D(2 ** 3 * 48, 4, strides=2, activation="elu")
 
+    @tf.function
     def call(self, x):
         """ x: (None, 64, 64, 1) -> (None, 2, 2, 384) -> out: (None, 1536)
         """
@@ -105,6 +110,7 @@ class Decoder(tf.keras.Model):
         self.convT3 = kl.Conv2DTranspose(48, 6, strides=2, activation="elu")
         self.convT4 = kl.Conv2DTranspose(1, 6, strides=2)
 
+    @tf.function
     def call(self, feat):
         """
             feat: (batch_size, 1624)
@@ -146,9 +152,9 @@ class RecurrentStateSpaceModel(tf.keras.Model):
         """ ! Redundunt method
         """
         h = self.step_h(prev_z, prev_h, prev_a)
-        z_prior = self.sample_z_prior(h)
-        z_post = self.sample_z_post(h, embed)
-        return z_post, z_prior, h
+        z_prior, z_prior_probs = self.sample_z_prior(h)
+        z_post, z_post_probs = self.sample_z_post(h, embed)
+        return h, z_post, z_post_probs, z_prior, z_prior_probs
 
     @tf.function
     def sample_z_prior(self, h):
@@ -171,7 +177,7 @@ class RecurrentStateSpaceModel(tf.keras.Model):
         #: Reparameterization trick for OneHotCategorcalDist
         z = z + z_probs - tf.stop_gradient(z_probs)
 
-        return z
+        return z, z_probs
 
     @tf.function
     def sample_z_post(self, h, embed):
@@ -195,7 +201,7 @@ class RecurrentStateSpaceModel(tf.keras.Model):
         #: Reparameterization trick for OneHotCategorcalDist
         z = z + z_probs - tf.stop_gradient(z_probs)
 
-        return z
+        return z, z_probs
 
     @tf.function
     def step_h(self, prev_z, prev_h, prev_a):
@@ -220,6 +226,7 @@ class MLPHead(tf.keras.Model):
 
         self.out = kl.Dense(out_shape)
 
+    @tf.function
     def call(self, x):
         x = self.d1(x)
         x = self.d2(x)
