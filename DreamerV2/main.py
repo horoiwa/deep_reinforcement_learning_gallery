@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 
 import tensorflow as tf
 import gym
@@ -13,11 +14,11 @@ class Config:
 
     num_episodes: int = 10         # Num of total rollouts
     batch_size: int = 48           # Batch size, B
-    sequence_length: int = 50      # Sequence Lenght, L
+    sequence_length: int = 30      # Sequence Lenght, L
     buffer_size: int = int(1e6)    # Replay buffer size (FIFO)
     gamma: float = 0.997
     anneal_stpes: int = 1000000
-    update_interval: int = 4
+    update_interval: int = 8
 
     kl_loss_scale: float = 0.1     # KL loss scale, β
     kl_alpha: float = 0.8          # KL balancing
@@ -61,7 +62,6 @@ class DreamerV2Agent:
             )
 
         self.world_model = WorldModel(config)
-
         self.wm_optimizer = tf.keras.optimizers.Adam(lr=2e-4)
 
         self.actor = PolicyNetwork(action_space=self.action_space)
@@ -77,7 +77,7 @@ class DreamerV2Agent:
         eps = max(0.0, 0.6 * (self.config.anneal_stpes - self.global_steps) / self.config.anneal_stpes)
         return eps
 
-    def rollout(self, training=False):
+    def rollout(self, training: bool):
 
         env = gym.make(self.env_id)
 
@@ -91,6 +91,8 @@ class DreamerV2Agent:
 
         done = False
 
+        lives = int(env.ale.lives())
+
         while not done:
 
             h = self.world_model.step_h(prev_z, prev_h, prev_a)
@@ -103,17 +105,24 @@ class DreamerV2Agent:
 
             next_frame, reward, done, info = env.step(action)
 
-            #: Send transition to replaybuffer
-            is_first = True if episode_steps == 0 else False
+            #: Reward clipping by tanh
+            _reward = math.tanh(reward)
 
-            self.buffer.add(obs, action_onehot, reward, is_first, done)
+            #: Life loss as episode end
+            if info["ale.lives"] != lives:
+                lives = int(info["ale.lives"])
+                _done = True
+            else:
+                _done = done
+
+            self.buffer.add(obs, action_onehot, _reward, _done, prev_z, prev_h)
 
             #: Update states
             obs = self.preprocess_func(next_frame)
 
             prev_z, prev_h, prev_a = z, h, action_onehot
 
-            if self.global_steps % self.config.update_interval == 0:
+            if training and self.global_steps % self.config.update_interval == 0:
                 self.update_networks()
 
             #: Stats
@@ -125,12 +134,11 @@ class DreamerV2Agent:
 
         return episode_steps, episode_rewards
 
-    def rollout_imagine(self):
-        pass
+    def update_networks(self):
 
-    def update_networks(self, batch_size, sequence_length):
+        minibatch = self.buffer.get_minibatch()
 
-        minibatch = self.buffer.make_minibatch(batch_size, sequence_length)
+        import pdb; pdb.set_trace()
 
         minibatch = self.update_worldmodel(minibatch)
 
@@ -143,6 +151,9 @@ class DreamerV2Agent:
             3. Append latent states to minibatch
         """
         return minibatch
+
+    def rollout_in_dream(self):
+        return None
 
     def update_actor_critic(self, minibatch):
         """
@@ -180,18 +191,18 @@ def main():
 
     agent = DreamerV2Agent(env_id=env_id, config=config)
 
-    for _ in range(5):
-        agent.rollout()
-
-    import sys
-    sys.exit()
-
     n = 0
 
     while n < config.num_episodes:
 
-        steps, score = agent.rollout()
+        training = n > 5
 
+        steps, score = agent.rollout(training)
+
+        print(f"Episode {n}: {steps}steps {score}")
+        print()
+
+        n += 1
 
 if __name__ == "__main__":
     main()

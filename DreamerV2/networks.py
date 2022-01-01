@@ -35,16 +35,17 @@ class WorldModel(tf.keras.Model):
 
         embed = self.encoder(obs)
         h = self.rssm.step_h(prev_z, prev_h, prev_a)
-        z = self.rssm.sample_z(h, embed)
-        _z = tf.reshape(z, [z.shape[0], -1])
+        z_prior = self.rssm.sample_z_prior(h)
+        z_post = self.rssm.sample_z_post(h, embed)
+        _z_post = tf.reshape(z_post, [z_post.shape[0], -1])
 
-        feat = tf.concat([_z, h], axis=-1)
+        feat = tf.concat([_z_post, h], axis=-1)
 
-        decoded = self.decoder(z)
+        img_decoded = self.decoder(feat)
         reward = self.reward_head(feat)
         gamma = self.discount_head(feat)
 
-        return h, z, feat, decoded, reward, gamma
+        return h, z_prior, z_post, feat, img_decoded, reward, gamma
 
     def get_initial_state(self, batch_size):
         z_init = tf.zeros([batch_size, self.latent_dim, self.n_atoms])
@@ -64,7 +65,7 @@ class WorldModel(tf.keras.Model):
     @tf.function
     def get_feature(self, obs, h):
         embed = self.encoder(obs)
-        z = self.rssm.sample_z(h, embed)
+        z = self.rssm.sample_z_post(h, embed)
         z = tf.reshape(z, [z.shape[0], -1])
         feat = tf.concat([z, h], axis=-1)
         return feat, z
@@ -129,9 +130,13 @@ class RecurrentStateSpaceModel(tf.keras.Model):
 
         self.units = 600
 
-        self.dense_z1 = kl.Dense(self.units, activation="elu")
+        self.dense_z_prior1 = kl.Dense(self.units, activation="elu")
 
-        self.dense_z2 = kl.Dense(self.latent_dim*self.n_atoms)
+        self.dense_z_prior2 = kl.Dense(self.latent_dim*self.n_atoms)
+
+        self.dense_z_post1 = kl.Dense(self.units, activation="elu")
+
+        self.dense_z_post2 = kl.Dense(self.latent_dim*self.n_atoms)
 
         self.dense_h1 = kl.Dense(self.units, activation="elu")
 
@@ -141,15 +146,39 @@ class RecurrentStateSpaceModel(tf.keras.Model):
         """ ! Redundunt method
         """
         h = self.step_h(prev_z, prev_h, prev_a)
-        z = self.sample_z(h, embed)
-        return z, h
+        z_prior = self.sample_z_prior(h)
+        z_post = self.sample_z_post(h, embed)
+        return z_post, z_prior, h
 
     @tf.function
-    def sample_z(self, h, embed):
+    def sample_z_prior(self, h):
+
+        x = self.dense_z_prior1(h)
+        logits = self.dense_z_prior2(x)
+        logits = tf.reshape(
+            logits, [logits.shape[0], self.latent_dim, self.n_atoms]
+            )
+
+        z_probs = tf.nn.softmax(logits, axis=2)
+
+        #: batch_shape=[batch_size] event_shape=[32, 32]
+        dist = tfd.Independent(
+            tfd.OneHotCategorical(probs=z_probs),
+            reinterpreted_batch_ndims=1)
+
+        z = tf.cast(dist.sample(), tf.float32)
+
+        #: Reparameterization trick for OneHotCategorcalDist
+        z = z + z_probs - tf.stop_gradient(z_probs)
+
+        return z
+
+    @tf.function
+    def sample_z_post(self, h, embed):
 
         x = tf.concat([h, embed], axis=-1)
-        x = self.dense_z1(x)
-        logits = self.dense_z2(x)
+        x = self.dense_z_post1(x)
+        logits = self.dense_z_post2(x)
         logits = tf.reshape(
             logits, [logits.shape[0], self.latent_dim, self.n_atoms]
             )
@@ -173,7 +202,7 @@ class RecurrentStateSpaceModel(tf.keras.Model):
         prev_z = tf.reshape(prev_z, [prev_z.shape[0], -1])
         x = tf.concat([prev_z, prev_a], axis=-1)
         x = self.dense_h1(x)
-        h, _ = self.gru_cell(x, [prev_h])
+        x, [h] = self.gru_cell(x, [prev_h])  #: x == h
 
         return h
 
