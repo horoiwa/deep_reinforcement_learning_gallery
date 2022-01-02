@@ -258,15 +258,21 @@ class PolicyNetwork(tf.keras.Model):
         assert feat.shape[0] == 1
 
         if random.random() > epsilon:
-            logits, probs = self(feat)
-            dist = tfd.OneHotCategorical(probs=probs)
-            action_onehot = dist.sample()
+            action_onehot = self.sample(feat)
             action = np.argmax(action_onehot)
         else:
             #: random action
             action = random.randint(0, self.action_space-1)
 
         return action
+
+    def sample(self, feat):
+        logits, probs = self(feat)
+        dist = tfd.Independent(
+            tfd.OneHotCategorical(probs=probs),
+            reinterpreted_batch_ndims=0)
+        actions_onehot = dist.sample()
+        return actions_onehot
 
 
 class ValueNetwork(tf.keras.Model):

@@ -140,9 +140,9 @@ class DreamerV2Agent:
 
         minibatch = self.buffer.get_minibatch()
 
-        hs, z_posts, feats = self.update_worldmodel(minibatch)
+        z_posts, hs = self.update_worldmodel(minibatch)
 
-        trajectory = self.rollout_in_dream(hs, z_posts, feats, minibatch["done"])
+        trajectory = self.rollout_in_dream(z_posts, hs, minibatch["done"])
 
         self.update_actor_critic(trajectory)
 
@@ -173,7 +173,7 @@ class DreamerV2Agent:
 
         with tf.GradientTape() as tape:
 
-            hs, z_prior_probs, z_posts, z_post_probs, feats = [], [], [], [], []
+            hs, z_prior_probs, z_posts, z_post_probs = [], [], [], []
 
             img_outs, r_preds, done_preds = [], [], []
 
@@ -192,8 +192,6 @@ class DreamerV2Agent:
 
                 z_post_probs.append(z_post_prob)
 
-                feats.append(feat)
-
                 img_outs.append(img_out)
 
                 r_preds.append(reward_pred)
@@ -211,8 +209,6 @@ class DreamerV2Agent:
             z_posts = tf.stack(z_posts, axis=0)
 
             z_post_probs = tf.stack(z_post_probs, axis=0)
-
-            feats = tf.stack(feats, axis=0)
 
             img_outs = tf.stack(img_outs, axis=0)
 
@@ -237,7 +233,7 @@ class DreamerV2Agent:
         grads, norm = tf.clip_by_global_norm(grads, 100.)
         self.wm_optimizer.apply_gradients(zip(grads, self.world_model.trainable_variables))
 
-        return hs, z_posts, feats
+        return z_posts, hs
 
     @tf.function
     def _compute_kl_loss(self, post_probs, prior_probs):
@@ -333,8 +329,57 @@ class DreamerV2Agent:
 
         return loss
 
-    def rollout_in_dream(self):
-        trajectory = []
+    def rollout_in_dream(self, z_init, h_init, done_init):
+        """
+        Inputs:
+            h_init: (L, B, 1)
+            z_init: (L, B, latent_dim * n_atoms)
+            feat_init: (L, B, 1 + latent_dim * n_atoms)
+            done_init: (L, B, 1)
+        """
+        L, B = h_init.shape[:2]
+
+        horizon = self.config.imagination_horizon
+
+        z, h = tf.reshape(z_init, [L*B, -1]), tf.reshape(h_init, [L*B, -1])
+        feats = tf.concat([z, h], axis=-1)
+
+        done_init = tf.reshape(done_init, [L*B, -1])
+
+        trajectory = {"feat": [], "action": [], 'next_feat': []}
+
+        for t in range(horizon):
+
+            actions = tf.cast(self.actor.sample(feats), dtype=tf.float32)
+
+            trajectory["feat"].append(feats)
+            trajectory["action"].append(actions)
+
+            h = self.world_model.step_h(z, h, actions)
+            z, _ = self.world_model.rssm.sample_z_prior(h)
+            z = tf.reshape(z, [L*B, -1])
+
+            feats = tf.concat([z, h], axis=-1)
+            trajectory["next_feat"].append(feats)
+
+        trajectory = {k: tf.stack(v, axis=0) for k, v in trajectory.items()}
+
+        #: Predict r_t from feat_{t+1} = concat(z_{t+1}, h_{t+1})
+        rewards = self.world_model.reward_head(trajectory['next_feat'])
+        trajectory["r"] = tfd.Independent(
+                tfd.Normal(loc=rewards, scale=1.),
+                reinterpreted_batch_ndims=1
+                ).mode()
+
+        dones = self.world_model.discount_head(trajectory['next_feat'])
+        dones = tfd.Independent(
+                tfd.Bernoulli(logits=dones), reinterpreted_batch_ndims=1
+                ).mode()
+        #: first stepだけはis_doneを予測値でなく観測値に置き換える
+        import pdb; pdb.set_trace()
+        raise NotImplementedError()
+
+        trajactory["discount_weights"] = None
         return trajectory
 
     def update_actor_critic(self, minibatch):
