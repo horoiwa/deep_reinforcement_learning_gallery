@@ -140,9 +140,11 @@ class DreamerV2Agent:
 
         minibatch = self.buffer.get_minibatch()
 
-        self.update_worldmodel(minibatch)
+        hs, z_posts, feats = self.update_worldmodel(minibatch)
 
-        self.update_actor_critic(minibatch)
+        trajectory = self.rollout_in_dream(hs, z_posts, feats, minibatch["done"])
+
+        self.update_actor_critic(trajectory)
 
     def update_worldmodel(self, minibatch):
         """
@@ -171,7 +173,7 @@ class DreamerV2Agent:
 
         with tf.GradientTape() as tape:
 
-            z_prior_probs, z_post_probs, feats = [], [], []
+            hs, z_prior_probs, z_posts, z_post_probs, feats = [], [], [], [], []
 
             img_outs, r_preds, done_preds = [], [], []
 
@@ -182,11 +184,15 @@ class DreamerV2Agent:
                 (h, z_prior, z_prior_prob, z_post, z_post_prob,
                  feat, img_out, reward_pred, done_pred) = _outputs
 
-                feats.append(feat)
+                hs.append(h)
 
                 z_prior_probs.append(z_prior_prob)
 
+                z_posts.append(z_post)
+
                 z_post_probs.append(z_post_prob)
+
+                feats.append(feat)
 
                 img_outs.append(img_out)
 
@@ -198,7 +204,11 @@ class DreamerV2Agent:
 
             #: Reshape outputs
             #: [(B, ...), (B, ...), ...] -> (L, B, ...)
+            hs = tf.stack(hs, axis=0)
+
             z_prior_probs = tf.stack(z_prior_probs, axis=0)
+
+            z_posts = tf.stack(z_posts, axis=0)
 
             z_post_probs = tf.stack(z_post_probs, axis=0)
 
@@ -226,6 +236,8 @@ class DreamerV2Agent:
         grads = tape.gradient(loss, self.world_model.trainable_variables)
         grads, norm = tf.clip_by_global_norm(grads, 100.)
         self.wm_optimizer.apply_gradients(zip(grads, self.world_model.trainable_variables))
+
+        return hs, z_posts, feats
 
     @tf.function
     def _compute_kl_loss(self, post_probs, prior_probs):
@@ -295,6 +307,7 @@ class DreamerV2Agent:
 
         return loss
 
+    @tf.function
     def _compute_log_loss(self, y_true, y_pred, head):
         """
         Inputs:
@@ -319,6 +332,10 @@ class DreamerV2Agent:
         loss = tf.reduce_mean(log_prob)
 
         return loss
+
+    def rollout_in_dream(self):
+        trajectory = []
+        return trajectory
 
     def update_actor_critic(self, minibatch):
         """

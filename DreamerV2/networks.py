@@ -31,8 +31,6 @@ class WorldModel(tf.keras.Model):
 
     @tf.function
     def call(self, obs, prev_z, prev_h, prev_a):
-        """ ! Redundunt method
-        """
 
         embed = self.encoder(obs)
 
@@ -40,9 +38,9 @@ class WorldModel(tf.keras.Model):
 
         z_prior, z_prior_probs = self.rssm.sample_z_prior(h)
         z_post, z_post_probs = self.rssm.sample_z_post(h, embed)
-        _z_post = tf.reshape(z_post, [z_post.shape[0], -1])
+        z_post = tf.reshape(z_post, [z_post.shape[0], -1])
 
-        feat = tf.concat([_z_post, h], axis=-1)
+        feat = tf.concat([z_post, h], axis=-1)
 
         img_decoded = self.decoder(feat)
         reward = self.reward_head(feat)
