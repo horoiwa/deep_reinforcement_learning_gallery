@@ -140,7 +140,7 @@ class DreamerV2Agent:
 
         minibatch = self.buffer.get_minibatch()
 
-        minibatch = self.update_worldmodel(minibatch)
+        self.update_worldmodel(minibatch)
 
         self.update_actor_critic(minibatch)
 
@@ -173,14 +173,14 @@ class DreamerV2Agent:
 
             z_prior_probs, z_post_probs, feats = [], [], []
 
-            img_outs, r_preds, terminal_preds = [], [], []
+            img_outs, r_preds, done_preds = [], [], []
 
             for t in tf.range(L):
 
                 _outputs = self.world_model(observations[t], prev_z, prev_h, prev_a)
 
                 (h, z_prior, z_prior_prob, z_post, z_post_prob,
-                 feat, img_out, reward_pred, terminal_pred) = _outputs
+                 feat, img_out, reward_pred, done_pred) = _outputs
 
                 feats.append(feat)
 
@@ -192,7 +192,7 @@ class DreamerV2Agent:
 
                 r_preds.append(reward_pred)
 
-                terminal_preds.append(terminal_pred)
+                done_preds.append(done_pred)
 
                 prev_z, prev_h, prev_a = z_post, h, actions[t]
 
@@ -208,16 +208,16 @@ class DreamerV2Agent:
 
             r_preds = tf.stack(r_preds, axis=0)
 
-            terminal_preds = tf.stack(terminal_preds, axis=0)
+            done_preds = tf.stack(done_preds, axis=0)
 
             #: Compute loss terms
             kl_loss = self._compute_kl_loss(z_prior_probs, z_post_probs)
 
             img_log_loss = self._compute_img_log_loss(observations, img_outs)
 
-            reward_log_loss = self._compute_log_loss(rewards)
+            reward_log_loss = self._compute_log_loss(rewards, r_preds, head="reward")
 
-            discount_log_loss = None
+            discount_log_loss = self._compute_log_loss(dones, done_preds, head="discount")
 
             loss = - img_log_loss - reward_log_loss - discount_log_loss + kl_loss
 
@@ -225,9 +225,7 @@ class DreamerV2Agent:
 
         grads = tape.gradient(loss, self.world_model.trainable_variables)
         grads, norm = tf.clip_by_global_norm(grads, 100.)
-        self.wm_optimizer.apply_gradients(self.world_model.trainable_variables)
-
-        return minibatch
+        self.wm_optimizer.apply_gradients(zip(grads, self.world_model.trainable_variables))
 
     @tf.function
     def _compute_kl_loss(self, post_probs, prior_probs):
@@ -276,6 +274,7 @@ class DreamerV2Agent:
 
         return kl_loss
 
+    @tf.function
     def _compute_img_log_loss(self, img_in, img_out):
         """
         Inputs:
@@ -288,13 +287,38 @@ class DreamerV2Agent:
 
         img_out = tf.reshape(img_out, (L * B, H * W * C))
 
-        dist = tfd.Independent(tfd.Normal(img_out, 1.))
+        dist = tfd.Independent(tfd.Normal(loc=img_out, scale=2.))
 
         log_prob = dist.log_prob(img_in)
 
-        log_prob = tf.reduce_mean(log_prob)
+        loss = tf.reduce_mean(log_prob)
 
-        return log_prob
+        return loss
+
+    def _compute_log_loss(self, y_true, y_pred, head):
+        """
+        Inputs:
+            y_true: (L, B, 1)
+            y_pred: (L, B, 1)
+            head: "reward" or "discount"
+        """
+
+        if head == "reward":
+            dist = tfd.Independent(
+                tfd.Normal(loc=y_pred, scale=1.), reinterpreted_batch_ndims=1
+                )
+        elif head == "discount":
+            dist = tfd.Independent(
+                tfd.Bernoulli(logits=y_pred), reinterpreted_batch_ndims=1
+                )
+        else:
+            raise NotImplementedError(head)
+
+        log_prob = dist.log_prob(y_true)
+
+        loss = tf.reduce_mean(log_prob)
+
+        return loss
 
     def update_actor_critic(self, minibatch):
         """

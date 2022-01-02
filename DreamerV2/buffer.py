@@ -86,8 +86,8 @@ class SequenceReplayBuffer:
             sequence = {
                 "obs": tf.concat([e.obs for e in sequence], axis=0),           #: (self.L, 64, 64, 1)
                 "action": tf.concat([e.action for e in sequence], axis=0),
-                "reward": tf.concat([e.reward for e in sequence], axis=0),
-                "done": tf.concat([e.done for e in sequence], axis=0),
+                "reward": tf.stack([[e.reward] for e in sequence], axis=0),
+                "done": tf.stack([[e.done] for e in sequence], axis=0),
                 "prev_z": sequence[0].prev_z,
                 "prev_h": sequence[0].prev_h,
                 "prev_a": sequence[0].prev_a,
