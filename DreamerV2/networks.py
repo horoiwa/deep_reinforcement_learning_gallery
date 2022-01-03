@@ -286,9 +286,10 @@ class ValueNetwork(tf.keras.Model):
 
         self.mlp = MLPHead(out_shape=1)
 
+    @tf.function
     def call(self, feat):
 
-        value = self.mlp_value(feat)
+        value = self.mlp(feat)
 
         return value
 

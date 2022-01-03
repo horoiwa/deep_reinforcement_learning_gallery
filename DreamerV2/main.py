@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import math
+from pathlib import Path
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -20,18 +21,19 @@ class Config:
     buffer_size: int = int(1e6)    # Replay buffer size (FIFO)
     gamma: float = 0.997
     anneal_stpes: int = 1000000
-    update_interval: int = 8
+    update_period: int = 12
+    target_update_period: int = 1200
 
-    kl_loss_scale: float = 0.1     # KL loss scale, β
+    kl_scale: float = 0.1     # KL loss scale, β
     kl_alpha: float = 0.8          # KL balancing
-    ent_loss_scale: float = 1e-3
+    ent_scale: float = 1e-3
     latent_dim: int = 32           # discrete latent dimensions
     n_atoms: int = 32              # discrete latent classes
     lr_world: float = 2e-4         # learning rate of world model
 
     imagination_horizon: int = 5   # Imagination horizon, H
-    discount_lambda: float = 0.995 # discount factor γ
-    lambda_target: float = 0.95    # λ-target parameter
+    gamma_discount: float = 0.995   # discount factor γ
+    lambda_gae: float = 0.95       # λ for Generalized advantage estimator
     entropy_scale: float = 1e-3    # entropy loss scale
     lr_actor: float = 4e-5
     lr_critic: float = 1e-4
@@ -70,9 +72,22 @@ class DreamerV2Agent:
         self.actor_optimizer = tf.keras.optimizers.Adam(lr=self.config.lr_actor)
 
         self.critic = ValueNetwork(action_space=self.action_space)
+        self.target_critic = ValueNetwork(action_space=self.action_space)
         self.critic_optimizer = tf.keras.optimizers.Adam(lr=self.config.lr_critic)
 
         self.global_steps = 0
+
+    def save(self, savedir=None):
+        savedir = Path(savedir) if savedir is not None else Path("checkpoints")
+        self.world_model.save_weights(savedir / "worldmodel")
+        self.actor.save_weights(savedir / "actor")
+        self.critic.save_weights(savedir / "critic")
+
+    def load(self, loaddir=None):
+        savedir = Path(loaddir) if loaddir is not None else Path("checkpoints")
+        self.world_model.load_weights(savedir / "worldmodel")
+        self.actor.load_weights(savedir / "actor")
+        self.critic.load_weights(savedir / "critic")
 
     @property
     def epsilon(self):
@@ -130,8 +145,14 @@ class DreamerV2Agent:
 
             prev_z, prev_h, prev_a = z, h, action_onehot
 
-            if training and self.global_steps % self.config.update_interval == 0:
+            #: Update world model and actor-critic
+            if training and self.global_steps % self.config.update_period == 0:
                 self.update_networks()
+
+            #: Target update
+            if training and self.global_steps % self.config.target_update_period == 0:
+                print("== Target Update ==")
+                self.target_critic.set_weights(self.critic.get_weights())
 
             #: Stats
             self.global_steps += 1
@@ -171,9 +192,11 @@ class DreamerV2Agent:
             2. Conmpute KL loss (post_z, prior_z)
             3. Reconstrunction loss, reward, discount loss
         """
-        #: r_t-1, done_t-1, obs_t, action_t
+
         (observations, actions, rewards, next_observations, dones,
          prev_z, prev_h, prev_a) = minibatch.values()
+
+        discounts = (1. - dones) * self.config.gamma_discount
 
         prev_z, prev_h, prev_a = prev_z[0], prev_h[0], prev_a[0]
 
@@ -192,14 +215,14 @@ class DreamerV2Agent:
 
             hs, z_prior_probs, z_posts, z_post_probs = [], [], [], []
 
-            img_outs, r_preds, done_preds = [], [], []
+            img_outs, r_preds, disc_preds = [], [], []
 
             for t in tf.range(L+1):
 
                 _outputs = self.world_model(observations[t], prev_z, prev_h, prev_a)
 
                 (h, z_prior, z_prior_prob, z_post, z_post_prob,
-                 feat, img_out, reward_pred, done_pred) = _outputs
+                 feat, img_out, reward_pred, disc_pred) = _outputs
 
                 hs.append(h)
 
@@ -213,7 +236,7 @@ class DreamerV2Agent:
 
                 r_preds.append(reward_pred)
 
-                done_preds.append(done_pred)
+                disc_preds.append(disc_pred)
 
                 prev_z, prev_h, prev_a = z_post, h, actions[t]
 
@@ -231,7 +254,7 @@ class DreamerV2Agent:
 
             r_preds = tf.stack(r_preds, axis=0)[1:]
 
-            done_preds = tf.stack(done_preds, axis=0)[1:]
+            disc_preds = tf.stack(disc_preds, axis=0)[1:]
 
             #: Compute loss terms
             kl_loss = self._compute_kl_loss(z_prior_probs, z_post_probs)
@@ -240,9 +263,9 @@ class DreamerV2Agent:
 
             reward_log_loss = self._compute_log_loss(rewards, r_preds, head="reward")
 
-            discount_log_loss = self._compute_log_loss(dones, done_preds, head="discount")
+            discount_log_loss = self._compute_log_loss(discounts, disc_preds, head="discount")
 
-            loss = - img_log_loss - reward_log_loss - discount_log_loss + kl_loss
+            loss = - img_log_loss - reward_log_loss - discount_log_loss + self.config.kl_scale * kl_loss
 
             loss *= 1. / L
 
@@ -337,8 +360,6 @@ class DreamerV2Agent:
             dist = tfd.Independent(
                 tfd.Bernoulli(logits=y_pred), reinterpreted_batch_ndims=1
                 )
-        else:
-            raise NotImplementedError(head)
 
         log_prob = dist.log_prob(y_true)
 
@@ -351,7 +372,6 @@ class DreamerV2Agent:
         Inputs:
             h_init: (L, B, 1)
             z_init: (L, B, latent_dim * n_atoms)
-            feat_init: (L, B, 1 + latent_dim * n_atoms)
             done_init: (L, B, 1)
         """
         L, B = h_init.shape[:2]
@@ -360,16 +380,16 @@ class DreamerV2Agent:
 
         z, h = tf.reshape(z_init, [L*B, -1]), tf.reshape(h_init, [L*B, -1])
         feats = tf.concat([z, h], axis=-1)
-        done_init = tf.reshape(done_init, [L*B, -1])
+        #done_init = tf.reshape(done_init, [L*B, -1])
 
         #: s_t, a_t, s_t+1
-        trajectory = {"feat": [], "action": [], 'next_feat': []}
+        trajectory = {"state": [], "action": [], 'next_state': []}
 
         for t in range(horizon):
 
             actions = tf.cast(self.actor.sample(feats), dtype=tf.float32)
 
-            trajectory["feat"].append(feats)
+            trajectory["state"].append(feats)
             trajectory["action"].append(actions)
 
             h = self.world_model.step_h(z, h, actions)
@@ -377,58 +397,90 @@ class DreamerV2Agent:
             z = tf.reshape(z, [L*B, -1])
 
             feats = tf.concat([z, h], axis=-1)
-            trajectory["next_feat"].append(feats)
+            trajectory["next_state"].append(feats)
 
         trajectory = {k: tf.stack(v, axis=0) for k, v in trajectory.items()}
 
         #: reward_head(s_t+1) -> r_t
         #: Distribution.mode()は確立最大値を返すのでNormalの場合は
         #: trjactory["reward"] == rewards
-        rewards = self.world_model.reward_head(trajectory['next_feat'])
+        rewards = self.world_model.reward_head(trajectory['next_state'])
         trajectory["reward"] = tfd.Independent(
                 tfd.Normal(loc=rewards, scale=1.),
                 reinterpreted_batch_ndims=1
                 ).mode()
 
-        dones = self.world_model.discount_head(trajectory['next_feat'])
-        dones = tfd.Independent(
-                tfd.Bernoulli(logits=dones), reinterpreted_batch_ndims=1
-                ).mode()
-        dones = tf.cast(dones, tf.float32)
-
-        #: first-stepだけはis_doneを予測値でなく観測値に置き換える
-        #: 訓練初期の安定性向上効果が見込める？
-        dones = tf.concat([done_init[None, ...], dones[1:]], axis=0)
-        trajectory["done"] = dones
+        disc_logits = self.world_model.discount_head(trajectory['next_state'])
+        trajectory["discount"] = tfd.Independent(
+                tfd.Bernoulli(logits=disc_logits), reinterpreted_batch_ndims=1
+                ).mean()
 
         return trajectory
 
     def update_actor_critic(self, trajectory):
+        """ Actor-Critic update using Generalized Advantage Estimator
         """
-            1. Create imagined trajectories from each start states
-            2. Compute target values from imagined trajectories (GAE)
-            3. Update policy network to maximize target value
-            4. Update value network to minimize (imagined_value - pred_value)^2
-        """
-        import pdb; pdb.set_trace()
-        with tf.GradientTape() as tape:
-            #: compute imagined trajectory
-            #: computte target value
-            target_value = None
-            loss = -1 * target_value
 
-        grads = tape.gradient(loss, self.policy.trainable_variables)
-        self.policy_optimizer.apply_gradients(
-                    zip(grads, self.policy.trainable_variables))
+        #: adv: (L*B, 1)
+        adv, v_target = self.compute_GAE(
+            trajectory['state'], trajectory['reward'],
+            trajectory['next_state'], trajectory['discount']
+            )
+
+        states = trajectory['state'][0]
+        actions = trajectory['action'][0]
 
         with tf.GradientTape() as tape:
-            #: compute imagined trajectory
-            #: computte target value
-            loss = 0.5 * tf.square(target_value - pred_value)
 
-        grads = tape.gradient(loss, self.value.trainable_variables)
-        self.value_optimizer.apply_gradients(
-                    zip(grads, self.value.trainable_variables))
+            _, action_probs = self.actor(states)
+
+            objective = actions * tf.math.log(action_probs + 1e-5) * adv
+
+            objective = tf.reduce_sum(objective, axis=-1)
+
+            dist = tfd.Independent(
+                tfd.OneHotCategorical(probs=action_probs),
+                reinterpreted_batch_ndims=0)
+            ent = dist.entropy()
+
+            actor_loss = -1 * objective + self.config.ent_scale * ent
+            actor_loss = tf.reduce_mean(actor_loss)
+
+        grads = tape.gradient(actor_loss, self.actor.trainable_variables)
+        self.actor_optimizer.apply_gradients(
+                    zip(grads, self.actor.trainable_variables))
+
+        with tf.GradientTape() as tape:
+            v_pred = self.critic(states)
+            value_loss = 0.5 * tf.square(v_target - v_pred)
+            value_loss = tf.reduce_mean(value_loss)
+
+        grads = tape.gradient(value_loss, self.critic.trainable_variables)
+        self.critic_optimizer.apply_gradients(
+                    zip(grads, self.critic.trainable_variables))
+
+    def compute_GAE(self, states, rewards, next_states, discounts):
+        """ HIGH-DIMENSIONAL CONTINUOUS CONTROL USING GENERALIZED ADVANTAGE ESTIMATION
+            https://arxiv.org/pdf/1506.02438.pdf
+        """
+        T, B, F = states.shape
+        lambda_ = self.config.lambda_gae
+
+        v = self.target_critic(states)
+        v_next = self.target_critic(next_states)
+        deltas = rewards + discounts * v_next - v
+
+        _weights = tf.concat(
+            [tf.ones_like(discounts[:1]), discounts[:-1] * lambda_],
+            axis=0)
+
+        weights = tf.math.cumprod(_weights, axis=0)
+
+        adv = tf.reduce_sum(weights * deltas, axis=0)
+
+        v_target = adv + v[0]
+
+        return adv, v_target
 
     def testplay(self):
         pass

@@ -61,7 +61,6 @@ class SequenceReplayBuffer:
         while True:
 
             selected_idx = random.randint(self.L, len(self.buffer)-self.L)
-
             sequence = [pickle.loads(lz4f.decompress(self.buffer[idx]))
                         for idx in range(selected_idx-self.L, selected_idx+self.L)]
 
