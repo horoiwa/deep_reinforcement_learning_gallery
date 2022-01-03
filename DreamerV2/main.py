@@ -30,7 +30,7 @@ class Config:
     lr_world: float = 2e-4         # learning rate of world model
 
     imagination_horizon: int = 10  # Imagination horizon, H
-    discount: float = 0.995        # discount factor γ
+    discount_lambda: float = 0.995 # discount factor γ
     lambda_target: float = 0.95    # λ-target parameter
     entropy_scale: float = 1e-3    # entropy loss scale
     lr_actor: float = 4e-5
@@ -91,6 +91,8 @@ class DreamerV2Agent:
 
         prev_a = tf.one_hot([0], self.action_space)
 
+        prev_r, prev_done = 0, False
+
         done = False
 
         lives = int(env.ale.lives())
@@ -117,12 +119,19 @@ class DreamerV2Agent:
             else:
                 _done = done
 
-            self.buffer.add(obs, action_onehot, _reward, _done, prev_z, prev_h, prev_a)
+            #: (r_t-1, done_t-1, obs_t, action_t, done_t)
+            self.buffer.add(
+                prev_r, prev_done,
+                obs, action_onehot, _reward, _done,
+                prev_z, prev_h, prev_a
+                )
 
             #: Update states
             obs = self.preprocess_func(next_frame)
 
             prev_z, prev_h, prev_a = z, h, action_onehot
+
+            prev_r, prev_done = _reward, _done
 
             if training and self.global_steps % self.config.update_interval == 0:
                 self.update_networks()
@@ -165,7 +174,9 @@ class DreamerV2Agent:
             2. Conmpute KL loss (post_z, prior_z)
             3. Reconstrunction loss, reward, discount loss
         """
-        (observations, actions, rewards, dones, prev_z, prev_h, prev_a) = minibatch.values()
+        #: r_t-1, done_t-1, obs_t, action_t
+        (prev_rewards, prev_dones, observations, actions, rewards, dones,
+         prev_z, prev_h, prev_a) = minibatch.values()
 
         prev_z, prev_h, prev_a = prev_z[0], prev_h[0], prev_a[0]
 
@@ -221,9 +232,9 @@ class DreamerV2Agent:
 
             img_log_loss = self._compute_img_log_loss(observations, img_outs)
 
-            reward_log_loss = self._compute_log_loss(rewards, r_preds, head="reward")
+            reward_log_loss = self._compute_log_loss(prev_rewards, r_preds, head="reward")
 
-            discount_log_loss = self._compute_log_loss(dones, done_preds, head="discount")
+            discount_log_loss = self._compute_log_loss(prev_dones, done_preds, head="discount")
 
             loss = - img_log_loss - reward_log_loss - discount_log_loss + kl_loss
 
@@ -329,7 +340,7 @@ class DreamerV2Agent:
 
         return loss
 
-    def rollout_in_dream(self, z_init, h_init, done_init):
+    def rollout_in_dream(self, z_init, h_init, done_init, video=False):
         """
         Inputs:
             h_init: (L, B, 1)
@@ -346,6 +357,7 @@ class DreamerV2Agent:
 
         done_init = tf.reshape(done_init, [L*B, -1])
 
+        #: s_t, a_t, s_t+1
         trajectory = {"feat": [], "action": [], 'next_feat': []}
 
         for t in range(horizon):
@@ -364,7 +376,7 @@ class DreamerV2Agent:
 
         trajectory = {k: tf.stack(v, axis=0) for k, v in trajectory.items()}
 
-        #: Predict r_t from feat_{t+1} = concat(z_{t+1}, h_{t+1})
+        #: reward_head(s_t+1) -> r_t
         rewards = self.world_model.reward_head(trajectory['next_feat'])
         trajectory["r"] = tfd.Independent(
                 tfd.Normal(loc=rewards, scale=1.),
@@ -375,8 +387,10 @@ class DreamerV2Agent:
         dones = tfd.Independent(
                 tfd.Bernoulli(logits=dones), reinterpreted_batch_ndims=1
                 ).mode()
+
         #: first stepだけはis_doneを予測値でなく観測値に置き換える
-        import pdb; pdb.set_trace()
+        discount_weights = (1. - dones) * self.config.discount_lambda
+        discount_weights[0] = (1. - done_init)
         raise NotImplementedError()
 
         trajactory["discount_weights"] = None

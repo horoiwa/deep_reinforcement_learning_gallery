@@ -11,6 +11,8 @@ import lz4.frame as lz4f
 @dataclass
 class Experience:
 
+    prev_reward: tf.float32
+    prev_done: tf.float32
     obs: tf.float32
     action: tf.float32
     reward: tf.float32
@@ -84,7 +86,9 @@ class SequenceReplayBuffer:
 
             #: prev_h, prev_zはsequenceの先頭だけでOK
             sequence = {
-                "obs": tf.concat([e.obs for e in sequence], axis=0),           #: (self.L, 64, 64, 1)
+                "prev_reward": tf.stack([[e.prev_reward] for e in sequence], axis=0),
+                "prev_done": tf.stack([[e.prev_done] for e in sequence], axis=0),
+                "obs": tf.concat([e.obs for e in sequence], axis=0),
                 "action": tf.concat([e.action for e in sequence], axis=0),
                 "reward": tf.stack([[e.reward] for e in sequence], axis=0),
                 "done": tf.stack([[e.done] for e in sequence], axis=0),
@@ -95,25 +99,34 @@ class SequenceReplayBuffer:
 
             yield sequence
 
-    def add(self, obs: np.array, action_onehot: int,
-            reward: int, done: bool, prev_z, prev_h, prev_a_onehot):
+    def add(self, prev_reward, prev_done: bool, obs: np.array,
+            action_onehot, reward, done: bool,
+            prev_z, prev_h, prev_a_onehot):
         """
+        Note:
+            RSSMの特性上、(st, at, rt, dt)ではなく,
+            (rt-1, dt-1, st, at)を遷移の単位とした方が処理が楽
+
         Note:
             Assumed that transition information is sent from single env.
         """
 
+        prev_reward = tf.convert_to_tensor(prev_reward, dtype=tf.float32)
+        prev_done = tf.convert_to_tensor(prev_done, dtype=tf.float32)
+
         obs = tf.convert_to_tensor(obs, dtype=tf.float32)
         action = tf.convert_to_tensor(action_onehot, dtype=tf.float32)
-        reward = tf.convert_to_tensor(reward, dtype=tf.float32)
         done = tf.convert_to_tensor(done, dtype=tf.float32)
+        reward = tf.convert_to_tensor(reward, dtype=tf.float32)
 
-        exp = Experience(obs, action, reward, done, prev_z, prev_h, prev_a_onehot)
+        exp = Experience(
+            prev_reward, prev_done, obs, action, reward, done,
+            prev_z, prev_h, prev_a_onehot)
         exp = lz4f.compress(pickle.dumps(exp))
 
         self.tmp_buffer.append(exp)
 
         if done:
-
             if len(self.tmp_buffer) > self.L:
                 for exp in self.tmp_buffer:
                     self.buffer.append(exp)
