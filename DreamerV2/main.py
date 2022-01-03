@@ -29,7 +29,7 @@ class Config:
     n_atoms: int = 32              # discrete latent classes
     lr_world: float = 2e-4         # learning rate of world model
 
-    imagination_horizon: int = 10  # Imagination horizon, H
+    imagination_horizon: int = 5   # Imagination horizon, H
     discount_lambda: float = 0.995 # discount factor γ
     lambda_target: float = 0.95    # λ-target parameter
     entropy_scale: float = 1e-3    # entropy loss scale
@@ -91,8 +91,6 @@ class DreamerV2Agent:
 
         prev_a = tf.one_hot([0], self.action_space)
 
-        prev_r, prev_done = 0, False
-
         done = False
 
         lives = int(env.ale.lives())
@@ -109,6 +107,8 @@ class DreamerV2Agent:
 
             next_frame, reward, done, info = env.step(action)
 
+            next_obs = self.preprocess_func(next_frame)
+
             #: Reward clipping by tanh
             _reward = math.tanh(reward)
 
@@ -121,17 +121,14 @@ class DreamerV2Agent:
 
             #: (r_t-1, done_t-1, obs_t, action_t, done_t)
             self.buffer.add(
-                prev_r, prev_done,
-                obs, action_onehot, _reward, _done,
+                obs, action_onehot, _reward, next_obs, _done,
                 prev_z, prev_h, prev_a
                 )
 
             #: Update states
-            obs = self.preprocess_func(next_frame)
+            obs = next_obs
 
             prev_z, prev_h, prev_a = z, h, action_onehot
-
-            prev_r, prev_done = _reward, _done
 
             if training and self.global_steps % self.config.update_interval == 0:
                 self.update_networks()
@@ -151,9 +148,9 @@ class DreamerV2Agent:
 
         z_posts, hs = self.update_worldmodel(minibatch)
 
-        trajectory = self.rollout_in_dream(z_posts, hs, minibatch["done"])
+        trajectory_in_dream = self.rollout_in_dream(z_posts, hs, minibatch["done"])
 
-        self.update_actor_critic(trajectory)
+        self.update_actor_critic(trajectory_in_dream)
 
     def update_worldmodel(self, minibatch):
         """
@@ -175,12 +172,21 @@ class DreamerV2Agent:
             3. Reconstrunction loss, reward, discount loss
         """
         #: r_t-1, done_t-1, obs_t, action_t
-        (prev_rewards, prev_dones, observations, actions, rewards, dones,
+        (observations, actions, rewards, next_observations, dones,
          prev_z, prev_h, prev_a) = minibatch.values()
 
         prev_z, prev_h, prev_a = prev_z[0], prev_h[0], prev_a[0]
 
-        L = observations.shape[0]
+        last_obs = next_observations[-1][None, ...]
+
+        observations = tf.concat([observations, last_obs], axis=0)
+
+        #: dummy action to avoid IndexError at last iteration
+        last_action = tf.zeros((1,)+actions.shape[1:])
+
+        actions = tf.concat([actions, last_action], axis=0)
+
+        L = self.config.sequence_length
 
         with tf.GradientTape() as tape:
 
@@ -188,7 +194,7 @@ class DreamerV2Agent:
 
             img_outs, r_preds, done_preds = [], [], []
 
-            for t in tf.range(L):
+            for t in tf.range(L+1):
 
                 _outputs = self.world_model(observations[t], prev_z, prev_h, prev_a)
 
@@ -212,29 +218,29 @@ class DreamerV2Agent:
                 prev_z, prev_h, prev_a = z_post, h, actions[t]
 
             #: Reshape outputs
-            #: [(B, ...), (B, ...), ...] -> (L, B, ...)
-            hs = tf.stack(hs, axis=0)
+            #: [(B, ...), (B, ...), ...] -> (L+1, B, ...) -> (L, B, ...)
+            hs = tf.stack(hs, axis=0)[:-1]
 
-            z_prior_probs = tf.stack(z_prior_probs, axis=0)
+            z_prior_probs = tf.stack(z_prior_probs, axis=0)[:-1]
 
-            z_posts = tf.stack(z_posts, axis=0)
+            z_posts = tf.stack(z_posts, axis=0)[:-1]
 
-            z_post_probs = tf.stack(z_post_probs, axis=0)
+            z_post_probs = tf.stack(z_post_probs, axis=0)[:-1]
 
-            img_outs = tf.stack(img_outs, axis=0)
+            img_outs = tf.stack(img_outs, axis=0)[:-1]
 
-            r_preds = tf.stack(r_preds, axis=0)
+            r_preds = tf.stack(r_preds, axis=0)[1:]
 
-            done_preds = tf.stack(done_preds, axis=0)
+            done_preds = tf.stack(done_preds, axis=0)[1:]
 
             #: Compute loss terms
             kl_loss = self._compute_kl_loss(z_prior_probs, z_post_probs)
 
-            img_log_loss = self._compute_img_log_loss(observations, img_outs)
+            img_log_loss = self._compute_img_log_loss(observations[:-1], img_outs)
 
-            reward_log_loss = self._compute_log_loss(prev_rewards, r_preds, head="reward")
+            reward_log_loss = self._compute_log_loss(rewards, r_preds, head="reward")
 
-            discount_log_loss = self._compute_log_loss(prev_dones, done_preds, head="discount")
+            discount_log_loss = self._compute_log_loss(dones, done_preds, head="discount")
 
             loss = - img_log_loss - reward_log_loss - discount_log_loss + kl_loss
 
@@ -354,7 +360,6 @@ class DreamerV2Agent:
 
         z, h = tf.reshape(z_init, [L*B, -1]), tf.reshape(h_init, [L*B, -1])
         feats = tf.concat([z, h], axis=-1)
-
         done_init = tf.reshape(done_init, [L*B, -1])
 
         #: s_t, a_t, s_t+1
@@ -377,8 +382,10 @@ class DreamerV2Agent:
         trajectory = {k: tf.stack(v, axis=0) for k, v in trajectory.items()}
 
         #: reward_head(s_t+1) -> r_t
+        #: Distribution.mode()は確立最大値を返すのでNormalの場合は
+        #: trjactory["reward"] == rewards
         rewards = self.world_model.reward_head(trajectory['next_feat'])
-        trajectory["r"] = tfd.Independent(
+        trajectory["reward"] = tfd.Independent(
                 tfd.Normal(loc=rewards, scale=1.),
                 reinterpreted_batch_ndims=1
                 ).mode()
@@ -387,23 +394,23 @@ class DreamerV2Agent:
         dones = tfd.Independent(
                 tfd.Bernoulli(logits=dones), reinterpreted_batch_ndims=1
                 ).mode()
+        dones = tf.cast(dones, tf.float32)
 
-        #: first stepだけはis_doneを予測値でなく観測値に置き換える
-        discount_weights = (1. - dones) * self.config.discount_lambda
-        discount_weights[0] = (1. - done_init)
-        raise NotImplementedError()
+        #: first-stepだけはis_doneを予測値でなく観測値に置き換える
+        #: 訓練初期の安定性向上効果が見込める？
+        dones = tf.concat([done_init[None, ...], dones[1:]], axis=0)
+        trajectory["done"] = dones
 
-        trajactory["discount_weights"] = None
         return trajectory
 
-    def update_actor_critic(self, minibatch):
+    def update_actor_critic(self, trajectory):
         """
             1. Create imagined trajectories from each start states
             2. Compute target values from imagined trajectories (GAE)
             3. Update policy network to maximize target value
             4. Update value network to minimize (imagined_value - pred_value)^2
         """
-
+        import pdb; pdb.set_trace()
         with tf.GradientTape() as tape:
             #: compute imagined trajectory
             #: computte target value
@@ -422,6 +429,12 @@ class DreamerV2Agent:
         grads = tape.gradient(loss, self.value.trainable_variables)
         self.value_optimizer.apply_gradients(
                     zip(grads, self.value.trainable_variables))
+
+    def testplay(self):
+        pass
+
+    def testplay_in_dream(self):
+        pass
 
 
 def main():
