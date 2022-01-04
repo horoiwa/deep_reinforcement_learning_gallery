@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import math
 from pathlib import Path
+import shutil
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -15,12 +16,11 @@ import util
 @dataclass
 class Config:
 
-    num_episodes: int = 10         # Num of total rollouts
-    batch_size: int = 48           # Batch size, B
-    sequence_length: int = 15      # Sequence Lenght, L
+    batch_size: int = 32           # Batch size, B
+    sequence_length: int = 10      # Sequence Lenght, L
     buffer_size: int = int(1e6)    # Replay buffer size (FIFO)
     gamma: float = 0.997
-    anneal_stpes: int = 1000000
+    anneal_stpes: int = 500000
     update_period: int = 12
     target_update_period: int = 1200
 
@@ -78,16 +78,16 @@ class DreamerV2Agent:
         self.global_steps = 0
 
     def save(self, savedir=None):
-        savedir = Path(savedir) if savedir is not None else Path("checkpoints")
-        self.world_model.save_weights(savedir / "worldmodel")
-        self.actor.save_weights(savedir / "actor")
-        self.critic.save_weights(savedir / "critic")
+        savedir = Path(savedir) if savedir is not None else Path("./checkpoints")
+        self.world_model.save_weights(str(savedir / "worldmodel"))
+        self.actor.save_weights(str(savedir / "actor"))
+        self.critic.save_weights(str(savedir / "critic"))
 
     def load(self, loaddir=None):
         savedir = Path(loaddir) if loaddir is not None else Path("checkpoints")
-        self.world_model.load_weights(savedir / "worldmodel")
-        self.actor.load_weights(savedir / "actor")
-        self.critic.load_weights(savedir / "critic")
+        self.world_model.load_weights(str(loaddir / "worldmodel"))
+        self.actor.load_weights(str(loaddir / "actor"))
+        self.critic.load_weights(str(loaddir / "critic"))
 
     @property
     def epsilon(self):
@@ -165,13 +165,13 @@ class DreamerV2Agent:
 
     def update_networks(self):
 
-        minibatch = self.buffer.get_minibatch()
+            minibatch = self.buffer.get_minibatch()
 
-        z_posts, hs = self.update_worldmodel(minibatch)
+            z_posts, hs = self.update_worldmodel(minibatch)
 
-        trajectory_in_dream = self.rollout_in_dream(z_posts, hs, minibatch["done"])
+            trajectory_in_dream = self.rollout_in_dream(z_posts, hs, minibatch["done"])
 
-        self.update_actor_critic(trajectory_in_dream)
+            self.update_actor_critic(trajectory_in_dream)
 
     def update_worldmodel(self, minibatch):
         """
@@ -482,14 +482,117 @@ class DreamerV2Agent:
 
         return adv, v_target
 
-    def testplay(self):
-        pass
+    def testplay(self, test_id, outdir: Path):
 
-    def testplay_in_dream(self):
-        pass
+        images = []
+
+        env = gym.make(self.env_id)
+
+        obs = self.preprocess_func(env.reset())
+
+        episode_steps, episode_rewards = 0, 0
+
+        prev_z, prev_h = self.world_model.get_initial_state(batch_size=1)
+
+        prev_a = tf.one_hot([0], self.action_space)
+
+        done = False
+
+        while not done:
+
+            (h, z_prior, z_prior_probs, z_post,
+             z_post_probs, feat, img_out,
+             r_pred, discount_pred) = self.world_model(obs, prev_z, prev_h, prev_a)
+
+            action = self.actor.sample_action(feat, 0)
+
+            action_onehot = tf.one_hot([action], self.action_space)
+
+            next_frame, reward, done, info = env.step(action)
+
+            next_obs = self.preprocess_func(next_frame)
+
+            images.append(util.vizualize_vae(obs, img_out.numpy()))
+
+            #: Update states
+            obs = next_obs
+
+            prev_z, prev_h, prev_a = z_post, h, action_onehot
+
+            episode_steps += 1
+            episode_rewards += 1
+
+        images[0].save(
+            f'{outdir}/{test_id}.gif',
+            save_all=True, append_images=images[1:],
+            optimize=False, duration=60, loop=0)
+
+        return episode_steps, episode_rewards
+
+    def testplay_in_dream(self, test_id, outdir: Path, initial_state=None, H=10):
+
+        images = []
+
+        state = None
+
+        prev_z, prev_h = self.world_model.get_initial_state(batch_size=1)
+
+        prev_a = tf.one_hot([0], self.action_space)
+
+        score = 0
+
+        actions, rewards, discounts = [], [], []
+
+        for i in range(H):
+
+            if i == 0:
+                env = gym.make(self.env_id)
+
+                obs = self.preprocess_func(env.reset())
+
+                (h, z_prior, z_prior_probs, z_post,
+                 z_post_probs, feat, img_out,
+                 r_pred, discount_pred) = self.world_model(obs, prev_z, prev_h, prev_a)
+
+            else:
+                pass
+
+            action = self.actor.sample_action(feat, 0)
+            rewards.append(r_pred)
+            discounts.append(discount_pred)
+
+            next_state = step_h
+
+            actions.append(action)
+
+            action_onehot = tf.one_hot([action], self.action_space)
+
+            images.append(util.vizualize_dream(obs, img_out.numpy()))
+
+            #: update states
+            obs = next_obs
+            prev_z, prev_h, prev_a = z_prior, h, action_onehot
+
+        else:
+            pass
+
+        images[0].save(
+            f'{outdir}/{test_id}.gif',
+            save_all=True, append_images=images[1:],
+            optimize=False, duration=60, loop=0)
 
 
 def main():
+
+    logdir = Path("./log")
+    if logdir.exists():
+        shutil.rmtree(logdir)
+    logdir.mkdir()
+
+    videodir = Path("./video")
+    if logdir.exists():
+        shutil.rmtree(videodir)
+    videodir.mkdir()
 
     env_id = "BreakoutDeterministic-v4"
 
@@ -497,16 +600,32 @@ def main():
 
     agent = DreamerV2Agent(env_id=env_id, config=config)
 
+    init_episodes = 2
+
+    test_interval = 20
+
     n = 0
 
-    while n < config.num_episodes:
+    while n < 10000:
 
-        training = n > 2
+        training = n > init_episodes
 
         steps, score = agent.rollout(training)
 
         print(f"Episode {n}: {steps}steps {score}")
         print()
+
+        if n % test_interval == 0:
+        #if training & (n % test_interval == 0):
+            steps, score = agent.testplay(n, videodir)
+            agent.testplay_in_dream(n, videodir)
+            print("=="*4)
+            print(f"Test: {steps}steps {score}")
+            print("=="*4)
+            print()
+
+        if n % 100 == 0:
+            agent.save()
 
         n += 1
 

@@ -52,7 +52,7 @@ class SequenceReplayBuffer:
 
         dataset = dataset.batch(self.batch_size, drop_remainder=True)
 
-        dataset.prefetch(5)
+        dataset.prefetch(self.buffer_size*2)
 
         self.dataset = iter(dataset)
 
