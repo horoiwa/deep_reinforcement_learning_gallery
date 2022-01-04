@@ -46,7 +46,7 @@ class Config:
 class DreamerV2Agent:
 
     def __init__(self, env_id: str, config: Config,
-                 summary_writer: int = None):
+                 summary_writer: tf.summary.SummaryWriter = None):
 
         self.env_id = env_id
 
@@ -161,7 +161,7 @@ class DreamerV2Agent:
 
             episode_rewards += reward
 
-        return episode_steps, episode_rewards
+        return episode_steps, episode_rewards, self.global_steps
 
     def update_networks(self):
 
@@ -169,7 +169,7 @@ class DreamerV2Agent:
 
             z_posts, hs = self.update_worldmodel(minibatch)
 
-            trajectory_in_dream = self.rollout_in_dream(z_posts, hs, minibatch["done"])
+            trajectory_in_dream = self.rollout_in_dream(z_posts, hs)
 
             self.update_actor_critic(trajectory_in_dream)
 
@@ -273,6 +273,13 @@ class DreamerV2Agent:
         grads, norm = tf.clip_by_global_norm(grads, 100.)
         self.wm_optimizer.apply_gradients(zip(grads, self.world_model.trainable_variables))
 
+        with self.summary_writer.as_default():
+            tf.summary.scalar("wm_loss", L * loss, step=self.global_steps)
+            tf.summary.scalar("img_log_loss", -img_log_loss, step=self.global_steps)
+            tf.summary.scalar("reward_log_loss", -reward_log_loss, step=self.global_steps)
+            tf.summary.scalar("discount_log_loss", -discount_log_loss, step=self.global_steps)
+            tf.summary.scalar("kl_loss", kl_loss, step=self.global_steps)
+
         return z_posts, hs
 
     @tf.function
@@ -367,7 +374,7 @@ class DreamerV2Agent:
 
         return loss
 
-    def rollout_in_dream(self, z_init, h_init, done_init, video=False):
+    def rollout_in_dream(self, z_init, h_init, video=False):
         """
         Inputs:
             h_init: (L, B, 1)
@@ -457,6 +464,10 @@ class DreamerV2Agent:
         grads = tape.gradient(value_loss, self.critic.trainable_variables)
         self.critic_optimizer.apply_gradients(
                     zip(grads, self.critic.trainable_variables))
+
+        with self.summary_writer.as_default():
+            tf.summary.scalar("actor_loss", actor_loss, step=self.global_steps)
+            tf.summary.scalar("value_loss", value_loss, step=self.global_steps)
 
     def compute_GAE(self, states, rewards, next_states, discounts):
         """ HIGH-DIMENSIONAL CONTINUOUS CONTROL USING GENERALIZED ADVANTAGE ESTIMATION
@@ -606,6 +617,8 @@ def main():
         shutil.rmtree(logdir)
     logdir.mkdir()
 
+    summary_writer = tf.summary.create_file_writer(str(logdir))
+
     videodir = Path("./video")
     if videodir.exists():
         shutil.rmtree(videodir)
@@ -615,9 +628,11 @@ def main():
 
     config = Config()
 
-    agent = DreamerV2Agent(env_id=env_id, config=config)
+    agent = DreamerV2Agent(
+        env_id=env_id, config=config, summary_writer=summary_writer
+        )
 
-    init_episodes = 2
+    init_episodes = 90
 
     test_interval = 100
 
@@ -627,7 +642,7 @@ def main():
 
         training = n > init_episodes
 
-        steps, score = agent.rollout(training)
+        steps, score, global_steps = agent.rollout(training)
 
         print(f"Episode {n}: {steps}steps {score}")
         print()
@@ -635,9 +650,11 @@ def main():
         if n % test_interval == 0:
             agent.testplay_in_dream(n, videodir)
             steps, score = agent.testplay(n, videodir)
-            print("=="*4)
+
+            with summary_writer.as_default():
+                tf.summary.scalar("test_score", score, step=global_steps)
+
             print(f"Test: {steps}steps {score}")
-            print("=="*4)
             print()
 
         if n % 100 == 0:

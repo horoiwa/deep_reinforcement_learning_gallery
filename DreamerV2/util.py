@@ -105,4 +105,4 @@ if __name__ == '__main__':
     env = gym.make(env_id)
     preprocessor = get_preprocess_func(env_id)
     obs = preprocessor(env.reset())
-    img = vizualize(obs, obs)
+    img = vizualize_vae(obs, obs)
