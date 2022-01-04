@@ -215,14 +215,14 @@ class DreamerV2Agent:
 
             hs, z_prior_probs, z_posts, z_post_probs = [], [], [], []
 
-            img_outs, r_preds, disc_preds = [], [], []
+            img_outs, r_means, disc_logits = [], [], []
 
             for t in tf.range(L+1):
 
                 _outputs = self.world_model(observations[t], prev_z, prev_h, prev_a)
 
                 (h, z_prior, z_prior_prob, z_post, z_post_prob,
-                 feat, img_out, reward_pred, disc_pred) = _outputs
+                 feat, img_out, reward_pred, disc_logit) = _outputs
 
                 hs.append(h)
 
@@ -234,9 +234,9 @@ class DreamerV2Agent:
 
                 img_outs.append(img_out)
 
-                r_preds.append(reward_pred)
+                r_means.append(reward_pred)
 
-                disc_preds.append(disc_pred)
+                disc_logits.append(disc_logit)
 
                 prev_z, prev_h, prev_a = z_post, h, actions[t]
 
@@ -252,18 +252,18 @@ class DreamerV2Agent:
 
             img_outs = tf.stack(img_outs, axis=0)[:-1]
 
-            r_preds = tf.stack(r_preds, axis=0)[1:]
+            r_means = tf.stack(r_means, axis=0)[1:]
 
-            disc_preds = tf.stack(disc_preds, axis=0)[1:]
+            disc_logits = tf.stack(disc_logits, axis=0)[1:]
 
             #: Compute loss terms
             kl_loss = self._compute_kl_loss(z_prior_probs, z_post_probs)
 
             img_log_loss = self._compute_img_log_loss(observations[:-1], img_outs)
 
-            reward_log_loss = self._compute_log_loss(rewards, r_preds, head="reward")
+            reward_log_loss = self._compute_log_loss(rewards, r_means, head="reward")
 
-            discount_log_loss = self._compute_log_loss(discounts, disc_preds, head="discount")
+            discount_log_loss = self._compute_log_loss(discounts, disc_logits, head="discount")
 
             loss = - img_log_loss - reward_log_loss - discount_log_loss + self.config.kl_scale * kl_loss
 
@@ -380,7 +380,6 @@ class DreamerV2Agent:
 
         z, h = tf.reshape(z_init, [L*B, -1]), tf.reshape(h_init, [L*B, -1])
         feats = tf.concat([z, h], axis=-1)
-        #done_init = tf.reshape(done_init, [L*B, -1])
 
         #: s_t, a_t, s_t+1
         trajectory = {"state": [], "action": [], 'next_state': []}
@@ -502,7 +501,7 @@ class DreamerV2Agent:
 
             (h, z_prior, z_prior_probs, z_post,
              z_post_probs, feat, img_out,
-             r_pred, discount_pred) = self.world_model(obs, prev_z, prev_h, prev_a)
+             r_mean, discount_pred) = self.world_model(obs, prev_z, prev_h, prev_a)
 
             action = self.actor.sample_action(feat, 0)
 
@@ -512,7 +511,8 @@ class DreamerV2Agent:
 
             next_obs = self.preprocess_func(next_frame)
 
-            images.append(util.vizualize_vae(obs, img_out.numpy()))
+            img = util.vizualize_vae(obs[0, :, :, 0], img_out.numpy()[0, :, :, 0])
+            images.append(img)
 
             #: Update states
             obs = next_obs
@@ -523,7 +523,7 @@ class DreamerV2Agent:
             episode_rewards += 1
 
         images[0].save(
-            f'{outdir}/{test_id}.gif',
+            f'{outdir}/testplay_{test_id}.gif',
             save_all=True, append_images=images[1:],
             optimize=False, duration=60, loop=0)
 
@@ -531,19 +531,15 @@ class DreamerV2Agent:
 
     def testplay_in_dream(self, test_id, outdir: Path, initial_state=None, H=10):
 
-        images = []
-
-        state = None
+        img_outs = []
 
         prev_z, prev_h = self.world_model.get_initial_state(batch_size=1)
 
         prev_a = tf.one_hot([0], self.action_space)
 
-        score = 0
-
         actions, rewards, discounts = [], [], []
 
-        for i in range(H):
+        for i in range(H+1):
 
             if i == 0:
                 env = gym.make(self.env_id)
@@ -552,34 +548,55 @@ class DreamerV2Agent:
 
                 (h, z_prior, z_prior_probs, z_post,
                  z_post_probs, feat, img_out,
-                 r_pred, discount_pred) = self.world_model(obs, prev_z, prev_h, prev_a)
+                 r_mean, disc_logit) = self.world_model(obs, prev_z, prev_h, prev_a)
+
+                discount_pred = tfd.Bernoulli(logits=disc_logit).mean()
+
+                img_out = obs[0, :, :, 0]
+
+                z = z_post
+
+                action = 1  #: 0: NOOP, 1:FIRE, 2: LEFT 3: RIGHT
 
             else:
-                pass
+                h = self.world_model.step_h(prev_z, prev_h, prev_a)
 
-            action = self.actor.sample_action(feat, 0)
-            rewards.append(r_pred)
-            discounts.append(discount_pred)
+                z, _ = self.world_model.rssm.sample_z_prior(h)
 
-            next_state = step_h
+                z = tf.reshape(z, [1, -1])
 
-            actions.append(action)
+                feat = tf.concat([z, h], axis=-1)
+
+                img_out = self.world_model.decoder(feat)
+
+                img_out = img_out.numpy()[0, :, :, 0]
+
+                r_mean = self.world_model.reward_head(feat)
+
+                disc_logit = self.world_model.discount_head(feat)
+
+                discount_pred = tfd.Bernoulli(logits=disc_logit).mean()
+
+                action = self.actor.sample_action(feat, 0)
 
             action_onehot = tf.one_hot([action], self.action_space)
 
-            images.append(util.vizualize_dream(obs, img_out.numpy()))
+            actions.append(int(action))
 
-            #: update states
-            obs = next_obs
-            prev_z, prev_h, prev_a = z_prior, h, action_onehot
+            rewards.append(float(r_mean))
 
-        else:
-            pass
+            discounts.append(float(discount_pred))
 
+            img_outs.append(img_out)
+
+            prev_z, prev_h, prev_a = z, h, action_onehot
+
+        img_outs, actions, rewards, discounts = img_outs[:-1], actions[:-1], rewards[1:], discounts[1:]
+        images = util.visualize_dream(img_outs, actions, rewards, discounts)
         images[0].save(
-            f'{outdir}/{test_id}.gif',
+            f'{outdir}/test_in_dream_{test_id}.gif',
             save_all=True, append_images=images[1:],
-            optimize=False, duration=60, loop=0)
+            optimize=False, duration=1000, loop=0)
 
 
 def main():
@@ -590,7 +607,7 @@ def main():
     logdir.mkdir()
 
     videodir = Path("./video")
-    if logdir.exists():
+    if videodir.exists():
         shutil.rmtree(videodir)
     videodir.mkdir()
 
@@ -602,7 +619,7 @@ def main():
 
     init_episodes = 2
 
-    test_interval = 20
+    test_interval = 100
 
     n = 0
 
@@ -616,9 +633,8 @@ def main():
         print()
 
         if n % test_interval == 0:
-        #if training & (n % test_interval == 0):
-            steps, score = agent.testplay(n, videodir)
             agent.testplay_in_dream(n, videodir)
+            steps, score = agent.testplay(n, videodir)
             print("=="*4)
             print(f"Test: {steps}steps {score}")
             print("=="*4)

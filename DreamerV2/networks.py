@@ -43,11 +43,11 @@ class WorldModel(tf.keras.Model):
         feat = tf.concat([z_post, h], axis=-1)
 
         img_decoded = self.decoder(feat)
-        reward = self.reward_head(feat)
-        discount = self.discount_head(feat)
+        reward_mean = self.reward_head(feat)
+        discount_logit = self.discount_head(feat)
 
         return (h, z_prior, z_prior_probs, z_post, z_post_probs,
-                feat, img_decoded, reward, discount)
+                feat, img_decoded, reward_mean, discount_logit)
 
     def get_initial_state(self, batch_size):
         z_init = tf.zeros([batch_size, self.latent_dim, self.n_atoms])

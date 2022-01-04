@@ -18,23 +18,33 @@ def _preprocess_breakout(frame):
     return image_out.astype(np.float32)
 
 
+def get_font(size="regular"):
+    if size == "regular":
+        fontsize = 18
+    elif size == "small":
+        fontsize = 12
+    else:
+        raise NotImplementedError(size)
+
+    return ImageFont.truetype("arial.ttf", fontsize)
+
+
 def vizualize_vae(img_in, img_out):
     """
         img_in: (64, 64, 1)
         img_out: (64, 64, 1)
     """
-    assert img_in.shape == (1, 64, 64, 1)
-    assert img_out.shape == (1, 64, 64, 1)
+    assert img_in.shape == (64, 64)
+    assert img_out.shape == (64, 64)
 
-    img_in = Image.fromarray(img_in[0, :, :, 0] * 255).resize((192, 192))
-    img_out = Image.fromarray(img_out[0, :, :, 0] * 255).resize((192, 192))
+    img_in = Image.fromarray(img_in * 255).resize((192, 192))
+    img_out = Image.fromarray(img_out * 255).resize((192, 192))
 
     pl, pr = 15, 15
     pt, pb = 60, 30
 
     canvas = Image.new('RGB', (pl+192+pr+192+pr, pt+192+pb), color="black")
-    fnt = ImageFont.truetype("arial.ttf", 18)
-    fnt_sm = ImageFont.truetype("arial.ttf", 12)
+    fnt = get_font()
 
     canvas.paste(img_in, (pl, pt))
     canvas.paste(img_out, (pl+192+pr, pt))
@@ -46,8 +56,35 @@ def vizualize_vae(img_in, img_out):
     return canvas
 
 
-def visualize_dream():
-    return None
+def visualize_dream(img_outs, actions, rewards, discounts):
+
+    #: actions of Breakout
+    action_dict = {0: "NoOp", 1: "FIRE", 2: "LEFT", 3: "RIGHT"}
+
+    fnt = get_font()
+
+    images = []
+
+    pl, pr = 15, 15
+    pt, pb = 30, 30
+
+    for i, img in enumerate(img_outs):
+
+        canvas = Image.new('RGB', (pl+192+pr+100+pr, pt+192+pb), color="black")
+
+        frame = Image.fromarray(img * 255).resize((192, 192))
+        canvas.paste(frame, (pl, pt))
+
+        desc = Image.new('RGB', (100, pt+192+pb), color="black")
+        draw = ImageDraw.Draw(desc)
+        draw.text((0, 30), f"A: {action_dict[actions[i]]}", font=fnt, fill="white")
+        draw.text((0, 50), f"R: {round(rewards[i], 2)}", font=fnt, fill="white")
+        draw.text((0, 70), f"γ: {round(discounts[i], 2)}", font=fnt, fill="white")
+        canvas.paste(desc, (pl+192+pr, pt))
+
+        images.append(canvas)
+
+    return images
 
 
 class Timer:
