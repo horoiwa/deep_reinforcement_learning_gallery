@@ -1,6 +1,9 @@
 import time
+import os
+
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+
 
 def get_preprocess_func(env_name):
     if "Breakout" in env_name:
@@ -26,7 +29,11 @@ def get_font(size="regular"):
     else:
         raise NotImplementedError(size)
 
-    return ImageFont.truetype("arial.ttf", fontsize)
+    if os.name == 'posix':
+        fontpath = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+        return ImageFont.truetype(fontpath, fontsize)
+    elif os.name == 'nt':
+        return ImageFont.truetype("arial.ttf", fontsize)
 
 
 def vizualize_vae(img_in, img_out):

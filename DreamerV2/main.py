@@ -77,6 +77,13 @@ class DreamerV2Agent:
 
         self.global_steps = 0
 
+    def setup(self):
+        pass
+
+    def get_weights(self):
+        return (self.world_model.get_weights(),
+                self.policy.get_weights(), self.critic.get_weights())
+
     def save(self, savedir=None):
         savedir = Path(savedir) if savedir is not None else Path("./checkpoints")
         self.world_model.save_weights(str(savedir / "worldmodel"))
@@ -84,7 +91,7 @@ class DreamerV2Agent:
         self.critic.save_weights(str(savedir / "critic"))
 
     def load(self, loaddir=None):
-        savedir = Path(loaddir) if loaddir is not None else Path("checkpoints")
+        loaddir = Path(loaddir) if loaddir is not None else Path("checkpoints")
         self.world_model.load_weights(str(loaddir / "worldmodel"))
         self.actor.load_weights(str(loaddir / "actor"))
         self.critic.load_weights(str(loaddir / "critic"))
@@ -165,13 +172,13 @@ class DreamerV2Agent:
 
     def update_networks(self):
 
-            minibatch = self.buffer.get_minibatch()
+        minibatch = self.buffer.get_minibatch()
 
-            z_posts, hs = self.update_worldmodel(minibatch)
+        z_posts, hs = self.update_worldmodel(minibatch)
 
-            trajectory_in_dream = self.rollout_in_dream(z_posts, hs)
+        trajectory_in_dream = self.rollout_in_dream(z_posts, hs)
 
-            self.update_actor_critic(trajectory_in_dream)
+        self.update_actor_critic(trajectory_in_dream)
 
     def update_worldmodel(self, minibatch):
         """
@@ -610,19 +617,23 @@ class DreamerV2Agent:
             optimize=False, duration=1000, loop=0)
 
 
-def main():
+def main(resume=None):
+    """ resume: Dict(n: int, global_steps: int)
+    """
 
-    logdir = Path("./log")
-    if logdir.exists():
-        shutil.rmtree(logdir)
-    logdir.mkdir()
+    if resume is None:
 
-    summary_writer = tf.summary.create_file_writer(str(logdir))
+        logdir = Path("./log")
+        if logdir.exists():
+            shutil.rmtree(logdir)
+        logdir.mkdir()
 
-    videodir = Path("./video")
-    if videodir.exists():
-        shutil.rmtree(videodir)
-    videodir.mkdir()
+        summary_writer = tf.summary.create_file_writer(str(logdir))
+
+        videodir = Path("./video")
+        if videodir.exists():
+            shutil.rmtree(videodir)
+        videodir.mkdir()
 
     env_id = "BreakoutDeterministic-v4"
 
@@ -632,11 +643,16 @@ def main():
         env_id=env_id, config=config, summary_writer=summary_writer
         )
 
-    init_episodes = 90
+    init_episodes = 100
 
     test_interval = 100
 
     n = 0
+
+    if resume:
+        n = resume["n"]
+        agent.global_steps = resume["global_steps"]
+        agent.load("checkpoints")
 
     while n < 10000:
 
