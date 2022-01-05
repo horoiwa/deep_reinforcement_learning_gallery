@@ -77,8 +77,20 @@ class DreamerV2Agent:
 
         self.global_steps = 0
 
+        self.setup()
+
     def setup(self):
-        pass
+        """ Build network weights """
+        env = gym.make(self.env_id)
+        obs = self.preprocess_func(env.reset())
+        prev_z, prev_h = self.world_model.get_initial_state(batch_size=1)
+        prev_a = tf.one_hot([0], self.action_space)
+        _outputs = self.world_model(obs, prev_z, prev_h, prev_a)
+        (h, z_prior, z_prior_prob, z_post, z_post_prob,
+         feat, img_out, reward_pred, disc_logit) = _outputs
+        self.actor(feat)
+        self.critic(feat)
+        self.target_critic(feat)
 
     def get_weights(self):
         return (self.world_model.get_weights(),
@@ -540,6 +552,12 @@ class DreamerV2Agent:
             episode_steps += 1
             episode_rewards += 1
 
+            #: avoiding agent freeze
+            if episode_steps > 300 and episode_rewards < 2:
+                break
+            elif episode_steps > 1000 and episode_rewards < 10:
+                break
+
         images[0].save(
             f'{outdir}/testplay_{test_id}.gif',
             save_all=True, append_images=images[1:],
@@ -651,9 +669,11 @@ def main(resume=None):
     n = 0
 
     if resume:
-        n = resume["n"]
-        agent.global_steps = resume["global_steps"]
+        n = int(resume["n"])
+        init_episodes += n
+        agent.global_steps = int(resume["global_steps"])
         agent.load("checkpoints")
+        print("== Load weights ==")
 
     while n < 10000:
 
@@ -679,6 +699,7 @@ def main(resume=None):
 
         if n % 50 == 0:
             agent.save()
+            print("== Save weights ==")
 
         n += 1
 
