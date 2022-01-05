@@ -558,8 +558,6 @@ class DreamerV2Agent:
 
             images.append(img)
 
-            import pdb; pdb.set_trace()
-
             #: Update states
             obs = next_obs
 
