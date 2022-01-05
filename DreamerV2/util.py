@@ -90,7 +90,7 @@ def visualize_dream(img_outs, actions, rewards, discounts):
         frame = Image.fromarray(img * 255).resize((192, 192))
         canvas.paste(frame, (pl, pt))
 
-        desc = Image.new('RGB', (100, pt+192+pb), color="black")
+        desc = Image.new('RGB', (160, pt+192+pb), color="black")
         draw = ImageDraw.Draw(desc)
         draw.text((0, 30), f"A: {action_dict[actions[i]]}", font=fnt, fill="white")
         draw.text((0, 50), f"R_pred: {round(rewards[i], 2)}", font=fnt, fill="white")
