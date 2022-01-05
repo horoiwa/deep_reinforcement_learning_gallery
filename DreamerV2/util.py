@@ -36,7 +36,7 @@ def get_font(size="regular"):
         return ImageFont.truetype("arial.ttf", fontsize)
 
 
-def vizualize_vae(img_in, img_out):
+def vizualize_vae(img_in, img_out, r, disc):
     """
         img_in: (64, 64, 1)
         img_out: (64, 64, 1)
@@ -50,7 +50,7 @@ def vizualize_vae(img_in, img_out):
     pl, pr = 15, 15
     pt, pb = 60, 30
 
-    canvas = Image.new('RGB', (pl+192+pr+192+pr, pt+192+pb), color="black")
+    canvas = Image.new('RGB', (pl+192+pr+192+pr+120+pr, pt+192+pb), color="black")
     fnt = get_font()
 
     canvas.paste(img_in, (pl, pt))
@@ -59,6 +59,14 @@ def vizualize_vae(img_in, img_out):
     draw = ImageDraw.Draw(canvas)
     draw.text((pl, 30), "Original image", font=fnt, fill="white")
     draw.text((pl+192+pr, 30), "Reconstructed image", font=fnt, fill="white")
+
+    r = round(r, 2)
+    disc = round(disc, 2)
+
+    draw.text((pl+192+pr+192+pr, 50),
+              f"R_pred: {r}", font=fnt, fill="white")
+    draw.text((pl+192+pr+192+pr, 70),
+              f"γ_pred: {disc}", font=fnt, fill="white")
 
     return canvas
 
@@ -77,7 +85,7 @@ def visualize_dream(img_outs, actions, rewards, discounts):
 
     for i, img in enumerate(img_outs):
 
-        canvas = Image.new('RGB', (pl+192+pr+100+pr, pt+192+pb), color="black")
+        canvas = Image.new('RGB', (pl+192+pr+120+pr, pt+192+pb), color="black")
 
         frame = Image.fromarray(img * 255).resize((192, 192))
         canvas.paste(frame, (pl, pt))
@@ -85,8 +93,8 @@ def visualize_dream(img_outs, actions, rewards, discounts):
         desc = Image.new('RGB', (100, pt+192+pb), color="black")
         draw = ImageDraw.Draw(desc)
         draw.text((0, 30), f"A: {action_dict[actions[i]]}", font=fnt, fill="white")
-        draw.text((0, 50), f"R: {round(rewards[i], 2)}", font=fnt, fill="white")
-        draw.text((0, 70), f"γ: {round(discounts[i], 2)}", font=fnt, fill="white")
+        draw.text((0, 50), f"R_pred: {round(rewards[i], 2)}", font=fnt, fill="white")
+        draw.text((0, 70), f"γ_pred: {round(discounts[i], 2)}", font=fnt, fill="white")
 
         draw.text((0, 110), f"Time: {i}", font=fnt, fill="white")
         canvas.paste(desc, (pl+192+pr, pt))

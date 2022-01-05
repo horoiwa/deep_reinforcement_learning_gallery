@@ -522,7 +522,7 @@ class DreamerV2Agent:
 
     def testplay(self, test_id, outdir: Path):
 
-        images = []
+        images, rewards, discounts = [], [], []
 
         env = gym.make(self.env_id)
 
@@ -540,7 +540,7 @@ class DreamerV2Agent:
 
             (h, z_prior, z_prior_probs, z_post,
              z_post_probs, feat, img_out,
-             r_mean, discount_pred) = self.world_model(obs, prev_z, prev_h, prev_a)
+             r_mean, discount_logit) = self.world_model(obs, prev_z, prev_h, prev_a)
 
             action = self.actor.sample_action(feat, 0)
 
@@ -550,8 +550,14 @@ class DreamerV2Agent:
 
             next_obs = self.preprocess_func(next_frame)
 
-            img = util.vizualize_vae(obs[0, :, :, 0], img_out.numpy()[0, :, :, 0])
+            disc = tfd.Bernoulli(logits=discount_logit).mean()
+
+            img = util.vizualize_vae(
+                obs[0, :, :, 0], img_out.numpy()[0, :, :, 0], float(r_mean), float(disc))
+
             images.append(img)
+
+            import pdb; pdb.set_trace()
 
             #: Update states
             obs = next_obs
@@ -574,7 +580,7 @@ class DreamerV2Agent:
 
         return episode_steps, episode_rewards
 
-    def testplay_in_dream(self, test_id, outdir: Path, initial_state=None, H=10):
+    def testplay_in_dream(self, test_id, outdir: Path, H):
 
         img_outs = []
 
@@ -672,7 +678,7 @@ def main(resume=None):
         env_id=env_id, config=config, summary_writer=summary_writer
         )
 
-    init_episodes = 10
+    init_episodes = 30
 
     test_interval = 100
 
