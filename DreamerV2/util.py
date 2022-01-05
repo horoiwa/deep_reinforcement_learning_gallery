@@ -57,8 +57,8 @@ def vizualize_vae(img_in, img_out):
     canvas.paste(img_out, (pl+192+pr, pt))
 
     draw = ImageDraw.Draw(canvas)
-    draw.text((pl, 30), f"Original image", font=fnt, fill="white")
-    draw.text((pl+192+pr, 30), f"Reconstructed image", font=fnt, fill="white")
+    draw.text((pl, 30), "Original image", font=fnt, fill="white")
+    draw.text((pl+192+pr, 30), "Reconstructed image", font=fnt, fill="white")
 
     return canvas
 
@@ -66,7 +66,7 @@ def vizualize_vae(img_in, img_out):
 def visualize_dream(img_outs, actions, rewards, discounts):
 
     #: actions of Breakout
-    action_dict = {0: "NoOp", 1: "FIRE", 2: "LEFT", 3: "RIGHT"}
+    action_dict = {0: "NoOp", 1: "FIRE", 2: "RIGHT", 3: "LEFT"}
 
     fnt = get_font()
 
@@ -87,6 +87,8 @@ def visualize_dream(img_outs, actions, rewards, discounts):
         draw.text((0, 30), f"A: {action_dict[actions[i]]}", font=fnt, fill="white")
         draw.text((0, 50), f"R: {round(rewards[i], 2)}", font=fnt, fill="white")
         draw.text((0, 70), f"γ: {round(discounts[i], 2)}", font=fnt, fill="white")
+
+        draw.text((0, 110), f"Time: {i}", font=fnt, fill="white")
         canvas.paste(desc, (pl+192+pr, pt))
 
         images.append(canvas)

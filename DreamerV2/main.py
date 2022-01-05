@@ -300,6 +300,7 @@ class DreamerV2Agent:
             tf.summary.scalar("reward_log_loss", -reward_log_loss, step=self.global_steps)
             tf.summary.scalar("discount_log_loss", -discount_log_loss, step=self.global_steps)
             tf.summary.scalar("kl_loss", kl_loss, step=self.global_steps)
+            tf.summary.scalar("eps", self.epsilon, step=self.global_steps)
 
         return z_posts, hs
 
@@ -363,15 +364,16 @@ class DreamerV2Agent:
 
         img_out = tf.reshape(img_out, (L * B, H * W * C))
 
-        dist = tfd.Independent(tfd.Normal(loc=img_out, scale=2.))
+        dist = tfd.Independent(tfd.Normal(loc=img_out, scale=1.))
 
         log_prob = dist.log_prob(img_in)
 
         loss = tf.reduce_mean(log_prob)
 
+        loss = img_in
+
         return loss
 
-    @tf.function
     def _compute_log_loss(self, y_true, y_pred, head):
         """
         Inputs:
@@ -457,6 +459,10 @@ class DreamerV2Agent:
         states = trajectory['state'][0]
         actions = trajectory['action'][0]
 
+        total_imgaine_rewards = tf.reduce_mean(
+            tf.reduce_sum(trajectory['reward'], axis=1)
+            )
+
         with tf.GradientTape() as tape:
 
             _, action_probs = self.actor(states)
@@ -489,6 +495,7 @@ class DreamerV2Agent:
         with self.summary_writer.as_default():
             tf.summary.scalar("actor_loss", actor_loss, step=self.global_steps)
             tf.summary.scalar("value_loss", value_loss, step=self.global_steps)
+            tf.summary.scalar("imagine_rewards", total_imgaine_rewards, step=self.global_steps)
 
     def compute_GAE(self, states, rewards, next_states, discounts):
         """ HIGH-DIMENSIONAL CONTINUOUS CONTROL USING GENERALIZED ADVANTAGE ESTIMATION
@@ -665,7 +672,7 @@ def main(resume=None):
         env_id=env_id, config=config, summary_writer=summary_writer
         )
 
-    init_episodes = 100
+    init_episodes = 10
 
     test_interval = 100
 
@@ -691,10 +698,11 @@ def main(resume=None):
         print()
 
         if n % test_interval == 0:
-            agent.testplay_in_dream(n, videodir)
+            agent.testplay_in_dream(n, videodir, H=20)
             steps, score = agent.testplay(n, videodir)
 
             with summary_writer.as_default():
+                tf.summary.scalar("test_steps", steps, step=global_steps)
                 tf.summary.scalar("test_score", score, step=global_steps)
 
             print(f"Test: {steps}steps {score}")
@@ -708,5 +716,5 @@ def main(resume=None):
 
 if __name__ == "__main__":
     resume = None
-    #resume = {"n": 280, "global_steps":54000}
+    #resume = {"n": 280, "global_steps": 54000}
     main(resume)
