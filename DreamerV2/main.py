@@ -371,8 +371,6 @@ class DreamerV2Agent:
 
         loss = tf.reduce_mean(log_prob)
 
-        loss = img_in
-
         return loss
 
     def _compute_log_loss(self, y_true, y_pred, head):
@@ -523,7 +521,7 @@ class DreamerV2Agent:
 
     def testplay(self, test_id, outdir: Path):
 
-        images, rewards, discounts = [], [], []
+        images = []
 
         env = gym.make(self.env_id)
 
