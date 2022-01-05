@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 import shutil
+import random
 
 import tensorflow as tf
 import tensorflow_probability as tfp
@@ -31,7 +32,7 @@ class Config:
     n_atoms: int = 32              # discrete latent classes
     lr_world: float = 2e-4         # learning rate of world model
 
-    imagination_horizon: int = 5   # Imagination horizon, H
+    imagination_horizon: int = 8   # Imagination horizon, H
     gamma_discount: float = 0.995   # discount factor γ
     lambda_gae: float = 0.95       # λ for Generalized advantage estimator
     entropy_scale: float = 1e-3    # entropy loss scale
@@ -590,12 +591,15 @@ class DreamerV2Agent:
 
         actions, rewards, discounts = [], [], []
 
-        for i in range(H+1):
+        env = gym.make(self.env_id)
 
-            if i == 0:
-                env = gym.make(self.env_id)
+        obs = self.preprocess_func(env.reset())
 
-                obs = self.preprocess_func(env.reset())
+        N = random.randint(2, 10)
+
+        for i in range(N+H+1):
+
+            if i < N:
 
                 (h, z_prior, z_prior_probs, z_post,
                  z_post_probs, feat, img_out,
@@ -605,9 +609,13 @@ class DreamerV2Agent:
 
                 img_out = obs[0, :, :, 0]
 
-                z = z_post
+                action = 1 if i == 0 else self.actor.sample_action(feat, 0)
 
-                action = 1  #: 0: NOOP, 1:FIRE, 2: LEFT 3: RIGHT
+                next_frame, reward, done, info = env.step(action)
+
+                obs = self.preprocess_func(next_frame)
+
+                z = z_post
 
             else:
                 h = self.world_model.step_h(prev_z, prev_h, prev_a)
@@ -630,15 +638,15 @@ class DreamerV2Agent:
 
                 action = self.actor.sample_action(feat, 0)
 
+                actions.append(int(action))
+
+                rewards.append(float(r_mean))
+
+                discounts.append(float(discount_pred))
+
+                img_outs.append(img_out)
+
             action_onehot = tf.one_hot([action], self.action_space)
-
-            actions.append(int(action))
-
-            rewards.append(float(r_mean))
-
-            discounts.append(float(discount_pred))
-
-            img_outs.append(img_out)
 
             prev_z, prev_h, prev_a = z, h, action_onehot
 
