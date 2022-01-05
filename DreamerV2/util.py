@@ -85,7 +85,7 @@ def visualize_dream(img_outs, actions, rewards, discounts):
 
     for i, img in enumerate(img_outs):
 
-        canvas = Image.new('RGB', (pl+192+pr+120+pr, pt+192+pb), color="black")
+        canvas = Image.new('RGB', (pl+192+pr+160+pr, pt+192+pb), color="black")
 
         frame = Image.fromarray(img * 255).resize((192, 192))
         canvas.paste(frame, (pl, pt))
