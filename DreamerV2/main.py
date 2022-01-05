@@ -642,7 +642,6 @@ def main(resume=None):
     """
 
     logdir = Path("./log")
-    summary_writer = tf.summary.create_file_writer(str(logdir))
 
     videodir = Path("./video")
 
@@ -655,6 +654,8 @@ def main(resume=None):
         if videodir.exists():
             shutil.rmtree(videodir)
         videodir.mkdir()
+
+    summary_writer = tf.summary.create_file_writer(str(logdir))
 
     env_id = "BreakoutDeterministic-v4"
 
@@ -707,5 +708,5 @@ def main(resume=None):
 
 if __name__ == "__main__":
     resume = None
-    resume = {"n": 280, "global_steps":54000}
+    #resume = {"n": 280, "global_steps":54000}
     main(resume)
