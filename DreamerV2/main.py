@@ -660,12 +660,15 @@ def main(resume=None):
 
         steps, score, global_steps = agent.rollout(training)
 
+        with summary_writer.as_default():
+            tf.summary.scalar("train_score", score, step=global_steps)
+
         print(f"Episode {n}: {steps}steps {score}")
         print()
 
         if n % test_interval == 0:
             agent.testplay_in_dream(n, videodir)
-            steps, score = agent.testplay(n, videodir)
+            score, steps = agent.testplay(n, videodir)
 
             with summary_writer.as_default():
                 tf.summary.scalar("test_score", score, step=global_steps)
@@ -673,10 +676,12 @@ def main(resume=None):
             print(f"Test: {steps}steps {score}")
             print()
 
-        if n % 100 == 0:
+        if n % 50 == 0:
             agent.save()
 
         n += 1
 
 if __name__ == "__main__":
-    main()
+    resume = None
+    #resume = {"n": 280, "global_steps":54000}
+    main(resume)
