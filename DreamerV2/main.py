@@ -621,16 +621,17 @@ def main(resume=None):
     """ resume: Dict(n: int, global_steps: int)
     """
 
+    logdir = Path("./log")
+    summary_writer = tf.summary.create_file_writer(str(logdir))
+
+    videodir = Path("./video")
+
     if resume is None:
 
-        logdir = Path("./log")
         if logdir.exists():
             shutil.rmtree(logdir)
         logdir.mkdir()
 
-        summary_writer = tf.summary.create_file_writer(str(logdir))
-
-        videodir = Path("./video")
         if videodir.exists():
             shutil.rmtree(videodir)
         videodir.mkdir()
@@ -683,5 +684,5 @@ def main(resume=None):
 
 if __name__ == "__main__":
     resume = None
-    #resume = {"n": 280, "global_steps":54000}
+    resume = {"n": 280, "global_steps":54000}
     main(resume)
