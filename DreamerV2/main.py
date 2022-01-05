@@ -550,7 +550,7 @@ class DreamerV2Agent:
             prev_z, prev_h, prev_a = z_post, h, action_onehot
 
             episode_steps += 1
-            episode_rewards += 1
+            episode_rewards += reward
 
             #: avoiding agent freeze
             if episode_steps > 300 and episode_rewards < 2:
@@ -689,7 +689,7 @@ def main(resume=None):
 
         if n % test_interval == 0:
             agent.testplay_in_dream(n, videodir)
-            score, steps = agent.testplay(n, videodir)
+            steps, score = agent.testplay(n, videodir)
 
             with summary_writer.as_default():
                 tf.summary.scalar("test_score", score, step=global_steps)
