@@ -91,6 +91,7 @@ class DreamerV2Agent:
         self.actor(feat)
         self.critic(feat)
         self.target_critic(feat)
+        self.target_critic.set_weights(self.critic.get_weights())
 
     def get_weights(self):
         return (self.world_model.get_weights(),
@@ -107,6 +108,7 @@ class DreamerV2Agent:
         self.world_model.load_weights(str(loaddir / "worldmodel"))
         self.actor.load_weights(str(loaddir / "actor"))
         self.critic.load_weights(str(loaddir / "critic"))
+        self.target_critic.load_weights(str(loaddir / "critic"))
 
     @property
     def epsilon(self):
