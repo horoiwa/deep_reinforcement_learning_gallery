@@ -35,7 +35,8 @@ class Config:
     imagination_horizon: int = 8   # Imagination horizon, H
     gamma_discount: float = 0.995   # discount factor γ
     lambda_gae: float = 0.95       # λ for Generalized advantage estimator
-    entropy_scale: float = 1e-3    # entropy loss scale
+    #entropy_scale: float = 1e-3    # entropy loss scale
+    entropy_scale: float = 1e-1    # entropy loss scale
     lr_actor: float = 4e-5
     lr_critic: float = 1e-4
 
@@ -113,7 +114,7 @@ class DreamerV2Agent:
 
     @property
     def epsilon(self):
-        eps = max(0.0, 0.6 * (self.config.anneal_stpes - self.global_steps) / self.config.anneal_stpes)
+        eps = max(0.05, 0.6 * (self.config.anneal_stpes - self.global_steps) / self.config.anneal_stpes)
         return eps
 
     def rollout(self, training: bool):
@@ -475,7 +476,7 @@ class DreamerV2Agent:
                 reinterpreted_batch_ndims=0)
             ent = dist.entropy()
 
-            actor_loss = -1 * objective + self.config.ent_scale * ent
+            actor_loss = -1 * objective + self.config.ent_scale * -1 * ent
             actor_loss = tf.reduce_mean(actor_loss)
 
         grads = tape.gradient(actor_loss, self.actor.trainable_variables)
@@ -493,7 +494,8 @@ class DreamerV2Agent:
 
         with self.summary_writer.as_default():
             tf.summary.scalar("actor_loss", actor_loss, step=self.global_steps)
-            tf.summary.scalar("value_loss", value_loss, step=self.global_steps)
+            tf.summary.scalar("actor_entropy", -tf.reduce_mean(ent), step=self.global_steps)
+            tf.summary.scalar("value_loss", ent, step=self.global_steps)
             tf.summary.scalar("imagine_rewards", total_imgaine_rewards, step=self.global_steps)
 
     def compute_GAE(self, states, rewards, next_states, discounts):
@@ -698,9 +700,6 @@ def main(resume=None):
         agent.load("checkpoints")
         print("== Load weights ==")
 
-    agent.testplay_in_dream(n, videodir, H=20)
-    steps, score = agent.testplay(n, videodir)
-
     while n < 10000:
 
         training = n > init_episodes
@@ -731,6 +730,6 @@ def main(resume=None):
         n += 1
 
 if __name__ == "__main__":
-    #resume = None
-    resume = {"n": 280, "global_steps": 54000}
+    resume = None
+    #resume = {"n": 280, "global_steps": 54000}
     main(resume)
