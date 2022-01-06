@@ -383,7 +383,7 @@ class DreamerV2Agent:
 
         if head == "reward":
             dist = tfd.Independent(
-                tfd.Normal(loc=y_pred, scale=1.), reinterpreted_batch_ndims=1
+                tfd.Normal(loc=y_pred, scale=.1), reinterpreted_batch_ndims=1
                 )
         elif head == "discount":
             dist = tfd.Independent(
@@ -541,7 +541,10 @@ class DreamerV2Agent:
              z_post_probs, feat, img_out,
              r_mean, discount_logit) = self.world_model(obs, prev_z, prev_h, prev_a)
 
-            action = self.actor.sample_action(feat, 0)
+            if episode_steps == 0:
+                action = 1
+            else:
+                action = self.actor.sample_action(feat, 0)
 
             action_onehot = tf.one_hot([action], self.action_space)
 
@@ -695,6 +698,9 @@ def main(resume=None):
         agent.load("checkpoints")
         print("== Load weights ==")
 
+    agent.testplay_in_dream(n, videodir, H=20)
+    steps, score = agent.testplay(n, videodir)
+
     while n < 10000:
 
         training = n > init_episodes
@@ -725,6 +731,6 @@ def main(resume=None):
         n += 1
 
 if __name__ == "__main__":
-    resume = None
-    #resume = {"n": 280, "global_steps": 54000}
+    #resume = None
+    resume = {"n": 280, "global_steps": 54000}
     main(resume)
