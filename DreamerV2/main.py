@@ -495,7 +495,7 @@ class DreamerV2Agent:
         with self.summary_writer.as_default():
             tf.summary.scalar("actor_loss", actor_loss, step=self.global_steps)
             tf.summary.scalar("actor_entropy", -tf.reduce_mean(ent), step=self.global_steps)
-            tf.summary.scalar("value_loss", ent, step=self.global_steps)
+            tf.summary.scalar("value_loss", value_loss, step=self.global_steps)
             tf.summary.scalar("imagine_rewards", total_imgaine_rewards, step=self.global_steps)
 
     def compute_GAE(self, states, rewards, next_states, discounts):
