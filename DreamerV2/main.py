@@ -17,13 +17,13 @@ import util
 @dataclass
 class Config:
 
-    batch_size: int = 32           # Batch size, B
+    batch_size: int = 10           # Batch size, B
     sequence_length: int = 10      # Sequence Lenght, L
     buffer_size: int = int(1e6)    # Replay buffer size (FIFO)
     gamma: float = 0.997
     anneal_stpes: int = 500000
-    update_period: int = 12
-    target_update_period: int = 1600
+    update_period: int = 8
+    target_update_period: int = 1200
 
     kl_scale: float = 0.1     # KL loss scale, β
     kl_alpha: float = 0.8          # KL balancing
@@ -147,8 +147,9 @@ class DreamerV2Agent:
 
             next_obs = self.preprocess_func(next_frame)
 
-            #: Reward clipping by tanh
-            _reward = math.tanh(reward)
+            #: Note: DreamerV2 paper uses tanh clipping
+            #: But simple max-clipping works well for Breakout
+            _reward = max(1.0, reward)
 
             #: Life loss as episode end
             if info["ale.lives"] != lives:
@@ -531,6 +532,8 @@ class DreamerV2Agent:
 
         episode_steps, episode_rewards = 0, 0
 
+        r_pred_total = 0.
+
         prev_z, prev_h = self.world_model.get_initial_state(batch_size=1)
 
         prev_a = tf.one_hot([0], self.action_space)
@@ -556,8 +559,11 @@ class DreamerV2Agent:
 
             disc = tfd.Bernoulli(logits=discount_logit).mean()
 
+            r_pred_total += float(r_mean)
+
             img = util.vizualize_vae(
-                obs[0, :, :, 0], img_out.numpy()[0, :, :, 0], float(r_mean), float(disc))
+                obs[0, :, :, 0], img_out.numpy()[0, :, :, 0],
+                float(r_mean), float(disc), r_pred_total)
 
             images.append(img)
 
@@ -578,7 +584,7 @@ class DreamerV2Agent:
         images[0].save(
             f'{outdir}/testplay_{test_id}.gif',
             save_all=True, append_images=images[1:],
-            optimize=False, duration=60, loop=0)
+            optimize=False, duration=120, loop=0)
 
         return episode_steps, episode_rewards
 
@@ -689,7 +695,7 @@ def main(resume=None):
 
     init_episodes = 30
 
-    test_interval = 100
+    test_interval = 50
 
     n = 0
 

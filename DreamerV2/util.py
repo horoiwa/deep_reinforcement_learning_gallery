@@ -42,7 +42,7 @@ def get_font(size="regular"):
         return ImageFont.truetype("arial.ttf", fontsize)
 
 
-def vizualize_vae(img_in, img_out, r, disc):
+def vizualize_vae(img_in, img_out, r, disc, r_total):
     """
         img_in: (64, 64, 1)
         img_out: (64, 64, 1)
@@ -68,11 +68,15 @@ def vizualize_vae(img_in, img_out, r, disc):
 
     r = round(r, 2)
     disc = round(disc, 2)
+    r_total = round(r_total, 2)
 
     draw.text((pl+192+pr+192+pr, 50),
               f"R_pred: {r}", font=fnt, fill="white")
     draw.text((pl+192+pr+192+pr, 70),
               f"γ_pred: {disc}", font=fnt, fill="white")
+
+    draw.text((pl+192+pr+192+pr, 1100),
+              f"Rtotal: {r_total}", font=fnt, fill="white")
 
     return canvas
 
