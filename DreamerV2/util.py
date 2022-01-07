@@ -14,11 +14,11 @@ def get_preprocess_func(env_name):
 
 
 def _preprocess_breakout(frame):
-    th = 40.
+    th = 10.
     image = Image.fromarray(frame)
     image = image.convert("L").crop((0, 34, 160, 200)).resize((64, 64))
     #enc = ImageEnhance.Contrast(image)
-    #image = enc.enhance(1.2)
+    #image = enc.enhance(1.5)
     image = np.array(image)
     image[image >= th] = 255.
     image[image < th] = 0.
@@ -75,7 +75,7 @@ def vizualize_vae(img_in, img_out, r, disc, r_total):
     draw.text((pl+192+pr+192+pr, 70),
               f"γ_pred: {disc}", font=fnt, fill="white")
 
-    draw.text((pl+192+pr+192+pr, 1100),
+    draw.text((pl+192+pr+192+pr, 110),
               f"Rtotal: {r_total}", font=fnt, fill="white")
 
     return canvas
