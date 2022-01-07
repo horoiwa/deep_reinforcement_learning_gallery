@@ -23,7 +23,7 @@ class Config:
     gamma: float = 0.997
     anneal_stpes: int = 500000
     update_period: int = 12
-    target_update_period: int = 1200
+    target_update_period: int = 1600
 
     kl_scale: float = 0.1     # KL loss scale, β
     kl_alpha: float = 0.8          # KL balancing
@@ -700,6 +700,7 @@ def main(resume=None):
         agent.load("checkpoints")
         print("== Load weights ==")
 
+    steps, score = agent.testplay(n, videodir)
     while n < 10000:
 
         training = n > init_episodes
