@@ -149,7 +149,7 @@ class DreamerV2Agent:
 
             #: Note: DreamerV2 paper uses tanh clipping
             #: But simple max-clipping works well for Breakout
-            _reward = max(1.0, reward)
+            _reward = reward if reward <= 1.0 else 1.0
 
             #: Life loss as episode end
             if info["ale.lives"] != lives:
