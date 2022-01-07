@@ -2,7 +2,7 @@ import time
 import os
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+from PIL import Image, ImageDraw, ImageFont
 
 
 def get_preprocess_func(env_name):
@@ -13,17 +13,16 @@ def get_preprocess_func(env_name):
            f"Frame processor not implemeted for {env_name}")
 
 
-def _preprocess_breakout(frame):
-    th = 10.
+def _preprocess_breakout(frame, th=40.):
+
     image = Image.fromarray(frame)
-    image = image.convert("L").crop((0, 34, 160, 200)).resize((64, 64))
-    #enc = ImageEnhance.Contrast(image)
-    #image = enc.enhance(1.5)
+    image = image.crop((0, 38, 160, 198)).resize((64, 64)).convert("L")
     image = np.array(image)
     image[image >= th] = 255.
     image[image < th] = 0.
     image_scaled = np.array(image) / 255.0
     image_out = image_scaled[np.newaxis, ..., np.newaxis]  #: (1, 64, 64, 1)
+
     return image_out.astype(np.float32)
 
 
