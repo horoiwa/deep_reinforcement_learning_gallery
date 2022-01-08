@@ -49,6 +49,8 @@ def vizualize_vae(img_in, img_out, r, disc, r_total):
     assert img_in.shape == (64, 64)
     assert img_out.shape == (64, 64)
 
+    img_out[img_out > 1.0] = 1.0
+
     img_in = Image.fromarray(img_in * 255).resize((192, 192))
     img_out = Image.fromarray(img_out * 255).resize((192, 192))
 
@@ -96,6 +98,7 @@ def visualize_dream(img_outs, actions, rewards, discounts):
 
         canvas = Image.new('RGB', (pl+192+pr+160+pr, pt+192+pb), color="black")
 
+        img[img > 1.0] = 1.0
         frame = Image.fromarray(img * 255).resize((192, 192))
         canvas.paste(frame, (pl, pt))
 

@@ -18,6 +18,7 @@ import util
 class Config:
 
     batch_size: int = 10           # Batch size, B
+    burnin_lenght: int = 3
     sequence_length: int = 10      # Sequence Lenght, L
     buffer_size: int = int(1e6)    # Replay buffer size (FIFO)
     gamma: float = 0.997
@@ -367,8 +368,8 @@ class DreamerV2Agent:
 
         img_out = tf.reshape(img_out, (L * B, H * W * C))
 
-        #dist = tfd.Independent(tfd.Normal(loc=img_out, scale=1.))
-        dist = tfd.Independent(tfd.Bernoulli(logits=img_out))
+        dist = tfd.Independent(tfd.Normal(loc=img_out, scale=1.))
+        #dist = tfd.Independent(tfd.Bernoulli(logits=img_out))
 
         log_prob = dist.log_prob(img_in)
 
@@ -558,7 +559,7 @@ class DreamerV2Agent:
 
             next_obs = self.preprocess_func(next_frame)
 
-            img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
+            #img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
 
             disc = tfd.Bernoulli(logits=discount_logit).mean()
 
@@ -638,7 +639,7 @@ class DreamerV2Agent:
 
                 img_out = self.world_model.decoder(feat)
 
-                img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
+                #img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
 
                 img_out = img_out.numpy()[0, :, :, 0]
 
@@ -699,6 +700,7 @@ def main(resume=None):
         )
 
     init_episodes = 30
+    #init_episodes = 3
 
     test_interval = 50
 
@@ -743,5 +745,5 @@ def main(resume=None):
 
 if __name__ == "__main__":
     resume = None
-    #resume = {"n": 280, "global_steps": 54000}
+    #resume = {"n": 294, "global_steps": 54000}
     main(resume)
