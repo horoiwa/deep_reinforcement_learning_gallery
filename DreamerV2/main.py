@@ -69,14 +69,17 @@ class DreamerV2Agent:
             )
 
         self.world_model = WorldModel(config)
-        self.wm_optimizer = tf.keras.optimizers.Adam(lr=self.config.lr_world)
+        self.wm_optimizer = tf.keras.optimizers.Adam(
+            lr=self.config.lr_world, eps=1e-4)
 
         self.actor = PolicyNetwork(action_space=self.action_space)
-        self.actor_optimizer = tf.keras.optimizers.Adam(lr=self.config.lr_actor)
+        self.actor_optimizer = tf.keras.optimizers.Adam(
+            lr=self.config.lr_actor, eps=1e-5)
 
         self.critic = ValueNetwork(action_space=self.action_space)
         self.target_critic = ValueNetwork(action_space=self.action_space)
-        self.critic_optimizer = tf.keras.optimizers.Adam(lr=self.config.lr_critic)
+        self.critic_optimizer = tf.keras.optimizers.Adam(
+            lr=self.config.lr_critic, eps=1e-5)
 
         self.global_steps = 0
 
@@ -294,11 +297,18 @@ class DreamerV2Agent:
 
             loss *= 1. / L
 
-        if tf.math.is_nan(loss):
+        #: Checking Nan
+        try:
+            tf.debugging.check_numerics(kl_loss, message='kl loss')
+            tf.debugging.check_numerics(img_log_loss, message='img loss')
+            tf.debugging.check_numerics(reward_log_loss, message='reward loss')
+            tf.debugging.check_numerics(discount_log_loss, message='discount loss')
+            tf.debugging.check_numerics(loss, message='total loss')
+        except Exception as e:
+            print(e.message)
             self.save("./checkpoints_debug")
             import sys; sys.exit()
 
-        import pdb; pdb.set_trace()
         grads = tape.gradient(loss, self.world_model.trainable_variables)
         grads, norm = tf.clip_by_global_norm(grads, 100.)
         self.wm_optimizer.apply_gradients(zip(grads, self.world_model.trainable_variables))
@@ -331,6 +341,10 @@ class DreamerV2Agent:
             prior_probs (L, B, latent_dim, n_atoms)
             post_probs (L, B, latent_dim, n_atoms)
         """
+
+        #: prevent inf
+        post_probs += 1e-5
+        prior_probs += 1e-5
 
         #: KL Balancing: See 2.2 BEHAVIOR LEARNING Algorithm 2
         kl_div1 = tfd.kl_divergence(
