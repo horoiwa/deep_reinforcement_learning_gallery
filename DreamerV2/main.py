@@ -70,16 +70,16 @@ class DreamerV2Agent:
 
         self.world_model = WorldModel(config)
         self.wm_optimizer = tf.keras.optimizers.Adam(
-            lr=self.config.lr_world, eps=1e-4)
+            lr=self.config.lr_world, epsilon=1e-4)
 
         self.actor = PolicyNetwork(action_space=self.action_space)
         self.actor_optimizer = tf.keras.optimizers.Adam(
-            lr=self.config.lr_actor, eps=1e-5)
+            lr=self.config.lr_actor, epsilon=1e-5)
 
         self.critic = ValueNetwork(action_space=self.action_space)
         self.target_critic = ValueNetwork(action_space=self.action_space)
         self.critic_optimizer = tf.keras.optimizers.Adam(
-            lr=self.config.lr_critic, eps=1e-5)
+            lr=self.config.lr_critic, epsilon=1e-5)
 
         self.global_steps = 0
 
@@ -342,7 +342,7 @@ class DreamerV2Agent:
             post_probs (L, B, latent_dim, n_atoms)
         """
 
-        #: prevent inf
+        #: Add small value to prevent inf kl
         post_probs += 1e-5
         prior_probs += 1e-5
 
