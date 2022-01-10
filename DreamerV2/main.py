@@ -294,6 +294,11 @@ class DreamerV2Agent:
 
             loss *= 1. / L
 
+        if tf.math.is_nan(loss):
+            self.save("./checkpoints_debug")
+            import sys; sys.exit()
+
+        import pdb; pdb.set_trace()
         grads = tape.gradient(loss, self.world_model.trainable_variables)
         grads, norm = tf.clip_by_global_norm(grads, 100.)
         self.wm_optimizer.apply_gradients(zip(grads, self.world_model.trainable_variables))
@@ -584,6 +589,8 @@ class DreamerV2Agent:
                 break
             elif episode_steps > 1000 and episode_rewards < 10:
                 break
+            elif episode_steps > 4000:
+                break
 
         images[0].save(
             f'{outdir}/testplay_{test_id}.gif',
@@ -700,15 +707,14 @@ def main(resume=None):
         )
 
     init_episodes = 30
-    #init_episodes = 3
 
     test_interval = 50
 
     n = 0
 
     if resume:
-        n = int(resume["n"])
-        init_episodes += n
+        n = int(resume["n_episode"])
+        init_episodes = n + int(resume["init_episodes"])
         agent.global_steps = int(resume["global_steps"])
         agent.load("checkpoints")
         print("== Load weights ==")
@@ -744,6 +750,8 @@ def main(resume=None):
         n += 1
 
 if __name__ == "__main__":
-    resume = None
-    #resume = {"n": 294, "global_steps": 54000}
+    #resume = None
+    resume = {"n_episode": 3501,
+              "global_steps": 992200,
+              "init_episodes": 500}
     main(resume)
