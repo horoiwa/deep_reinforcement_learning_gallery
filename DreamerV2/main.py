@@ -493,8 +493,9 @@ class DreamerV2Agent:
 
             objective = tf.reduce_sum(objective, axis=-1)
 
+            _probs = action_probs + 1e-5
             dist = tfd.Independent(
-                tfd.OneHotCategorical(probs=action_probs),
+                tfd.OneHotCategorical(probs=_probs),
                 reinterpreted_batch_ndims=0)
             ent = dist.entropy()
 
@@ -747,7 +748,7 @@ def main(resume=None):
         print()
 
         if n % test_interval == 0:
-            agent.testplay_in_dream(n, videodir, H=20)
+            #agent.testplay_in_dream(n, videodir, H=20)
             steps, score = agent.testplay(n, videodir)
 
             with summary_writer.as_default():
@@ -764,8 +765,8 @@ def main(resume=None):
         n += 1
 
 if __name__ == "__main__":
-    #resume = None
-    resume = {"n_episode": 3501,
-              "global_steps": 992200,
-              "init_episodes": 500}
+    resume = None
+    #resume = {"n_episode": 3501,
+    #          "global_steps": 992200,
+    #          "init_episodes": 500}
     main(resume)
