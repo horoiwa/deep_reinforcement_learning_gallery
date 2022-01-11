@@ -387,8 +387,8 @@ class DreamerV2Agent:
 
         img_out = tf.reshape(img_out, (L * B, H * W * C))
 
-        dist = tfd.Independent(tfd.Normal(loc=img_out, scale=1.))
-        #dist = tfd.Independent(tfd.Bernoulli(logits=img_out))
+        #dist = tfd.Independent(tfd.Normal(loc=img_out, scale=1.))
+        dist = tfd.Independent(tfd.Bernoulli(logits=img_out))
 
         log_prob = dist.log_prob(img_in)
 
@@ -579,7 +579,7 @@ class DreamerV2Agent:
 
             next_obs = self.preprocess_func(next_frame)
 
-            #img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
+            img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
 
             disc = tfd.Bernoulli(logits=discount_logit).mean()
 
@@ -661,7 +661,7 @@ class DreamerV2Agent:
 
                 img_out = self.world_model.decoder(feat)
 
-                #img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
+                img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
 
                 img_out = img_out.numpy()[0, :, :, 0]
 
