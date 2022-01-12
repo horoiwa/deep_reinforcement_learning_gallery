@@ -28,16 +28,14 @@ class Config:
 
     kl_scale: float = 0.1     # KL loss scale, β
     kl_alpha: float = 0.8          # KL balancing
-    ent_scale: float = 1e-3
     latent_dim: int = 32           # discrete latent dimensions
     n_atoms: int = 32              # discrete latent classes
     lr_world: float = 2e-4         # learning rate of world model
 
     imagination_horizon: int = 8   # Imagination horizon, H
-    gamma_discount: float = 0.995   # discount factor γ
+    gamma_discount: float = 0.995  # discount factor γ
     lambda_gae: float = 0.95       # λ for Generalized advantage estimator
-    #entropy_scale: float = 1e-3    # entropy loss scale
-    entropy_scale: float = 1e-1    # entropy loss scale
+    ent_scale: float = 1e-2
     lr_actor: float = 4e-5
     lr_critic: float = 1e-4
 
@@ -765,8 +763,8 @@ def main(resume=None):
         n += 1
 
 if __name__ == "__main__":
-    resume = None
-    #resume = {"n_episode": 3501,
-    #          "global_steps": 992200,
-    #          "init_episodes": 500}
+    #resume = None
+    resume = {"n_episode": 3651,
+              "global_steps": 931000,
+              "init_episodes": 300}
     main(resume)
