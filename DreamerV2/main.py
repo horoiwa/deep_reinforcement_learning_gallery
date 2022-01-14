@@ -463,11 +463,11 @@ class DreamerV2Agent:
         return trajectory
 
     def update_actor_critic(self, trajectory):
-        """ Actor-Critic update using Generalized Advantage Estimator
+        """ Actor-Critic update using PPO & Generalized Advantage Estimator
         """
 
         #: adv: (L*B, 1)
-        adv, v_target = self.compute_GAE(
+        advantages, v_targets = self.compute_GAE(
             trajectory['state'], trajectory['reward'],
             trajectory['next_state'], trajectory['discount']
             )
@@ -479,30 +479,48 @@ class DreamerV2Agent:
             tf.reduce_sum(trajectory['reward'], axis=1)
             )
 
-        with tf.GradientTape() as tape:
+        _, old_probs = self.actor(states)
 
-            _, action_probs = self.actor(states)
+        old_logprobs = tf.reduce_sum(
+            actions * tf.math.log(old_probs + 1e-5), axis=1
+        )
 
-            objective = actions * tf.math.log(action_probs + 1e-5) * adv
+        for _ in range(5):
 
-            objective = tf.reduce_sum(objective, axis=-1)
+            with tf.GradientTape() as tape:
 
-            _probs = action_probs + 1e-5
-            dist = tfd.Independent(
-                tfd.OneHotCategorical(probs=_probs),
-                reinterpreted_batch_ndims=0)
-            ent = dist.entropy()
+                _, new_probs = self.actor(states)
 
-            actor_loss = -1 * objective + self.config.ent_scale * -1 * ent
-            actor_loss = tf.reduce_mean(actor_loss)
+                new_probs += 1e-5
 
-        grads = tape.gradient(actor_loss, self.actor.trainable_variables)
-        self.actor_optimizer.apply_gradients(
-                    zip(grads, self.actor.trainable_variables))
+                new_logprobs = tf.reduce_sum(
+                    actions * tf.math.log(new_probs), axis=1)
+
+                ratio = tf.exp(new_logprobs - old_logprobs)
+
+                ratio_clipped = tf.clip_by_value(ratio, 0.9, 1.1)
+
+                obj_unclipped = ratio * advantages
+
+                obj_clipped = ratio_clipped * advantages
+
+                objective = tf.minimum(obj_unclipped, obj_clipped)
+
+                dist = tfd.Independent(
+                    tfd.OneHotCategorical(probs=new_probs),
+                    reinterpreted_batch_ndims=0)
+                ent = dist.entropy()
+
+                actor_loss = -1 * objective + self.config.ent_scale * -1 * ent
+                actor_loss = tf.reduce_mean(actor_loss)
+
+            grads = tape.gradient(actor_loss, self.actor.trainable_variables)
+            self.actor_optimizer.apply_gradients(
+                        zip(grads, self.actor.trainable_variables))
 
         with tf.GradientTape() as tape:
             v_pred = self.critic(states)
-            value_loss = 0.5 * tf.square(v_target - v_pred)
+            value_loss = 0.5 * tf.square(v_targets - v_pred)
             value_loss = tf.reduce_mean(value_loss)
 
         grads = tape.gradient(value_loss, self.critic.trainable_variables)
