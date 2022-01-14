@@ -32,7 +32,7 @@ class Config:
     n_atoms: int = 32              # discrete latent classes
     lr_world: float = 2e-4         # learning rate of world model
 
-    imagination_horizon: int = 8   # Imagination horizon, H
+    imagination_horizon: int = 10   # Imagination horizon, H
     gamma_discount: float = 0.995  # discount factor γ
     lambda_gae: float = 0.95       # λ for Generalized advantage estimator
     ent_scale: float = 1e-2
@@ -764,7 +764,7 @@ def main(resume=None):
 
 if __name__ == "__main__":
     #resume = None
-    resume = {"n_episode": 3651,
-              "global_steps": 931000,
-              "init_episodes": 300}
+    resume = {"n_episode": 6251,
+              "global_steps": 2000350,
+              "init_episodes": 100}
     main(resume)
