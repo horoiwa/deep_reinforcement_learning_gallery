@@ -129,7 +129,7 @@ class DreamerV2Agent:
 
         prev_z, prev_h = self.world_model.get_initial_state(batch_size=1)
 
-        prev_a = tf.one_hot([0], self.action_space)
+        prev_a = tf.convert_to_tensor([[0]*self.action_space], dtype=tf.float32)
 
         done = False
 
@@ -396,7 +396,7 @@ class DreamerV2Agent:
 
         return loss
 
-    def _compute_log_loss(self, y_true, y_pred, head):
+    def _compute_log_loss(self, y_true, y_pred):
         """
         Inputs:
             y_true: (L, B, 1)
@@ -570,7 +570,7 @@ class DreamerV2Agent:
 
         prev_z, prev_h = self.world_model.get_initial_state(batch_size=1)
 
-        prev_a = tf.one_hot([0], self.action_space)
+        prev_a = tf.convert_to_tensor([[0]*self.action_space], dtype=tf.float32)
 
         done = False
 
@@ -634,7 +634,7 @@ class DreamerV2Agent:
 
         prev_z, prev_h = self.world_model.get_initial_state(batch_size=1)
 
-        prev_a = tf.one_hot([0], self.action_space)
+        prev_a = tf.convert_to_tensor([[0]*self.action_space], dtype=tf.float32)
 
         actions, rewards, discounts = [], [], []
 
@@ -711,6 +711,18 @@ class DreamerV2Agent:
             optimize=False, duration=1000, loop=0)
 
 
+class Actor(DreamerV2Agent):
+
+    def __init(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+class Tester(DreamerV2Agent):
+
+    def __init(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
 def main(resume=None):
     """ resume: Dict(n: int, global_steps: int)
     """
@@ -739,7 +751,7 @@ def main(resume=None):
         env_id=env_id, config=config, summary_writer=summary_writer
         )
 
-    init_episodes = 30
+    init_episodes = 3
 
     test_interval = 50
 
@@ -783,8 +795,8 @@ def main(resume=None):
         n += 1
 
 if __name__ == "__main__":
-    #resume = None
-    resume = {"n_episode": 6251,
-              "global_steps": 2000350,
-              "init_episodes": 100}
+    resume = None
+    #resume = {"n_episode": 6251,
+    #          "global_steps": 2000350,
+    #          "init_episodes": 100}
     main(resume)

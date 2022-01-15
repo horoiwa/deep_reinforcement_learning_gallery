@@ -16,10 +16,12 @@ def get_preprocess_func(env_name):
 def _preprocess_breakout(frame, th=40.):
 
     image = Image.fromarray(frame)
-    image = image.crop((0, 38, 160, 198)).resize((64, 64)).convert("L")
+
+    image = image.crop((0, 38, 160, 198)).convert("L")
     image = np.array(image)
     image[image >= th] = 255.
     image[image < th] = 0.
+    image = Image.fromarray(image).resize((64, 64))
     image_scaled = np.array(image) / 255.0
     image_out = image_scaled[np.newaxis, ..., np.newaxis]  #: (1, 64, 64, 1)
 
