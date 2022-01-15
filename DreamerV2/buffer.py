@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 import collections
+import copy
 import random
+from typing import List
 
 import numpy as np
 import tensorflow as tf
@@ -31,8 +33,6 @@ class SequenceReplayBuffer:
 
         self.buffer = collections.deque(maxlen=self.buffer_size+self.L)
 
-        self.tmp_buffer = []
-
         self.batch_size = batch_size
 
         self.action_space = action_space
@@ -52,7 +52,7 @@ class SequenceReplayBuffer:
 
         dataset = dataset.batch(self.batch_size, drop_remainder=True)
 
-        dataset.prefetch(self.buffer_size*2)
+        dataset.prefetch(10)
 
         self.dataset = iter(dataset)
 
@@ -96,6 +96,32 @@ class SequenceReplayBuffer:
 
             yield sequence
 
+    def add_episode(self, episode: List[Experience]):
+
+        for exp in episode:
+            self.buffer.append(exp)
+
+    def get_minibatch(self):
+
+        if not hasattr(self, "dataset"):
+            print("Create TFDataset")
+            self.create_tfdataset()
+
+        minibatch = next(self.dataset)
+
+        #: (batchsize, timesteps, ...) -> (timesteps, batchsize, ...)
+        minibatch = {key: tf.einsum("ij... -> ji...", data)
+                     for key, data in minibatch.items()}
+
+        return minibatch
+
+
+class EpisodeBuffer:
+
+    def __init__(self):
+
+        self.buffer = []
+
     def add(self, obs: np.array, action_onehot, reward, next_obs, done: bool,
             prev_z, prev_h, prev_a_onehot):
         """
@@ -118,30 +144,12 @@ class SequenceReplayBuffer:
             prev_z, prev_h, prev_a_onehot)
         exp = lz4f.compress(pickle.dumps(exp))
 
-        self.tmp_buffer.append(exp)
+        self.buffer.append(exp)
 
-        if done:
-            if len(self.tmp_buffer) > self.L:
-                for exp in self.tmp_buffer:
-                    self.buffer.append(exp)
-            else:
-                print("Episode discarded")
-
-            self.tmp_buffer = []
-
-    def get_minibatch(self):
-
-        if not hasattr(self, "dataset"):
-            print("Create TFDataset")
-            self.create_tfdataset()
-
-        minibatch = next(self.dataset)
-
-        #: (batchsize, timesteps, ...) -> (timesteps, batchsize, ...)
-        minibatch = {key: tf.einsum("ij... -> ji...", data)
-                     for key, data in minibatch.items()}
-
-        return minibatch
+    def get_episode(self):
+        episode = copy.deepcopy(self.buffer)
+        self.buffer = []
+        return episode
 
 
 if __name__ == "__main__":

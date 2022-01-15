@@ -4,12 +4,12 @@ from pathlib import Path
 import shutil
 import random
 
+import ray
 import tensorflow as tf
-import tensorflow_probability as tfp
 from tensorflow_probability import distributions as tfd
 import gym
 
-from buffer import SequenceReplayBuffer
+from buffer import SequenceReplayBuffer, EpisodeBuffer
 from networks import PolicyNetwork, ValueNetwork, WorldModel
 import util
 
@@ -21,6 +21,7 @@ class Config:
     burnin_lenght: int = 3
     sequence_length: int = 10      # Sequence Lenght, L
     buffer_size: int = int(1e6)    # Replay buffer size (FIFO)
+    num_minibatchs: int = 10
     gamma: float = 0.997
     anneal_stpes: int = 500000
     update_period: int = 8
@@ -47,11 +48,16 @@ class Config:
 class DreamerV2Agent:
 
     def __init__(self, env_id: str, config: Config,
+                 pid: int = None, epsilon: float = 0.,
                  summary_writer: tf.summary.SummaryWriter = None):
 
         self.env_id = env_id
 
         self.config = config
+
+        self.pid = pid
+
+        self.epsilon = epsilon
 
         self.summary_writer = summary_writer
 
@@ -59,27 +65,20 @@ class DreamerV2Agent:
 
         self.preprocess_func = util.get_preprocess_func(env_name=self.env_id)
 
-        self.buffer = SequenceReplayBuffer(
-            buffer_size=config.buffer_size,
-            seq_len=config.sequence_length,
-            batch_size=config.batch_size,
-            action_space=self.action_space,
-            )
+        self.buffer = EpisodeBuffer()
 
         self.world_model = WorldModel(config)
         self.wm_optimizer = tf.keras.optimizers.Adam(
             lr=self.config.lr_world, epsilon=1e-4)
 
-        self.actor = PolicyNetwork(action_space=self.action_space)
-        self.actor_optimizer = tf.keras.optimizers.Adam(
+        self.policy = PolicyNetwork(action_space=self.action_space)
+        self.policy_optimizer = tf.keras.optimizers.Adam(
             lr=self.config.lr_actor, epsilon=1e-5)
 
-        self.critic = ValueNetwork(action_space=self.action_space)
-        self.target_critic = ValueNetwork(action_space=self.action_space)
-        self.critic_optimizer = tf.keras.optimizers.Adam(
+        self.value = ValueNetwork(action_space=self.action_space)
+        self.target_value = ValueNetwork(action_space=self.action_space)
+        self.value_optimizer = tf.keras.optimizers.Adam(
             lr=self.config.lr_critic, epsilon=1e-5)
-
-        self.global_steps = 0
 
         self.setup()
 
@@ -92,34 +91,49 @@ class DreamerV2Agent:
         _outputs = self.world_model(obs, prev_z, prev_h, prev_a)
         (h, z_prior, z_prior_prob, z_post, z_post_prob,
          feat, img_out, reward_pred, disc_logit) = _outputs
-        self.actor(feat)
-        self.critic(feat)
-        self.target_critic(feat)
-        self.target_critic.set_weights(self.critic.get_weights())
+        self.policy(feat)
+        self.value(feat)
+        self.target_value(feat)
+        self.target_value.set_weights(self.value.get_weights())
 
     def get_weights(self):
         return (self.world_model.get_weights(),
-                self.policy.get_weights(), self.critic.get_weights())
+                self.policy.get_weights(), self.value.get_weights())
 
     def save(self, savedir=None):
         savedir = Path(savedir) if savedir is not None else Path("./checkpoints")
         self.world_model.save_weights(str(savedir / "worldmodel"))
-        self.actor.save_weights(str(savedir / "actor"))
-        self.critic.save_weights(str(savedir / "critic"))
+        self.policy.save_weights(str(savedir / "policy"))
+        self.value.save_weights(str(savedir / "critic"))
 
     def load(self, loaddir=None):
         loaddir = Path(loaddir) if loaddir is not None else Path("checkpoints")
         self.world_model.load_weights(str(loaddir / "worldmodel"))
-        self.actor.load_weights(str(loaddir / "actor"))
-        self.critic.load_weights(str(loaddir / "critic"))
-        self.target_critic.load_weights(str(loaddir / "critic"))
+        self.policy.load_weights(str(loaddir / "policy"))
+        self.value.load_weights(str(loaddir / "critic"))
+        self.target_value.load_weights(str(loaddir / "critic"))
 
-    @property
-    def epsilon(self):
-        eps = max(0.05, 0.6 * (self.config.anneal_stpes - self.global_steps) / self.config.anneal_stpes)
-        return eps
+    def set_weights(self, wm_weights, policy_weights, critic_weights):
 
-    def rollout(self, training: bool):
+        self.world_model.set_weights(wm_weights)
+        self.policy.set_weights(policy_weights)
+        self.value.set_weights(critic_weights)
+        self.target_value.set_weights(critic_weights)
+
+    def get_weights(self):
+
+        weights = (self.world_model.get_weights(),
+                   self.policy.get_weights(),
+                   self.value.get_weights(),
+                   )
+
+        return weights
+
+    def rollout(self, weights=None):
+
+        if weights:
+            wm_weights, policy_weights, criric_weights = weights
+            self.set_weights(wm_weights, policy_weights, criric_weights)
 
         env = gym.make(self.env_id)
 
@@ -141,7 +155,7 @@ class DreamerV2Agent:
 
             feat, z = self.world_model.get_feature(obs, h)
 
-            action = self.actor.sample_action(feat, self.epsilon)
+            action = self.policy.sample_action(feat, self.epsilon)
 
             action_onehot = tf.one_hot([action], self.action_space)
 
@@ -171,33 +185,31 @@ class DreamerV2Agent:
 
             prev_z, prev_h, prev_a = z, h, action_onehot
 
-            #: Update world model and actor-critic
-            if training and self.global_steps % self.config.update_period == 0:
-                self.update_networks()
-
-            #: Target update
-            if training and self.global_steps % self.config.target_update_period == 0:
-                print("== Target Update ==")
-                self.target_critic.set_weights(self.critic.get_weights())
-
-            #: Stats
-            self.global_steps += 1
-
             episode_steps += 1
 
             episode_rewards += reward
 
-        return episode_steps, episode_rewards, self.global_steps
+            if episode_steps > 4000:
+                _ = self.buffer.get_episode()
+                return self.pid, [], 0, 0
 
-    def update_networks(self):
+        episode = self.buffer.get_episode()
 
-        minibatch = self.buffer.get_minibatch()
+        return self.pid, episode, episode_steps, episode_rewards
 
-        z_posts, hs = self.update_worldmodel(minibatch)
+    def update_networks(self, minibatchs):
 
-        trajectory_in_dream = self.rollout_in_dream(z_posts, hs)
+        for minibatch in minibatchs:
 
-        self.update_actor_critic(trajectory_in_dream)
+            z_posts, hs, info = self.update_worldmodel(minibatch)
+
+            trajectory_in_dream = self.rollout_in_dream(z_posts, hs)
+
+            info_ac = self.update_actor_critic(trajectory_in_dream)
+
+        info.update(info_ac)
+
+        return self.get_weights(), info
 
     def update_worldmodel(self, minibatch):
         """
@@ -295,33 +307,18 @@ class DreamerV2Agent:
 
             loss *= 1. / L
 
-        #: Checking Nan
-        try:
-            tf.debugging.check_numerics(kl_loss, message='kl loss')
-            tf.debugging.check_numerics(img_log_loss, message='img loss')
-            tf.debugging.check_numerics(reward_log_loss, message='reward loss')
-            tf.debugging.check_numerics(discount_log_loss, message='discount loss')
-            tf.debugging.check_numerics(loss, message='total loss')
-        except Exception as e:
-            print(e.message)
-            self.save("./checkpoints_debug")
-            import sys; sys.exit()
-
         grads = tape.gradient(loss, self.world_model.trainable_variables)
         grads, norm = tf.clip_by_global_norm(grads, 100.)
         self.wm_optimizer.apply_gradients(
             zip(grads, self.world_model.trainable_variables)
             )
 
-        with self.summary_writer.as_default():
-            tf.summary.scalar("wm_loss", L * loss, step=self.global_steps)
-            tf.summary.scalar("img_log_loss", -img_log_loss, step=self.global_steps)
-            tf.summary.scalar("reward_log_loss", -reward_log_loss, step=self.global_steps)
-            tf.summary.scalar("discount_log_loss", -discount_log_loss, step=self.global_steps)
-            tf.summary.scalar("kl_loss", kl_loss, step=self.global_steps)
-            tf.summary.scalar("eps", self.epsilon, step=self.global_steps)
+        info = {"wm_loss": L * loss, "img_log_loss": -img_log_loss,
+                "reward_log_loss": -reward_log_loss,
+                "discount_log_loss": -discount_log_loss,
+                "kl_loss": kl_loss,}
 
-        return z_posts, hs
+        return z_posts, hs, info
 
     @tf.function
     def _compute_kl_loss(self, post_probs, prior_probs):
@@ -433,7 +430,7 @@ class DreamerV2Agent:
 
         for t in range(horizon):
 
-            actions = tf.cast(self.actor.sample(feats), dtype=tf.float32)
+            actions = tf.cast(self.policy.sample(feats), dtype=tf.float32)
 
             trajectory["state"].append(feats)
             trajectory["action"].append(actions)
@@ -479,7 +476,7 @@ class DreamerV2Agent:
             tf.reduce_sum(trajectory['reward'], axis=1)
             )
 
-        _, old_probs = self.actor(states)
+        _, old_probs = self.policy(states)
 
         old_logprobs = tf.reduce_sum(
             actions * tf.math.log(old_probs + 1e-5), axis=1
@@ -489,7 +486,7 @@ class DreamerV2Agent:
 
             with tf.GradientTape() as tape:
 
-                _, new_probs = self.actor(states)
+                _, new_probs = self.policy(states)
 
                 new_probs += 1e-5
 
@@ -514,24 +511,27 @@ class DreamerV2Agent:
                 actor_loss = -1 * objective + self.config.ent_scale * -1 * ent
                 actor_loss = tf.reduce_mean(actor_loss)
 
-            grads = tape.gradient(actor_loss, self.actor.trainable_variables)
-            self.actor_optimizer.apply_gradients(
-                        zip(grads, self.actor.trainable_variables))
+            grads = tape.gradient(actor_loss, self.policy.trainable_variables)
+            self.policy_optimizer.apply_gradients(
+                        zip(grads, self.policy.trainable_variables))
 
         with tf.GradientTape() as tape:
-            v_pred = self.critic(states)
+            v_pred = self.value(states)
             value_loss = 0.5 * tf.square(v_targets - v_pred)
             value_loss = tf.reduce_mean(value_loss)
 
-        grads = tape.gradient(value_loss, self.critic.trainable_variables)
-        self.critic_optimizer.apply_gradients(
-                    zip(grads, self.critic.trainable_variables))
+        grads = tape.gradient(value_loss, self.value.trainable_variables)
+        self.value_optimizer.apply_gradients(
+                    zip(grads, self.value.trainable_variables))
 
-        with self.summary_writer.as_default():
-            tf.summary.scalar("actor_loss", actor_loss, step=self.global_steps)
-            tf.summary.scalar("actor_entropy", -tf.reduce_mean(ent), step=self.global_steps)
-            tf.summary.scalar("value_loss", value_loss, step=self.global_steps)
-            tf.summary.scalar("imagine_rewards", total_imgaine_rewards, step=self.global_steps)
+        info = {
+            "actor_loss": actor_loss,
+            "actor_entropy": -tf.reduce_mean(ent),
+            "value_loss": value_loss,
+            "imagine_rewards": total_imgaine_rewards
+            }
+
+        return info
 
     def compute_GAE(self, states, rewards, next_states, discounts):
         """ HIGH-DIMENSIONAL CONTINUOUS CONTROL USING GENERALIZED ADVANTAGE ESTIMATION
@@ -540,8 +540,8 @@ class DreamerV2Agent:
         T, B, F = states.shape
         lambda_ = self.config.lambda_gae
 
-        v = self.target_critic(states)
-        v_next = self.target_critic(next_states)
+        v = self.target_value(states)
+        v_next = self.target_value(next_states)
         deltas = rewards + discounts * v_next - v
 
         _weights = tf.concat(
@@ -556,7 +556,7 @@ class DreamerV2Agent:
 
         return adv, v_target
 
-    def testplay(self, test_id, outdir: Path):
+    def testplay(self, test_id, video_dir: Path, weights=None):
 
         images = []
 
@@ -583,7 +583,7 @@ class DreamerV2Agent:
             if episode_steps == 0:
                 action = 1
             else:
-                action = self.actor.sample_action(feat, 0)
+                action = self.policy.sample_action(feat, 0)
 
             action_onehot = tf.one_hot([action], self.action_space)
 
@@ -622,7 +622,7 @@ class DreamerV2Agent:
                 break
 
         images[0].save(
-            f'{outdir}/testplay_{test_id}.gif',
+            f'{video_dir}/testplay_{test_id}.gif',
             save_all=True, append_images=images[1:],
             optimize=False, duration=120, loop=0)
 
@@ -658,7 +658,7 @@ class DreamerV2Agent:
 
                 img_out = obs[0, :, :, 0]
 
-                action = 1 if i == 0 else self.actor.sample_action(feat, 0)
+                action = 1 if i == 0 else self.policy.sample_action(feat, 0)
 
                 next_frame, reward, done, info = env.step(action)
 
@@ -689,7 +689,7 @@ class DreamerV2Agent:
 
                 discount_pred = tfd.Bernoulli(logits=disc_logit).mean()
 
-                action = self.actor.sample_action(feat, 0)
+                action = self.policy.sample_action(feat, 0)
 
                 actions.append(int(action))
 
@@ -711,25 +711,64 @@ class DreamerV2Agent:
             optimize=False, duration=1000, loop=0)
 
 
+@ray.remote(num_cpus=1, num_gpus=1)
+class Learner(DreamerV2Agent):
+
+    def __init(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+
+@ray.remote(num_cpus=1, num_gpus=0)
 class Actor(DreamerV2Agent):
 
     def __init(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 
+@ray.remote(num_cpus=1, num_gpus=0)
 class Tester(DreamerV2Agent):
 
     def __init(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 
-def main(resume=None):
-    """ resume: Dict(n: int, global_steps: int)
+def main(resume=None, num_actors=2, init_episodes=10,
+         env_id="BreakoutDeterministic-v4"):
+
+    """ Setup Ape-X architecture
     """
 
-    logdir = Path("./log")
+    ray.init()
 
-    videodir = Path("./video")
+    config = Config()
+
+    learner = Learner.remote(env_id=env_id, config=config)
+
+    epsilons = [0.3 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
+    print("Epsilons", epsilons)
+
+    actors = [Actor.remote(
+        pid=i, env_id=env_id, config=config, epsilon=epsilons[i],
+        ) for i in range(num_actors)]
+
+    tester = Tester.remote(env_id=env_id, config=config)
+
+    replay_buffer = SequenceReplayBuffer(
+        buffer_size=config.buffer_size,
+        seq_len=config.sequence_length,
+        batch_size=config.batch_size,
+        action_space=gym.make(env_id).action_space.n,
+        )
+
+    if resume:
+        learner.load.remote("checkpoints")
+
+    current_weights = ray.put(ray.get(learner.get_weights.remote()))
+
+
+    """ Setup training log dirs
+    """
+    logdir, videodir = Path("./log"), Path("./video")
 
     if resume is None:
 
@@ -743,60 +782,88 @@ def main(resume=None):
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
-    env_id = "BreakoutDeterministic-v4"
+    """ Initial collcetion of experience
+    """
+    wip_actors = [actor.rollout.remote(weights=current_weights) for actor in actors]
+    for _ in range(init_episodes):
+        finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
+        pid, episode, steps, score = ray.get(finished_actor[0])
+        print(f"{pid}: {score} : {steps}steps")
+        replay_buffer.add_episode(episode)
 
-    config = Config()
+        wip_actors.extend(
+            [actors[pid].rollout.remote(current_weights)])
 
-    agent = DreamerV2Agent(
-        env_id=env_id, config=config, summary_writer=summary_writer
-        )
+    """ Counters
+    """
+    global_steps = 0 if resume is None else int(resume["global_steps"])
 
-    init_episodes = 3
+    learner_update_count = 0
 
-    test_interval = 50
+    """ Start training
+    """
 
-    n = 0
+    minibatchs = [replay_buffer.get_minibatch()
+                  for _ in range(config.num_minibatchs)]
 
-    if resume:
-        n = int(resume["n_episode"])
-        init_episodes = n + int(resume["init_episodes"])
-        agent.global_steps = int(resume["global_steps"])
-        agent.load("checkpoints")
-        print("== Load weights ==")
+    wip_learner = learner.update_networks.remote(minibatchs)
 
-    steps, score = agent.testplay(n, videodir)
-    while n < 10000:
+    wip_tester = tester.testplay.remote(
+        test_id=global_steps, video_dir=videodir, weights=current_weights)
 
-        training = n > init_episodes
+    minibatchs = [replay_buffer.get_minibatch() for _ in range(10)]
 
-        steps, score, global_steps = agent.rollout(training)
+    while global_steps < 2000000:
 
-        with summary_writer.as_default():
-            tf.summary.scalar("train_score", score, step=global_steps)
+        finished_actors, wip_actors = ray.wait(wip_actors, num_returns=1, timeout=0)
 
-        print(f"Episode {n}: {steps}steps {score}")
-        print()
+        if finished_actors:
+            pid, episode, steps, score = ray.get(finished_actor[0])
+            replay_buffer.add_episode(episode)
+            global_steps += steps
+            print(f"PID-{pid}: {score} : {steps}steps")
 
-        if n % test_interval == 0:
-            #agent.testplay_in_dream(n, videodir, H=20)
-            steps, score = agent.testplay(n, videodir)
+        finished_learner, _ = ray.wait([wip_learner], timeout=0)
+
+        if finished_learner:
+            weights, info = ray.get(finished_learner[0])
+            current_weights = ray.put(weights)
 
             with summary_writer.as_default():
-                tf.summary.scalar("test_steps", steps, step=global_steps)
-                tf.summary.scalar("test_score", score, step=global_steps)
+                for key, value in info.items():
+                    tf.summary.scalar(key, value, step=global_steps)
 
-            print(f"Test: {steps}steps {score}")
-            print()
+            learner_update_count += 1
 
-        if n % 50 == 0:
-            agent.save()
-            print("== Save weights ==")
+            if learner_update_count % 100 == 0:
+                print("== Save weights ==")
+                ray.get(learner.save.remote("checkpoints"))
 
-        n += 1
+            if learner_update_count % 150 == 0:
+                print("== Update Target-value ==")
+                ray.get(learner.set_weights.remote(current_weights))
+
+            wip_learner = learner.update_networks.remote(minibatchs)
+
+            with util.Timer("Create Minibatch"):
+                minibatchs = [
+                    replay_buffer.get_minibatch() for _ in range(config.num_minibatchs)
+                    ]
+
+        finished_tester, _ = ray.wait([wip_tester], timeout=0)
+
+        if finished_tester:
+            test_steps, test_score = ray.get(finished_tester[0])
+
+            wip_tester = tester.testplay.remote(
+                test_id=global_steps, video_dir=videodir, weights=current_weights)
+
+            with summary_writer.as_default():
+                tf.summary.scalar("test_steps", test_steps, step=global_steps)
+                tf.summary.scalar("test_score", test_score, step=global_steps)
+
 
 if __name__ == "__main__":
     resume = None
-    #resume = {"n_episode": 6251,
-    #          "global_steps": 2000350,
-    #          "init_episodes": 100}
+    #resume = {"global_steps": 2000350)
     main(resume)
