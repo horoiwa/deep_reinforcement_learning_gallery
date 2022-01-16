@@ -560,6 +560,9 @@ class DreamerV2Agent:
 
     def testplay(self, test_id, video_dir: Path = None, weights=None):
 
+        if weights:
+            self.set_weights(weights)
+
         images = []
 
         env = gym.make(self.env_id)
@@ -631,7 +634,10 @@ class DreamerV2Agent:
 
         return episode_steps, episode_rewards
 
-    def testplay_in_dream(self, test_id, outdir: Path, H):
+    def testplay_in_dream(self, test_id, outdir: Path, H, weights=None):
+
+        if weights:
+            self.set_weights(weights)
 
         img_outs = []
 
