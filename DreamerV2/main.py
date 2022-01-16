@@ -814,7 +814,7 @@ def main(resume=None, num_actors=12, init_episodes=10,
 
     minibatchs = [replay_buffer.get_minibatch() for _ in range(10)]
 
-    while global_steps < 2000000:
+    while global_steps < 200000000:
 
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1, timeout=0)
 
