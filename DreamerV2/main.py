@@ -528,7 +528,8 @@ class DreamerV2Agent:
 
         info = {
             "actor_loss": actor_loss,
-            "actor_entropy": -tf.reduce_mean(ent),
+            "objective": tf.reduce_mean(objective),
+            "actor_entropy": tf.reduce_mean(ent),
             "value_loss": value_loss,
             "imagine_rewards": total_imgaine_rewards
             }
