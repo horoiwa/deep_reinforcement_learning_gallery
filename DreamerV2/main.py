@@ -113,27 +113,29 @@ class DreamerV2Agent:
         self.value.load_weights(str(loaddir / "critic"))
         self.target_value.load_weights(str(loaddir / "critic"))
 
-    def set_weights(self, wm_weights, policy_weights, critic_weights):
+    def set_weights(self, weights):
+
+        wm_weights, policy_weights, value_weights = weights
 
         self.world_model.set_weights(wm_weights)
         self.policy.set_weights(policy_weights)
-        self.value.set_weights(critic_weights)
-        self.target_value.set_weights(critic_weights)
+        self.value.set_weights(value_weights)
+        self.target_value.set_weights(value_weights)
 
     def get_weights(self):
 
-        weights = (self.world_model.get_weights(),
-                   self.policy.get_weights(),
-                   self.value.get_weights(),
-                   )
+        weights = (
+            self.world_model.get_weights(),
+            self.policy.get_weights(),
+            self.value.get_weights(),
+            )
 
         return weights
 
     def rollout(self, weights=None):
 
         if weights:
-            wm_weights, policy_weights, criric_weights = weights
-            self.set_weights(wm_weights, policy_weights, criric_weights)
+            self.set_weights(weights)
 
         env = gym.make(self.env_id)
 
@@ -556,7 +558,7 @@ class DreamerV2Agent:
 
         return adv, v_target
 
-    def testplay(self, test_id, video_dir: Path, weights=None):
+    def testplay(self, test_id, video_dir: Path = None, weights=None):
 
         images = []
 
@@ -621,10 +623,11 @@ class DreamerV2Agent:
             elif episode_steps > 4000:
                 break
 
-        images[0].save(
-            f'{video_dir}/testplay_{test_id}.gif',
-            save_all=True, append_images=images[1:],
-            optimize=False, duration=120, loop=0)
+        if video_dir is not None:
+            images[0].save(
+                f'{video_dir}/testplay_{test_id}.gif',
+                save_all=True, append_images=images[1:],
+                optimize=False, duration=120, loop=0)
 
         return episode_steps, episode_rewards
 
@@ -714,57 +717,26 @@ class DreamerV2Agent:
 @ray.remote(num_cpus=1, num_gpus=1)
 class Learner(DreamerV2Agent):
 
-    def __init(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 
 @ray.remote(num_cpus=1, num_gpus=0)
 class Actor(DreamerV2Agent):
 
-    def __init(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 
 @ray.remote(num_cpus=1, num_gpus=0)
 class Tester(DreamerV2Agent):
 
-    def __init(self, *args, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
 
-def main(resume=None, num_actors=2, init_episodes=10,
+def main(resume=None, num_actors=12, init_episodes=10,
          env_id="BreakoutDeterministic-v4"):
-
-    """ Setup Ape-X architecture
-    """
-
-    ray.init()
-
-    config = Config()
-
-    learner = Learner.remote(env_id=env_id, config=config)
-
-    epsilons = [0.3 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
-    print("Epsilons", epsilons)
-
-    actors = [Actor.remote(
-        pid=i, env_id=env_id, config=config, epsilon=epsilons[i],
-        ) for i in range(num_actors)]
-
-    tester = Tester.remote(env_id=env_id, config=config)
-
-    replay_buffer = SequenceReplayBuffer(
-        buffer_size=config.buffer_size,
-        seq_len=config.sequence_length,
-        batch_size=config.batch_size,
-        action_space=gym.make(env_id).action_space.n,
-        )
-
-    if resume:
-        learner.load.remote("checkpoints")
-
-    current_weights = ray.put(ray.get(learner.get_weights.remote()))
-
 
     """ Setup training log dirs
     """
@@ -782,15 +754,44 @@ def main(resume=None, num_actors=2, init_episodes=10,
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
+    """ Setup Ape-X architecture
+    """
+
+    ray.init()
+
+    config = Config()
+
+    learner = Learner.remote(env_id=env_id, config=config)
+
+    epsilons = [0.6 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
+    print("Epsilons", epsilons)
+
+    actors = [Actor.remote(
+        pid=i, env_id=env_id, config=config, epsilon=max(0.05, epsilons[i]),
+        ) for i in range(num_actors)]
+
+    tester = Tester.remote(env_id=env_id, config=config)
+
+    replay_buffer = SequenceReplayBuffer(
+        buffer_size=config.buffer_size,
+        seq_len=config.sequence_length,
+        batch_size=config.batch_size,
+        action_space=gym.make(env_id).action_space.n,
+        )
+
+    if resume:
+        learner.load.remote("checkpoints")
+
+    current_weights = ray.put(ray.get(learner.get_weights.remote()))
+
     """ Initial collcetion of experience
     """
     wip_actors = [actor.rollout.remote(weights=current_weights) for actor in actors]
     for _ in range(init_episodes):
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
         pid, episode, steps, score = ray.get(finished_actor[0])
-        print(f"{pid}: {score} : {steps}steps")
+        print(f"PID-{pid}: {score} : {steps}steps")
         replay_buffer.add_episode(episode)
-
         wip_actors.extend(
             [actors[pid].rollout.remote(current_weights)])
 
@@ -798,7 +799,7 @@ def main(resume=None, num_actors=2, init_episodes=10,
     """
     global_steps = 0 if resume is None else int(resume["global_steps"])
 
-    learner_update_count = 0
+    learner_update_count, test_count = 0, 0
 
     """ Start training
     """
@@ -815,17 +816,22 @@ def main(resume=None, num_actors=2, init_episodes=10,
 
     while global_steps < 2000000:
 
-        finished_actors, wip_actors = ray.wait(wip_actors, num_returns=1, timeout=0)
+        finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1, timeout=0)
 
-        if finished_actors:
+        if finished_actor:
             pid, episode, steps, score = ray.get(finished_actor[0])
             replay_buffer.add_episode(episode)
             global_steps += steps
             print(f"PID-{pid}: {score} : {steps}steps")
+            wip_actors.extend([actors[pid].rollout.remote(current_weights)])
 
         finished_learner, _ = ray.wait([wip_learner], timeout=0)
 
         if finished_learner:
+            learner_update_count += 1
+
+            print(f"== Learner Update: {learner_update_count} ==")
+
             weights, info = ray.get(finished_learner[0])
             current_weights = ray.put(weights)
 
@@ -833,13 +839,11 @@ def main(resume=None, num_actors=2, init_episodes=10,
                 for key, value in info.items():
                     tf.summary.scalar(key, value, step=global_steps)
 
-            learner_update_count += 1
-
-            if learner_update_count % 100 == 0:
+            if learner_update_count % 50 == 0:
                 print("== Save weights ==")
                 ray.get(learner.save.remote("checkpoints"))
 
-            if learner_update_count % 150 == 0:
+            if learner_update_count % 40 == 0:
                 print("== Update Target-value ==")
                 ray.get(learner.set_weights.remote(current_weights))
 
@@ -853,10 +857,17 @@ def main(resume=None, num_actors=2, init_episodes=10,
         finished_tester, _ = ray.wait([wip_tester], timeout=0)
 
         if finished_tester:
+
+            test_count += 1
+
             test_steps, test_score = ray.get(finished_tester[0])
 
+            _videodir = videodir if test_count % 25 == 0 else None
+
             wip_tester = tester.testplay.remote(
-                test_id=global_steps, video_dir=videodir, weights=current_weights)
+                test_id=global_steps, video_dir=_videodir, weights=current_weights)
+
+            print(f"Test {test_count}: {test_score} : {test_steps}steps")
 
             with summary_writer.as_default():
                 tf.summary.scalar("test_steps", test_steps, step=global_steps)
