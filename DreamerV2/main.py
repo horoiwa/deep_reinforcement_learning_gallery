@@ -472,50 +472,34 @@ class DreamerV2Agent:
             )
 
         states = trajectory['state'][0]
-        actions = trajectory['action'][0]
+        selected_actions = trajectory['action'][0]
 
         total_imgaine_rewards = tf.reduce_mean(
             tf.reduce_sum(trajectory['reward'], axis=1)
             )
 
-        _, old_probs = self.policy(states)
+        with tf.GradientTape() as tape:
 
-        old_logprobs = tf.reduce_sum(
-            actions * tf.math.log(old_probs + 1e-5), axis=1
-        )
+            _, action_probs = self.policy(states)
 
-        for _ in range(5):
+            action_probs += 1e-5
 
-            with tf.GradientTape() as tape:
+            log_action_probs = tf.reduce_sum(
+                selected_actions * tf.math.log(action_probs), axis=1)
 
-                _, new_probs = self.policy(states)
+            objective = selected_actions * log_action_probs * advantages
 
-                new_probs += 1e-5
+            dist = tfd.Independent(
+                tfd.OneHotCategorical(probs=action_probs),
+                reinterpreted_batch_ndims=0)
+            ent = dist.entropy()
 
-                new_logprobs = tf.reduce_sum(
-                    actions * tf.math.log(new_probs), axis=1)
+            policy_loss = -1 * objective + self.config.ent_scale * -1 * ent
+            policy_loss = tf.reduce_mean(policy_loss)
 
-                ratio = tf.exp(new_logprobs - old_logprobs)
-
-                ratio_clipped = tf.clip_by_value(ratio, 0.9, 1.1)
-
-                obj_unclipped = ratio * advantages
-
-                obj_clipped = ratio_clipped * advantages
-
-                objective = tf.minimum(obj_unclipped, obj_clipped)
-
-                dist = tfd.Independent(
-                    tfd.OneHotCategorical(probs=new_probs),
-                    reinterpreted_batch_ndims=0)
-                ent = dist.entropy()
-
-                actor_loss = -1 * objective + self.config.ent_scale * -1 * ent
-                actor_loss = tf.reduce_mean(actor_loss)
-
-            grads = tape.gradient(actor_loss, self.policy.trainable_variables)
-            self.policy_optimizer.apply_gradients(
-                        zip(grads, self.policy.trainable_variables))
+        grads = tape.gradient(policy_loss, self.policy.trainable_variables)
+        self.policy_optimizer.apply_gradients(
+                    zip(grads, self.policy.trainable_variables))
 
         with tf.GradientTape() as tape:
             v_pred = self.value(states)
@@ -527,7 +511,7 @@ class DreamerV2Agent:
                     zip(grads, self.value.trainable_variables))
 
         info = {
-            "actor_loss": actor_loss,
+            "policy_loss": policy_loss,
             "objective": tf.reduce_mean(objective),
             "actor_entropy": tf.reduce_mean(ent),
             "value_loss": value_loss,
@@ -869,7 +853,7 @@ def main(resume=None, num_actors=12, init_episodes=10,
 
             test_steps, test_score = ray.get(finished_tester[0])
 
-            _videodir = videodir if test_count % 25 == 0 else None
+            _videodir = videodir if test_count % 50 == 0 else None
 
             wip_tester = tester.testplay.remote(
                 test_id=global_steps, video_dir=_videodir, weights=current_weights)
@@ -883,5 +867,5 @@ def main(resume=None, num_actors=12, init_episodes=10,
 
 if __name__ == "__main__":
     resume = None
-    #resume = {"global_steps": 2000350)
+    #resume = {"global_steps": 6531000}
     main(resume)
