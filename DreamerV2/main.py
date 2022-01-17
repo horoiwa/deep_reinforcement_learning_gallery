@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 import math
 from pathlib import Path
+import pdb
 import shutil
 import random
+from turtle import pd
 
 import ray
 import tensorflow as tf
@@ -24,16 +26,14 @@ class Config:
     num_minibatchs: int = 10
     gamma: float = 0.997
     anneal_stpes: int = 500000
-    update_period: int = 8
-    target_update_period: int = 1200
 
     kl_scale: float = 0.1     # KL loss scale, β
     kl_alpha: float = 0.8          # KL balancing
-    latent_dim: int = 32           # discrete latent dimensions
-    n_atoms: int = 32              # discrete latent classes
+    latent_dim: int = 16           # discrete latent dimensions
+    n_atoms: int = 16              # discrete latent classes
     lr_world: float = 2e-4         # learning rate of world model
 
-    imagination_horizon: int = 10   # Imagination horizon, H
+    imagination_horizon: int = 5   # Imagination horizon, H
     gamma_discount: float = 0.995  # discount factor γ
     lambda_gae: float = 0.95       # λ for Generalized advantage estimator
     ent_scale: float = 1e-2
@@ -315,10 +315,11 @@ class DreamerV2Agent:
             zip(grads, self.world_model.trainable_variables)
             )
 
-        info = {"wm_loss": L * loss, "img_log_loss": -img_log_loss,
+        info = {"wm_loss": L * loss,
+                "img_log_loss": -img_log_loss,
                 "reward_log_loss": -reward_log_loss,
                 "discount_log_loss": -discount_log_loss,
-                "kl_loss": kl_loss,}
+                "kl_loss": kl_loss}
 
         return z_posts, hs, info
 
@@ -481,21 +482,19 @@ class DreamerV2Agent:
         with tf.GradientTape() as tape:
 
             _, action_probs = self.policy(states)
-
             action_probs += 1e-5
 
-            log_action_probs = tf.reduce_sum(
-                selected_actions * tf.math.log(action_probs), axis=1)
-
-            objective = selected_actions * log_action_probs * advantages
+            objective = tf.reduce_sum(
+                selected_actions * tf.math.log(action_probs), axis=1, keepdims=True
+                ) * advantages
 
             dist = tfd.Independent(
                 tfd.OneHotCategorical(probs=action_probs),
                 reinterpreted_batch_ndims=0)
-            ent = dist.entropy()
+            ent = tf.reshape(dist.entropy(), [-1, 1])
 
-            policy_loss = -1 * objective + self.config.ent_scale * -1 * ent
-            policy_loss = tf.reduce_mean(policy_loss)
+            policy_loss = objective + self.config.ent_scale * ent
+            policy_loss = -1 * tf.reduce_mean(policy_loss)
 
         grads = tape.gradient(policy_loss, self.policy.trainable_variables)
         self.policy_optimizer.apply_gradients(
@@ -726,7 +725,7 @@ class Tester(DreamerV2Agent):
         super().__init__(*args, **kwargs)
 
 
-def main(resume=None, num_actors=12, init_episodes=10,
+def main(resume=None, num_actors=2, init_episodes=10,
          env_id="BreakoutDeterministic-v4"):
 
     """ Setup training log dirs
@@ -814,7 +813,7 @@ def main(resume=None, num_actors=12, init_episodes=10,
             replay_buffer.add_episode(episode)
             global_steps += steps
             print(f"PID-{pid}: {score} : {steps}steps")
-            wip_actors.extend([actors[pid].rollout.remote(current_weights)])
+            #wip_actors.extend([actors[pid].rollout.remote(current_weights)])
 
         finished_learner, _ = ray.wait([wip_learner], timeout=0)
 
@@ -858,7 +857,7 @@ def main(resume=None, num_actors=12, init_episodes=10,
             wip_tester = tester.testplay.remote(
                 test_id=global_steps, video_dir=_videodir, weights=current_weights)
 
-            print(f"Test {test_count}: {test_score} : {test_steps}steps")
+            #print(f"Test {test_count}: {test_score} : {test_steps}steps")
 
             with summary_writer.as_default():
                 tf.summary.scalar("test_steps", test_steps, step=global_steps)
