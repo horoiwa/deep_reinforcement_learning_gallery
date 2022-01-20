@@ -20,25 +20,26 @@ import util
 class Config:
 
     batch_size: int = 10           # Batch size, B
-    burnin_lenght: int = 3
     sequence_length: int = 10      # Sequence Lenght, L
-    buffer_size: int = int(1e6)    # Replay buffer size (FIFO)
+    buffer_size: int = 500000      # Replay buffer size (FIFO)
     num_minibatchs: int = 10
     gamma: float = 0.997
     anneal_stpes: int = 500000
 
     kl_scale: float = 0.1     # KL loss scale, β
     kl_alpha: float = 0.8          # KL balancing
-    latent_dim: int = 16           # discrete latent dimensions
-    n_atoms: int = 16              # discrete latent classes
-    lr_world: float = 2e-4         # learning rate of world model
+    latent_dim: int = 24           # discrete latent dimensions
+    n_atoms: int = 24              # discrete latent classes
+    #lr_world: float = 2e-4         # learning rate of world model
+    lr_world: float = 5e-4         # learning rate of world model
 
     imagination_horizon: int = 5   # Imagination horizon, H
     gamma_discount: float = 0.995  # discount factor γ
     lambda_gae: float = 0.95       # λ for Generalized advantage estimator
-    ent_scale: float = 1e-2
-    lr_actor: float = 4e-5
-    lr_critic: float = 1e-4
+    ent_scale: float = 1e-3
+    #lr_actor: float = 4e-5
+    lr_actor: float = 5e-5
+    lr_critic: float = 2e-4
 
     adam_epsilon: float = 1e-5
     adam_decay: float = 1e-6
@@ -467,7 +468,7 @@ class DreamerV2Agent:
         """
 
         #: adv: (L*B, 1)
-        advantages, v_targets = self.compute_GAE(
+        advantages, v_targets = self.compute_advantage(
             trajectory['state'], trajectory['reward'],
             trajectory['next_state'], trajectory['discount']
             )
@@ -519,28 +520,45 @@ class DreamerV2Agent:
 
         return info
 
-    def compute_GAE(self, states, rewards, next_states, discounts):
-        """ HIGH-DIMENSIONAL CONTINUOUS CONTROL USING GENERALIZED ADVANTAGE ESTIMATION
-            https://arxiv.org/pdf/1506.02438.pdf
-        """
+    def compute_advantage(self, states, rewards, next_states, discounts, method="multistep"):
+
         T, B, F = states.shape
-        lambda_ = self.config.lambda_gae
 
         v = self.target_value(states)
+
         v_next = self.target_value(next_states)
-        deltas = rewards + discounts * v_next - v
 
-        _weights = tf.concat(
-            [tf.ones_like(discounts[:1]), discounts[:-1] * lambda_],
-            axis=0)
+        if method == "gae":
+            """ HIGH-DIMENSIONAL CONTINUOUS CONTROL USING GENERALIZED ADVANTAGE ESTIMATION
+                https://arxiv.org/pdf/1506.02438.pdf
+            """
+            lambda_ = self.config.lambda_gae
 
-        weights = tf.math.cumprod(_weights, axis=0)
+            deltas = rewards + discounts * v_next - v
 
-        adv = tf.reduce_sum(weights * deltas, axis=0)
+            _weights = tf.concat(
+                [tf.ones_like(discounts[:1]), discounts[:-1] * lambda_],
+                axis=0)
 
-        v_target = adv + v[0]
+            weights = tf.math.cumprod(_weights, axis=0)
 
-        return adv, v_target
+            advantage = tf.reduce_sum(weights * deltas, axis=0)
+
+            v_target = advantage + v[0]
+
+        elif method == "multistep":
+            _weights = tf.concat(
+                [tf.ones_like(discounts[:1]), discounts], axis=0)
+            weights = tf.math.cumprod(_weights, axis=0)
+            discounted_returns = tf.concat([rewards, v_next[-2:-1]], axis=0) * weights
+
+            v_target = tf.math.cumsum(discounted_returns, axis=0)[-1]
+            advantage = v_target - v[0]
+
+        else:
+            raise NotImplementedError()
+
+        return advantage, v_target
 
     def testplay(self, test_id, video_dir: Path = None, weights=None):
 
@@ -725,7 +743,7 @@ class Tester(DreamerV2Agent):
         super().__init__(*args, **kwargs)
 
 
-def main(resume=None, num_actors=2, init_episodes=10,
+def main(resume=None, num_actors=2, init_episodes=5,
          env_id="BreakoutDeterministic-v4"):
 
     """ Setup training log dirs
@@ -866,5 +884,5 @@ def main(resume=None, num_actors=2, init_episodes=10,
 
 if __name__ == "__main__":
     resume = None
-    #resume = {"global_steps": 6531000}
+    #resume = {"global_steps": 14358730}
     main(resume)
