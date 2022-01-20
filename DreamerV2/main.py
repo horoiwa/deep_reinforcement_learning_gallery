@@ -1,10 +1,8 @@
 from dataclasses import dataclass
 import math
 from pathlib import Path
-import pdb
 import shutil
 import random
-from turtle import pd
 
 import ray
 import tensorflow as tf
@@ -256,14 +254,14 @@ class DreamerV2Agent:
 
             hs, z_prior_probs, z_posts, z_post_probs = [], [], [], []
 
-            img_outs, r_logits, disc_logits = [], [], []
+            img_outs, r_means, disc_logits = [], [], []
 
             for t in tf.range(L+1):
 
                 _outputs = self.world_model(observations[t], prev_z, prev_h, prev_a)
 
                 (h, z_prior, z_prior_prob, z_post, z_post_prob,
-                 feat, img_out, reward_logit, disc_logit) = _outputs
+                 feat, img_out, reward_mu, disc_logit) = _outputs
 
                 hs.append(h)
 
@@ -275,7 +273,7 @@ class DreamerV2Agent:
 
                 img_outs.append(img_out)
 
-                r_logits.append(reward_logit)
+                r_means.append(reward_mu)
 
                 disc_logits.append(disc_logit)
 
@@ -293,7 +291,7 @@ class DreamerV2Agent:
 
             img_outs = tf.stack(img_outs, axis=0)[:-1]
 
-            r_logits = tf.stack(r_logits, axis=0)[1:]
+            r_means = tf.stack(r_means, axis=0)[1:]
 
             disc_logits = tf.stack(disc_logits, axis=0)[1:]
 
@@ -302,9 +300,9 @@ class DreamerV2Agent:
 
             img_log_loss = self._compute_img_log_loss(observations[:-1], img_outs)
 
-            reward_log_loss = self._compute_log_loss(rewards, r_logits)
+            reward_log_loss = self._compute_log_loss(rewards, r_means, mode="reward")
 
-            discount_log_loss = self._compute_log_loss(discounts, disc_logits)
+            discount_log_loss = self._compute_log_loss(discounts, disc_logits, mode="discount")
 
             loss = - img_log_loss - reward_log_loss - discount_log_loss + self.config.kl_scale * kl_loss
 
@@ -397,17 +395,21 @@ class DreamerV2Agent:
 
         return loss
 
-    def _compute_log_loss(self, y_true, y_pred):
+    def _compute_log_loss(self, y_true, y_pred, mode):
         """
         Inputs:
             y_true: (L, B, 1)
             y_pred: (L, B, 1)
-            head: "reward" or "discount"
+            mode: "reward" or "discount"
         """
-
-        dist = tfd.Independent(
-            tfd.Bernoulli(logits=y_pred), reinterpreted_batch_ndims=1
-            )
+        if mode == "discount":
+            dist = tfd.Independent(
+                tfd.Bernoulli(logits=y_pred), reinterpreted_batch_ndims=1
+                )
+        elif mode == "reward":
+            dist = tfd.Independent(
+                tfd.Normal(loc=y_pred, scale=0.1), reinterpreted_batch_ndims=1
+                )
 
         log_prob = dist.log_prob(y_true)
 
@@ -451,10 +453,8 @@ class DreamerV2Agent:
         #: reward_head(s_t+1) -> r_t
         #: Distribution.mode()は確立最大値を返すのでNormalの場合は
         #: trjactory["reward"] == rewards
-        reward_logits = self.world_model.reward_head(trajectory['next_state'])
-        trajectory["reward"] = tfd.Independent(
-                tfd.Bernoulli(logits=reward_logits), reinterpreted_batch_ndims=1
-                ).mean()
+        rewards = self.world_model.reward_head(trajectory['next_state'])
+        trajectory["reward"] = rewards
 
         disc_logits = self.world_model.discount_head(trajectory['next_state'])
         trajectory["discount"] = tfd.Independent(
@@ -585,7 +585,7 @@ class DreamerV2Agent:
 
             (h, z_prior, z_prior_probs, z_post,
              z_post_probs, feat, img_out,
-             r_logit, discount_logit) = self.world_model(obs, prev_z, prev_h, prev_a)
+             r_pred, discount_logit) = self.world_model(obs, prev_z, prev_h, prev_a)
 
             if episode_steps == 0:
                 action = 1
@@ -601,8 +601,6 @@ class DreamerV2Agent:
             img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
 
             disc = tfd.Bernoulli(logits=discount_logit).mean()
-
-            r_pred = tfd.Bernoulli(logits=r_logit).mean()
 
             r_pred_total += float(r_pred)
 
@@ -661,9 +659,7 @@ class DreamerV2Agent:
 
                 (h, z_prior, z_prior_probs, z_post,
                  z_post_probs, feat, img_out,
-                 r_logit, disc_logit) = self.world_model(obs, prev_z, prev_h, prev_a)
-
-                r_pred = tfd.Bernoulli(logits=r_logit).mean()
+                 r_pred, disc_logit) = self.world_model(obs, prev_z, prev_h, prev_a)
 
                 discount_pred = tfd.Bernoulli(logits=disc_logit).mean()
 
@@ -692,9 +688,7 @@ class DreamerV2Agent:
 
                 img_out = img_out.numpy()[0, :, :, 0]
 
-                r_logit = self.world_model.reward_head(feat)
-
-                r_pred = tfd.Bernoulli(logits=r_logit).mean()
+                r_pred = self.world_model.reward_head(feat)
 
                 disc_logit = self.world_model.discount_head(feat)
 
@@ -743,7 +737,7 @@ class Tester(DreamerV2Agent):
         super().__init__(*args, **kwargs)
 
 
-def main(resume=None, num_actors=2, init_episodes=5,
+def main(resume=None, num_actors=10, init_episodes=100,
          env_id="BreakoutDeterministic-v4"):
 
     """ Setup training log dirs
@@ -771,7 +765,7 @@ def main(resume=None, num_actors=2, init_episodes=5,
 
     learner = Learner.remote(env_id=env_id, config=config)
 
-    epsilons = [0.6 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
+    epsilons = [0.4 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
     print("Epsilons", epsilons)
 
     actors = [Actor.remote(
