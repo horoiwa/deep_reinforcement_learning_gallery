@@ -825,7 +825,7 @@ def main(resume=None, num_actors=10, init_episodes=100,
             replay_buffer.add_episode(episode)
             global_steps += steps
             print(f"PID-{pid}: {score} : {steps}steps")
-            #wip_actors.extend([actors[pid].rollout.remote(current_weights)])
+            wip_actors.extend([actors[pid].rollout.remote(current_weights)])
 
         finished_learner, _ = ray.wait([wip_learner], timeout=0)
 
@@ -869,7 +869,7 @@ def main(resume=None, num_actors=10, init_episodes=100,
             wip_tester = tester.testplay.remote(
                 test_id=global_steps, video_dir=_videodir, weights=current_weights)
 
-            #print(f"Test {test_count}: {test_score} : {test_steps}steps")
+            print(f"Test {test_count}: {test_score} : {test_steps}steps")
 
             with summary_writer.as_default():
                 tf.summary.scalar("test_steps", test_steps, step=global_steps)
