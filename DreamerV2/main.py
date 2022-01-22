@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-import math
 from pathlib import Path
 import shutil
 import random
@@ -7,6 +6,7 @@ import random
 import ray
 import tensorflow as tf
 from tensorflow_probability import distributions as tfd
+import numpy as np
 import gym
 
 from buffer import SequenceReplayBuffer, EpisodeBuffer
@@ -29,15 +29,14 @@ class Config:
     latent_dim: int = 24           # discrete latent dimensions
     n_atoms: int = 24              # discrete latent classes
     #lr_world: float = 2e-4         # learning rate of world model
-    lr_world: float = 5e-4         # learning rate of world model
+    lr_world: float = 3e-4         # learning rate of world model
 
     imagination_horizon: int = 5   # Imagination horizon, H
     gamma_discount: float = 0.995  # discount factor γ
     lambda_gae: float = 0.95       # λ for Generalized advantage estimator
-    ent_scale: float = 1e-3
-    #lr_actor: float = 4e-5
-    lr_actor: float = 5e-5
-    lr_critic: float = 2e-4
+    ent_scale: float = 5e-3
+    lr_actor: float = 4e-5
+    lr_critic: float = 1e-4
 
     adam_epsilon: float = 1e-5
     adam_decay: float = 1e-6
@@ -468,97 +467,96 @@ class DreamerV2Agent:
         """
 
         #: adv: (L*B, 1)
-        advantages, v_targets = self.compute_advantage(
+        targets, weights = self.compute_target(
             trajectory['state'], trajectory['reward'],
             trajectory['next_state'], trajectory['discount']
             )
+        #: (H, L*B, ...)
+        states = trajectory['state']
+        selected_actions = trajectory['action']
 
-        states = trajectory['state'][0]
-        selected_actions = trajectory['action'][0]
+        with tf.GradientTape() as tape1:
+            v_pred = self.value(states)
+            advantages = targets - v_pred
+            value_loss = 0.5 * tf.square(advantages)
+            discount_value_loss = tf.reduce_mean(value_loss * weights)
 
-        total_imgaine_rewards = tf.reduce_mean(
-            tf.reduce_sum(trajectory['reward'], axis=1)
-            )
+        grads = tape1.gradient(discount_value_loss, self.value.trainable_variables)
+        self.value_optimizer.apply_gradients(
+                    zip(grads, self.value.trainable_variables))
 
-        with tf.GradientTape() as tape:
+        with tf.GradientTape() as tape2:
 
             _, action_probs = self.policy(states)
             action_probs += 1e-5
 
-            objective = tf.reduce_sum(
-                selected_actions * tf.math.log(action_probs), axis=1, keepdims=True
-                ) * advantages
+            selected_action_logprobs = tf.reduce_sum(
+                selected_actions * tf.math.log(action_probs), axis=2, keepdims=True
+                )
+
+            objective = selected_action_logprobs * advantages
 
             dist = tfd.Independent(
                 tfd.OneHotCategorical(probs=action_probs),
                 reinterpreted_batch_ndims=0)
-            ent = tf.reshape(dist.entropy(), [-1, 1])
+            ent = dist.entropy()
 
-            policy_loss = objective + self.config.ent_scale * ent
-            policy_loss = -1 * tf.reduce_mean(policy_loss)
+            policy_loss = objective + self.config.ent_scale * ent[..., None]
+            policy_loss *= -1
+            discounted_policy_loss = tf.reduce_mean(policy_loss * weights)
 
-        grads = tape.gradient(policy_loss, self.policy.trainable_variables)
+        grads = tape2.gradient(discounted_policy_loss, self.policy.trainable_variables)
         self.policy_optimizer.apply_gradients(
                     zip(grads, self.policy.trainable_variables))
 
-        with tf.GradientTape() as tape:
-            v_pred = self.value(states)
-            value_loss = 0.5 * tf.square(v_targets - v_pred)
-            value_loss = tf.reduce_mean(value_loss)
-
-        grads = tape.gradient(value_loss, self.value.trainable_variables)
-        self.value_optimizer.apply_gradients(
-                    zip(grads, self.value.trainable_variables))
-
         info = {
-            "policy_loss": policy_loss,
+            "policy_loss": tf.reduce_mean(policy_loss),
             "objective": tf.reduce_mean(objective),
             "actor_entropy": tf.reduce_mean(ent),
-            "value_loss": value_loss,
-            "imagine_rewards": total_imgaine_rewards
+            "value_loss": tf.reduce_mean(value_loss),
+            "target_0": tf.reduce_mean(targets[0]),
+            "target_-1": tf.reduce_mean(targets[-1]),
             }
 
         return info
 
-    def compute_advantage(self, states, rewards, next_states, discounts, method="multistep"):
+    def compute_target(self, states, rewards, next_states, discounts, method="mixed-multistep"):
 
         T, B, F = states.shape
 
-        v = self.target_value(states)
-
         v_next = self.target_value(next_states)
+
+        _weights = tf.concat(
+            [tf.ones_like(discounts[:1]), discounts[:-1]], axis=0)
+        weights = tf.math.cumprod(_weights, axis=0)
 
         if method == "gae":
             """ HIGH-DIMENSIONAL CONTINUOUS CONTROL USING GENERALIZED ADVANTAGE ESTIMATION
                 https://arxiv.org/pdf/1506.02438.pdf
             """
-            lambda_ = self.config.lambda_gae
+            raise NotImplementedError()
+            #lambda_ = self.config.lambda_gae
+            #deltas = rewards + discounts * v_next - v
+            #_weights = tf.concat(
+            #    [tf.ones_like(discounts[:1]), discounts[:-1] * lambda_],
+            #    axis=0)
+            #weights = tf.math.cumprod(_weights, axis=0)
+            #advantage = tf.reduce_sum(weights * deltas, axis=0)
+            #v_target = advantage + v[0]
 
-            deltas = rewards + discounts * v_next - v
+        elif method == "mixed-multistep":
 
-            _weights = tf.concat(
-                [tf.ones_like(discounts[:1]), discounts[:-1] * lambda_],
-                axis=0)
+            targets = np.zeros_like(v_next)  #: (H, L*B, 1)
+            last_value = v_next[-1]
 
-            weights = tf.math.cumprod(_weights, axis=0)
-
-            advantage = tf.reduce_sum(weights * deltas, axis=0)
-
-            v_target = advantage + v[0]
-
-        elif method == "multistep":
-            _weights = tf.concat(
-                [tf.ones_like(discounts[:1]), discounts], axis=0)
-            weights = tf.math.cumprod(_weights, axis=0)
-            discounted_returns = tf.concat([rewards, v_next[-2:-1]], axis=0) * weights
-
-            v_target = tf.math.cumsum(discounted_returns, axis=0)[-1]
-            advantage = v_target - v[0]
+            for i in reversed(range(targets.shape[0])):
+                last_value = rewards[i] + discounts[i] * last_value
+                targets[i] = last_value
 
         else:
             raise NotImplementedError()
 
-        return advantage, v_target
+        return targets, weights
 
     def testplay(self, test_id, video_dir: Path = None, weights=None):
 
@@ -737,7 +735,7 @@ class Tester(DreamerV2Agent):
         super().__init__(*args, **kwargs)
 
 
-def main(resume=None, num_actors=10, init_episodes=100,
+def main(resume=None, num_actors=10, init_episodes=50,
          env_id="BreakoutDeterministic-v4"):
 
     """ Setup training log dirs
@@ -765,7 +763,7 @@ def main(resume=None, num_actors=10, init_episodes=100,
 
     learner = Learner.remote(env_id=env_id, config=config)
 
-    epsilons = [0.4 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
+    epsilons = [0.6 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
     print("Epsilons", epsilons)
 
     actors = [Actor.remote(
@@ -878,5 +876,5 @@ def main(resume=None, num_actors=10, init_episodes=100,
 
 if __name__ == "__main__":
     resume = None
-    #resume = {"global_steps": 14358730}
+    #resume = {"global_steps": 34127583}
     main(resume)

@@ -220,7 +220,7 @@ class MLPHead(tf.keras.Model):
 
         self.d1 = kl.Dense(400, activation='elu')
         self.d2 = kl.Dense(400, activation='elu')
-        #self.d3 = kl.Dense(400, activation='elu')
+        self.d3 = kl.Dense(400, activation='elu')
         #self.d4 = kl.Dense(400, activation='elu')
 
         self.out = kl.Dense(out_shape)
@@ -229,7 +229,7 @@ class MLPHead(tf.keras.Model):
     def call(self, x):
         x = self.d1(x)
         x = self.d2(x)
-        #x = self.d3(x)
+        x = self.d3(x)
         #x = self.d4(x)
         out = self.out(x)
         return out
