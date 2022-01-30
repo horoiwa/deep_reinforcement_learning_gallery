@@ -218,12 +218,15 @@ class MLPHead(tf.keras.Model):
 
         super(MLPHead, self).__init__()
 
-        self.d1 = kl.Dense(400, activation='elu')
-        self.d2 = kl.Dense(400, activation='elu')
-        self.d3 = kl.Dense(400, activation='elu')
+        self.d1 = kl.Dense(400, activation='elu',
+                           kernel_initializer="Orthogonal")
+        self.d2 = kl.Dense(400, activation='elu'
+                           kernel_initializer="Orthogonal")
+        self.d3 = kl.Dense(400, activation='elu'
+                           kernel_initializer="Orthogonal")
         #self.d4 = kl.Dense(400, activation='elu')
 
-        self.out = kl.Dense(out_shape)
+        self.out = kl.Dense(out_shape, kernel_initializer="Orthogonal")
 
     @tf.function
     def call(self, x):
