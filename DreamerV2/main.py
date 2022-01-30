@@ -629,10 +629,7 @@ class DreamerV2Agent:
              z_post_probs, feat, img_out,
              r_pred, discount_logit) = self.world_model(obs, prev_z, prev_h, prev_a)
 
-            if episode_steps == 0:
-                action = 1
-            else:
-                action = self.policy.sample_action(feat, 0)
+            action = self.policy.sample_action(feat, 0)
 
             action_onehot = tf.one_hot([action], self.action_space)
 
