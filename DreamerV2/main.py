@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import shutil
 import random
+import datetime
 
 import ray
 import tensorflow as tf
@@ -19,23 +20,23 @@ class Config:
 
     batch_size: int = 10           # Batch size, B
     sequence_length: int = 10      # Sequence Lenght, L
-    buffer_size: int = 500000      # Replay buffer size (FIFO)
+    buffer_size: int = 200000      # Replay buffer size (FIFO)
     num_minibatchs: int = 10
     gamma: float = 0.997
-    anneal_stpes: int = 500000
 
     kl_scale: float = 0.1     # KL loss scale, β
     kl_alpha: float = 0.8          # KL balancing
     latent_dim: int = 24           # discrete latent dimensions
     n_atoms: int = 24              # discrete latent classes
     #lr_world: float = 2e-4         # learning rate of world model
-    lr_world: float = 3e-4         # learning rate of world model
+    lr_world: float = 5e-4         # learning rate of world model
 
     imagination_horizon: int = 5   # Imagination horizon, H
     gamma_discount: float = 0.995  # discount factor γ
     lambda_gae: float = 0.95       # λ for Generalized advantage estimator
     ent_scale: float = 5e-3
-    lr_actor: float = 4e-5
+    #lr_actor: float = 4e-5
+    lr_actor: float = 1e-4
     lr_critic: float = 1e-4
 
     adam_epsilon: float = 1e-5
@@ -93,10 +94,6 @@ class DreamerV2Agent:
         self.value(feat)
         self.target_value(feat)
         self.target_value.set_weights(self.value.get_weights())
-
-    def get_weights(self):
-        return (self.world_model.get_weights(),
-                self.policy.get_weights(), self.value.get_weights())
 
     def save(self, savedir=None):
         savedir = Path(savedir) if savedir is not None else Path("./checkpoints")
@@ -462,7 +459,7 @@ class DreamerV2Agent:
 
         return trajectory
 
-    def update_actor_critic(self, trajectory):
+    def update_actor_critic(self, trajectory, batch_size=64, strategy="PPO"):
         """ Actor-Critic update using PPO & Generalized Advantage Estimator
         """
 
@@ -475,39 +472,87 @@ class DreamerV2Agent:
         states = trajectory['state']
         selected_actions = trajectory['action']
 
-        with tf.GradientTape() as tape1:
-            v_pred = self.value(states)
-            advantages = targets - v_pred
-            value_loss = 0.5 * tf.square(advantages)
-            discount_value_loss = tf.reduce_mean(value_loss * weights)
+        N = weights.shape[0] * weights.shape[1]
+        states = tf.reshape(states, [N, -1])
+        selected_actions = tf.reshape(selected_actions, [N, -1])
+        targets = tf.reshape(targets, [N, -1])
+        weights = tf.reshape(weights, [N, -1])
+        _, old_action_probs = self.policy(states)
+        old_logprobs = tf.math.log(old_action_probs + 1e-5)
 
-        grads = tape1.gradient(discount_value_loss, self.value.trainable_variables)
-        self.value_optimizer.apply_gradients(
-                    zip(grads, self.value.trainable_variables))
+        for _ in range(5):
 
-        with tf.GradientTape() as tape2:
+            indices = np.random.choice(N, batch_size)
 
-            _, action_probs = self.policy(states)
-            action_probs += 1e-5
+            _states = tf.gather(states, indices)
+            _targets = tf.gather(targets, indices)
+            _selected_actions = tf.gather(selected_actions, indices)
+            _old_logprobs = tf.gather(old_logprobs, indices)
+            _weights = tf.gather(weights, indices)
 
-            selected_action_logprobs = tf.reduce_sum(
-                selected_actions * tf.math.log(action_probs), axis=2, keepdims=True
-                )
+            #: Update value network
+            with tf.GradientTape() as tape1:
+                v_pred = self.value(_states)
+                advantages = _targets - v_pred
+                value_loss = 0.5 * tf.square(advantages)
+                discount_value_loss = tf.reduce_mean(value_loss * _weights)
 
-            objective = selected_action_logprobs * advantages
+            grads = tape1.gradient(discount_value_loss, self.value.trainable_variables)
+            self.value_optimizer.apply_gradients(
+                        zip(grads, self.value.trainable_variables))
 
-            dist = tfd.Independent(
-                tfd.OneHotCategorical(probs=action_probs),
-                reinterpreted_batch_ndims=0)
-            ent = dist.entropy()
+            #: Update policy network
+            if strategy == "VanillaPG":
 
-            policy_loss = objective + self.config.ent_scale * ent[..., None]
-            policy_loss *= -1
-            discounted_policy_loss = tf.reduce_mean(policy_loss * weights)
+                with tf.GradientTape() as tape2:
+                    _, action_probs = self.policy(_states)
+                    action_probs += 1e-5
 
-        grads = tape2.gradient(discounted_policy_loss, self.policy.trainable_variables)
-        self.policy_optimizer.apply_gradients(
-                    zip(grads, self.policy.trainable_variables))
+                    selected_action_logprobs = tf.reduce_sum(
+                        _selected_actions * tf.math.log(action_probs),
+                        axis=1, keepdims=True
+                        )
+
+                    objective = selected_action_logprobs * advantages
+
+                    dist = tfd.Independent(
+                        tfd.OneHotCategorical(probs=action_probs),
+                        reinterpreted_batch_ndims=0)
+                    ent = dist.entropy()
+
+                    policy_loss = objective + self.config.ent_scale * ent[..., None]
+                    policy_loss *= -1
+                    discounted_policy_loss = tf.reduce_mean(policy_loss * _weights)
+
+            elif strategy == "PPO":
+
+                with tf.GradientTape() as tape2:
+                    _, action_probs = self.policy(_states)
+                    action_probs += 1e-5
+                    new_logprobs = tf.math.log(action_probs)
+
+                    ratio = tf.reduce_sum(
+                        _selected_actions * tf.exp(new_logprobs - _old_logprobs),
+                        axis=1, keepdims=True)
+                    ratio_clipped = tf.clip_by_value(ratio, 0.9, 1.1)
+
+                    obj_unclipped = ratio * advantages
+                    obj_clipped = ratio_clipped * advantages
+
+                    objective = tf.minimum(obj_unclipped, obj_clipped)
+
+                    dist = tfd.Independent(
+                        tfd.OneHotCategorical(probs=action_probs),
+                        reinterpreted_batch_ndims=0)
+                    ent = dist.entropy()
+
+                    policy_loss = objective + self.config.ent_scale * ent[..., None]
+                    policy_loss *= -1
+                    discounted_policy_loss = tf.reduce_mean(policy_loss * _weights)
+
+            grads = tape2.gradient(discounted_policy_loss, self.policy.trainable_variables)
+            self.policy_optimizer.apply_gradients(
+                        zip(grads, self.policy.trainable_variables))
 
         info = {
             "policy_loss": tf.reduce_mean(policy_loss),
@@ -735,15 +780,31 @@ class Tester(DreamerV2Agent):
         super().__init__(*args, **kwargs)
 
 
-def main(resume=None, num_actors=10, init_episodes=50,
-         env_id="BreakoutDeterministic-v4"):
+def main(resume=None, num_actors=5, init_episodes=50,
+         env_id="BreakoutDeterministic-v4", debug=False):
 
     """ Setup training log dirs
     """
     logdir, videodir = Path("./log"), Path("./video")
 
-    if resume is None:
+    if resume:
+        #: Create backup
+        if logdir.exists():
+            try:
+                shutil.copytree(
+                    logdir, "./log_"+str(datetime.date.today())
+                    )
+            except FileExistsError:
+                print("Skip crating bakup: log")
 
+        if Path("./checkpoints").exists():
+            try:
+                shutil.copytree(
+                    "./checkpoints", "./checkpoints_"+str(datetime.date.today())
+                    )
+            except FileExistsError:
+                print("Skip crating bakup: checkpoints")
+    else:
         if logdir.exists():
             shutil.rmtree(logdir)
         logdir.mkdir()
@@ -763,7 +824,7 @@ def main(resume=None, num_actors=10, init_episodes=50,
 
     learner = Learner.remote(env_id=env_id, config=config)
 
-    epsilons = [0.6 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
+    epsilons = [0.5 ** (1 + 7. * i / (num_actors - 1)) for i in range(num_actors)]
     print("Epsilons", epsilons)
 
     actors = [Actor.remote(
@@ -814,7 +875,7 @@ def main(resume=None, num_actors=10, init_episodes=50,
 
     minibatchs = [replay_buffer.get_minibatch() for _ in range(10)]
 
-    while global_steps < 200000000:
+    while True:
 
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1, timeout=0)
 
@@ -823,7 +884,8 @@ def main(resume=None, num_actors=10, init_episodes=50,
             replay_buffer.add_episode(episode)
             global_steps += steps
             print(f"PID-{pid}: {score} : {steps}steps")
-            wip_actors.extend([actors[pid].rollout.remote(current_weights)])
+            if not debug:
+                wip_actors.extend([actors[pid].rollout.remote(current_weights)])
 
         finished_learner, _ = ray.wait([wip_learner], timeout=0)
 
@@ -862,12 +924,12 @@ def main(resume=None, num_actors=10, init_episodes=50,
 
             test_steps, test_score = ray.get(finished_tester[0])
 
-            _videodir = videodir if test_count % 50 == 0 else None
+            if not debug:
+                print(f"Test {test_count}: {test_score} : {test_steps}steps")
 
+            _videodir = videodir if test_count % 50 == 0 else None
             wip_tester = tester.testplay.remote(
                 test_id=global_steps, video_dir=_videodir, weights=current_weights)
-
-            print(f"Test {test_count}: {test_score} : {test_steps}steps")
 
             with summary_writer.as_default():
                 tf.summary.scalar("test_steps", test_steps, step=global_steps)
@@ -876,5 +938,5 @@ def main(resume=None, num_actors=10, init_episodes=50,
 
 if __name__ == "__main__":
     resume = None
-    #resume = {"global_steps": 34127583}
+    #tresume = {"global_steps": 186599000}
     main(resume)
