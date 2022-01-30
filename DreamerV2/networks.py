@@ -220,9 +220,9 @@ class MLPHead(tf.keras.Model):
 
         self.d1 = kl.Dense(400, activation='elu',
                            kernel_initializer="Orthogonal")
-        self.d2 = kl.Dense(400, activation='elu'
+        self.d2 = kl.Dense(400, activation='elu',
                            kernel_initializer="Orthogonal")
-        self.d3 = kl.Dense(400, activation='elu'
+        self.d3 = kl.Dense(400, activation='elu',
                            kernel_initializer="Orthogonal")
         #self.d4 = kl.Dense(400, activation='elu')
 
