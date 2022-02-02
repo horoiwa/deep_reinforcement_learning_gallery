@@ -36,7 +36,7 @@ class Config:
     lambda_gae: float = 0.95       # λ for Generalized advantage estimator
     ent_scale: float = 5e-3
     #lr_actor: float = 4e-5
-    lr_actor: float = 5e-5
+    lr_actor: float = 2e-5
     lr_critic: float = 1e-4
 
     adam_epsilon: float = 1e-5
@@ -404,7 +404,7 @@ class DreamerV2Agent:
                 )
         elif mode == "reward":
             dist = tfd.Independent(
-                tfd.Normal(loc=y_pred, scale=1.0), reinterpreted_batch_ndims=1
+                tfd.Normal(loc=y_pred, scale=0.1), reinterpreted_batch_ndims=1
                 )
 
         log_prob = dist.log_prob(y_true)
@@ -934,5 +934,5 @@ def main(resume=None, num_actors=5, init_episodes=50,
 
 if __name__ == "__main__":
     #resume = None
-    resume = {"global_steps": 33099999}
+    resume = {"global_steps": 49009999}
     main(resume)
