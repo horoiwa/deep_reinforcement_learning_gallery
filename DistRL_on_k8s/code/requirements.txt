@@ -1,4 +1,4 @@
-tensorflow==2.5.2
+tensorflow==2.5.3
 tensorboard==2.6.0
 ray==1.5.2
 gym==0.19.0
