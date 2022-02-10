@@ -2,7 +2,7 @@ import time
 import os
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance
 
 
 def get_preprocess_func(env_name):
@@ -17,6 +17,7 @@ def _preprocess_breakout(frame, th=40.):
 
     image = Image.fromarray(frame)
     image = image.crop((0, 38, 160, 198)).convert("L")
+    image = ImageEnhance.Contrast(image).enhance(1.5)
     #image = image.point(lambda v: 255 if v > th else 0)
 
     image = image.resize((64, 64))

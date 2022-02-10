@@ -228,7 +228,6 @@ class MLPHead(tf.keras.Model):
 
         self.out = kl.Dense(out_shape, kernel_initializer="Orthogonal")
 
-    @tf.function
     def call(self, x):
         x = self.d1(x)
         x = self.d2(x)

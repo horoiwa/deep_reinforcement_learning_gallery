@@ -20,7 +20,7 @@ class Config:
 
     batch_size: int = 20           # Batch size, B
     sequence_length: int = 20      # Sequence Lenght, L
-    buffer_size: int = 200000       # Replay buffer size (FIFO)
+    buffer_size: int = 100000       # Replay buffer size (FIFO)
     num_minibatchs: int = 10
     gamma: float = 0.997
 
@@ -62,7 +62,7 @@ class DreamerV2Agent:
 
         self.preprocess_func = util.get_preprocess_func(env_name=self.env_id)
 
-        self.buffer = EpisodeBuffer()
+        self.buffer = EpisodeBuffer(seqlen=self.config.sequence_length)
 
         self.world_model = WorldModel(config)
         self.wm_optimizer = tf.keras.optimizers.Adam(
@@ -187,7 +187,7 @@ class DreamerV2Agent:
                 _ = self.buffer.get_episode()
                 return self.pid, [], 0, 0
 
-        sequences = self.buffer.get_episode()
+        sequences = self.buffer.get_sequences()
 
         return self.pid, sequences, episode_steps, episode_rewards
 
@@ -366,7 +366,7 @@ class DreamerV2Agent:
 
         return kl_loss
 
-    #@tf.function
+    @tf.function
     def _compute_img_log_loss(self, img_in, img_out):
         """
         Inputs:
@@ -774,7 +774,7 @@ class Tester(DreamerV2Agent):
         super().__init__(*args, **kwargs)
 
 
-def main(resume=None, num_actors=4, init_episodes=50,
+def main(resume=None, num_actors=5, init_episodes=50,
          env_id="BreakoutDeterministic-v4", debug=True):
 
     """ Setup training log dirs
@@ -845,9 +845,9 @@ def main(resume=None, num_actors=4, init_episodes=50,
     wip_actors = [actor.rollout.remote(weights=current_weights) for actor in actors]
     for _ in range(init_episodes):
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
-        pid, episode, steps, score = ray.get(finished_actor[0])
+        pid, sequences, steps, score = ray.get(finished_actor[0])
         print(f"PID-{pid}: {score} : {steps}steps")
-        replay_buffer.add_episode(episode)
+        replay_buffer.add_sequences(sequences)
         wip_actors.extend(
             [actors[pid].rollout.remote(current_weights)])
 
@@ -875,8 +875,8 @@ def main(resume=None, num_actors=4, init_episodes=50,
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1, timeout=0)
 
         if finished_actor:
-            pid, episode, steps, score = ray.get(finished_actor[0])
-            replay_buffer.add_episode(episode)
+            pid, sequences, steps, score = ray.get(finished_actor[0])
+            replay_buffer.add_sequences(sequences)
             global_steps += steps
             print(f"PID-{pid}: {score} : {steps}steps")
             if not debug:

@@ -31,7 +31,7 @@ class SequenceReplayBuffer:
 
         self.L = seq_len
 
-        self.buffer = collections.deque(maxlen=self.buffer_size+self.L)
+        self.buffer = collections.deque(maxlen=self.buffer_size)
 
         self.batch_size = batch_size
 
@@ -60,27 +60,8 @@ class SequenceReplayBuffer:
 
         while True:
 
-            selected_idx = random.randint(self.L, len(self.buffer)-self.L)
-            sequence = [pickle.loads(lz4f.decompress(self.buffer[idx]))
-                        for idx in range(selected_idx-self.L, selected_idx+self.L)]
-
-            #: sequence shold not cross episode
-            seqlen = len(sequence)
-            for i in range(seqlen//2, seqlen):
-                if sequence[i].done:
-                    sequence = sequence[i+1-self.L:i+1]
-                    assert sequence[-1].done, "Error #01"
-                    break
-            else:
-                sequence = sequence[-self.L:]
-
-            try:
-                assert len(sequence) == self.L, "Error #02"
-                assert np.all([not e.done for e in sequence[:-1]]), "Error #03"
-                assert np.array([e.done for e in sequence]).sum() < 2, "Error #04"
-            except:
-                print("Debug #02 #03 #04")
-                import pdb; pdb.set_trace()
+            selected_idx = random.randint(0, len(self.buffer)-1)
+            sequence = pickle.loads(lz4f.decompress(self.buffer[selected_idx]))
 
             #: prev_h, prev_zはsequenceの先頭だけでOK
             sequence = {
@@ -96,10 +77,10 @@ class SequenceReplayBuffer:
 
             yield sequence
 
-    def add_episode(self, episode: List[Experience]):
+    def add_sequences(self, sequences):
 
-        for exp in episode:
-            self.buffer.append(exp)
+        for seq in sequences:
+            self.buffer.append(seq)
 
     def get_minibatch(self):
 
@@ -118,9 +99,11 @@ class SequenceReplayBuffer:
 
 class EpisodeBuffer:
 
-    def __init__(self):
+    def __init__(self, seqlen):
 
         self.buffer = []
+
+        self.seqlen = seqlen
 
     def add(self, obs: np.array, action_onehot, reward, next_obs, done: bool,
             prev_z, prev_h, prev_a_onehot):
@@ -142,14 +125,25 @@ class EpisodeBuffer:
         exp = Experience(
             obs, action, reward, next_obs, done,
             prev_z, prev_h, prev_a_onehot)
-        exp = lz4f.compress(pickle.dumps(exp))
 
         self.buffer.append(exp)
 
-    def get_episode(self):
-        episode = copy.deepcopy(self.buffer)
+    def get_sequences(self):
+
+        assert self.buffer[-1].done
+
+        sequences = []
+
+        for t in range(0, len(self.buffer), self.seqlen):
+            if (t + self.seqlen) > len(self.buffer):
+                t = len(self.buffer) - self.seqlen
+            seq = self.buffer[t:t+self.seqlen]
+            seq = lz4f.compress(pickle.dumps(seq))
+            sequences.append(seq)
+
         self.buffer = []
-        return episode
+
+        return sequences
 
 
 if __name__ == "__main__":
