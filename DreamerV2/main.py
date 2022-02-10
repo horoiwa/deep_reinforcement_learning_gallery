@@ -18,9 +18,9 @@ import util
 @dataclass
 class Config:
 
-    batch_size: int = 10           # Batch size, B
-    sequence_length: int = 10      # Sequence Lenght, L
-    buffer_size: int = 50000      # Replay buffer size (FIFO)
+    batch_size: int = 20           # Batch size, B
+    sequence_length: int = 20      # Sequence Lenght, L
+    buffer_size: int = 200000       # Replay buffer size (FIFO)
     num_minibatchs: int = 10
     gamma: float = 0.997
 
@@ -28,15 +28,13 @@ class Config:
     kl_alpha: float = 0.8          # KL balancing
     latent_dim: int = 24           # discrete latent dimensions
     n_atoms: int = 24              # discrete latent classes
-    #lr_world: float = 2e-4         # learning rate of world model
-    lr_world: float = 5e-4         # learning rate of world model
+    lr_world: float = 2e-4         # learning rate of world model
 
-    imagination_horizon: int = 5   # Imagination horizon, H
+    imagination_horizon: int = 8   # Imagination horizon, H
     gamma_discount: float = 0.995  # discount factor γ
     lambda_gae: float = 0.95       # λ for Generalized advantage estimator
     ent_scale: float = 5e-3
-    #lr_actor: float = 4e-5
-    lr_actor: float = 2e-5
+    lr_actor: float = 4e-5
     lr_critic: float = 1e-4
 
     adam_epsilon: float = 1e-5
@@ -144,7 +142,7 @@ class DreamerV2Agent:
 
         done = False
 
-        lives = int(env.ale.lives())
+        # lives = int(env.ale.lives())
 
         while not done:
 
@@ -161,19 +159,18 @@ class DreamerV2Agent:
             next_obs = self.preprocess_func(next_frame)
 
             #: Note: DreamerV2 paper uses tanh clipping
-            #: But simple max-clipping works well for Breakout
             _reward = reward if reward <= 1.0 else 1.0
 
             #: Life loss as episode end
-            if info["ale.lives"] != lives:
-                lives = int(info["ale.lives"])
-                _done = True
-            else:
-                _done = done
+            # if info["ale.lives"] != lives:
+            #     lives = int(info["ale.lives"])
+            #     _done = True
+            # else:
+            #     _done = done
 
             #: (r_t-1, done_t-1, obs_t, action_t, done_t)
             self.buffer.add(
-                obs, action_onehot, _reward, next_obs, _done,
+                obs, action_onehot, _reward, next_obs, done,
                 prev_z, prev_h, prev_a
                 )
 
@@ -190,9 +187,9 @@ class DreamerV2Agent:
                 _ = self.buffer.get_episode()
                 return self.pid, [], 0, 0
 
-        episode = self.buffer.get_episode()
+        sequences = self.buffer.get_episode()
 
-        return self.pid, episode, episode_steps, episode_rewards
+        return self.pid, sequences, episode_steps, episode_rewards
 
     def update_networks(self, minibatchs):
 
@@ -369,7 +366,7 @@ class DreamerV2Agent:
 
         return kl_loss
 
-    @tf.function
+    #@tf.function
     def _compute_img_log_loss(self, img_in, img_out):
         """
         Inputs:
@@ -382,8 +379,8 @@ class DreamerV2Agent:
 
         img_out = tf.reshape(img_out, (L * B, H * W * C))
 
-        #dist = tfd.Independent(tfd.Normal(loc=img_out, scale=1.))
-        dist = tfd.Independent(tfd.Bernoulli(logits=img_out))
+        dist = tfd.Independent(tfd.Normal(loc=img_out, scale=1.))
+        #dist = tfd.Independent(tfd.Bernoulli(logits=img_out))
 
         log_prob = dist.log_prob(img_in)
 
@@ -391,6 +388,7 @@ class DreamerV2Agent:
 
         return loss
 
+    @tf.function
     def _compute_log_loss(self, y_true, y_pred, mode):
         """
         Inputs:
@@ -459,7 +457,7 @@ class DreamerV2Agent:
 
         return trajectory
 
-    def update_actor_critic(self, trajectory, batch_size=64, strategy="PPO"):
+    def update_actor_critic(self, trajectory, batch_size=512, strategy="PPO"):
         """ Actor-Critic update using PPO & Generalized Advantage Estimator
         """
 
@@ -480,7 +478,7 @@ class DreamerV2Agent:
         _, old_action_probs = self.policy(states)
         old_logprobs = tf.math.log(old_action_probs + 1e-5)
 
-        for _ in range(5):
+        for _ in range(10):
 
             indices = np.random.choice(N, batch_size)
 
@@ -637,7 +635,7 @@ class DreamerV2Agent:
 
             next_obs = self.preprocess_func(next_frame)
 
-            img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
+            #img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
 
             disc = tfd.Bernoulli(logits=discount_logit).mean()
 
@@ -723,7 +721,7 @@ class DreamerV2Agent:
 
                 img_out = self.world_model.decoder(feat)
 
-                img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
+                #img_out = tfd.Independent(tfd.Bernoulli(logits=img_out), 3).mean()
 
                 img_out = img_out.numpy()[0, :, :, 0]
 
@@ -776,8 +774,8 @@ class Tester(DreamerV2Agent):
         super().__init__(*args, **kwargs)
 
 
-def main(resume=None, num_actors=5, init_episodes=50,
-         env_id="BreakoutDeterministic-v4", debug=False):
+def main(resume=None, num_actors=4, init_episodes=50,
+         env_id="BreakoutDeterministic-v4", debug=True):
 
     """ Setup training log dirs
     """
@@ -843,6 +841,7 @@ def main(resume=None, num_actors=5, init_episodes=50,
 
     """ Initial collcetion of experience
     """
+    init_episodes = init_episodes if not debug else 5
     wip_actors = [actor.rollout.remote(weights=current_weights) for actor in actors]
     for _ in range(init_episodes):
         finished_actor, wip_actors = ray.wait(wip_actors, num_returns=1)
@@ -933,6 +932,6 @@ def main(resume=None, num_actors=5, init_episodes=50,
 
 
 if __name__ == "__main__":
-    #resume = None
-    resume = {"global_steps": 49009999}
-    main(resume)
+    resume = None
+    #resume = {"global_steps": 66839999}
+    main(resume, debug=False)

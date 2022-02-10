@@ -17,10 +17,10 @@ def _preprocess_breakout(frame, th=40.):
 
     image = Image.fromarray(frame)
     image = image.crop((0, 38, 160, 198)).convert("L")
-    image = image.point(lambda v: 255 if v > th else 0)
+    #image = image.point(lambda v: 255 if v > th else 0)
 
     image = image.resize((64, 64))
-    image = image.point(lambda v: 255 if v > th else 0)
+    #image = image.point(lambda v: 255 if v > th else 0)
 
     image_scaled = np.array(image) / 255.0
     image_out = image_scaled[np.newaxis, ..., np.newaxis]  #: (1, 64, 64, 1)
