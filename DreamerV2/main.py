@@ -402,7 +402,7 @@ class DreamerV2Agent:
                 )
         elif mode == "reward":
             dist = tfd.Independent(
-                tfd.Normal(loc=y_pred, scale=0.1), reinterpreted_batch_ndims=1
+                tfd.Normal(loc=y_pred, scale=1.), reinterpreted_batch_ndims=1
                 )
 
         log_prob = dist.log_prob(y_true)
