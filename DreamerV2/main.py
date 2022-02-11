@@ -142,7 +142,7 @@ class DreamerV2Agent:
 
         done = False
 
-        # lives = int(env.ale.lives())
+        lives = int(env.ale.lives())
 
         while not done:
 
@@ -162,15 +162,15 @@ class DreamerV2Agent:
             _reward = reward if reward <= 1.0 else 1.0
 
             #: Life loss as episode end
-            # if info["ale.lives"] != lives:
-            #     lives = int(info["ale.lives"])
-            #     _done = True
-            # else:
-            #     _done = done
+            if info["ale.lives"] != lives:
+                _done = True
+                lives = int(info["ale.lives"])
+            else:
+                _done = done
 
             #: (r_t-1, done_t-1, obs_t, action_t, done_t)
             self.buffer.add(
-                obs, action_onehot, _reward, next_obs, done,
+                obs, action_onehot, _reward, next_obs, _done,
                 prev_z, prev_h, prev_a
                 )
 
@@ -562,7 +562,7 @@ class DreamerV2Agent:
 
         return info
 
-    def compute_target(self, states, rewards, next_states, discounts, method="mixed-multistep"):
+    def compute_target(self, states, rewards, next_states, discounts, strategy="mixed-multistep"):
 
         T, B, F = states.shape
 
@@ -572,7 +572,7 @@ class DreamerV2Agent:
             [tf.ones_like(discounts[:1]), discounts[:-1]], axis=0)
         weights = tf.math.cumprod(_weights, axis=0)
 
-        if method == "gae":
+        if strategy == "gae":
             """ HIGH-DIMENSIONAL CONTINUOUS CONTROL USING GENERALIZED ADVANTAGE ESTIMATION
                 https://arxiv.org/pdf/1506.02438.pdf
             """
@@ -586,7 +586,7 @@ class DreamerV2Agent:
             #advantage = tf.reduce_sum(weights * deltas, axis=0)
             #v_target = advantage + v[0]
 
-        elif method == "mixed-multistep":
+        elif strategy == "mixed-multistep":
 
             targets = np.zeros_like(v_next)  #: (H, L*B, 1)
             last_value = v_next[-1]
