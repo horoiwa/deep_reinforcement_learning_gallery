@@ -933,5 +933,5 @@ def main(resume=None, num_actors=5, init_episodes=50,
 
 if __name__ == "__main__":
     resume = None
-    #resume = {"global_steps": 66839999}
+    #resume = {"global_steps": 129999999}
     main(resume, debug=False)
