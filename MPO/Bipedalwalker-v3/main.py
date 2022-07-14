@@ -12,7 +12,7 @@ from buffer import ReplayBuffer
 from networks import PolicyNetwork, CriticNetwork
 
 
-Transition = namedtuple('Transition', ["state", "action", "reward", "next_state"])
+Transition = namedtuple('Transition', ["state", "action", "reward", "next_state", "done"])
 
 
 class MPOAgent:
@@ -25,13 +25,13 @@ class MPOAgent:
 
         self.action_space = gym.make(self.env_id).action_space.shape[0]
 
-        self.buffer = ReplayBuffer(maxlen=100000)
+        self.replay_buffer = ReplayBuffer(maxlen=100000)
 
         self.policy = PolicyNetwork(action_space=self.action_space)
         self.target_policy = PolicyNetwork(action_space=self.action_space)
 
-        self.critic = CriticNetwork(action_space=self.action_space)
-        self.target_critic = CriticNetwork(action_space=self.action_space)
+        self.critic = CriticNetwork()
+        self.target_critic = CriticNetwork()
 
         self.log_eta = tf.Variable(0.)
         self.log_alpha = tf.Variable(0.)
@@ -62,7 +62,10 @@ class MPOAgent:
         dummy_action = (dummy_action[np.newaxis, ...]).astype(np.float32)
 
         self.policy(dummy_state)
+        self.target_policy(dummy_state)
+
         self.critic(dummy_state, dummy_action)
+        self.target_critic(dummy_state, dummy_action)
 
         self.target_policy.set_weights(self.policy.get_weights())
         self.target_critic.set_weights(self.critic.get_weights())
@@ -88,7 +91,9 @@ class MPOAgent:
 
         done = False
 
-        state = self.env.reset()
+        env = gym.make(self.env_id)
+
+        state = env.reset()
 
         while not done:
 
@@ -96,7 +101,7 @@ class MPOAgent:
 
             action = action.numpy()[0]
 
-            next_state, reward, done, _ = self.env.step(action)
+            next_state, reward, done, _ = env.step(action)
 
             transition = Transition(state, action, reward, next_state, done)
 
@@ -129,19 +134,22 @@ class MPOAgent:
         #: E-step
 
         #: M-step
-        with self.summary_writer.as_default():
-            tf.summary.scalar("eta", self.eta, step=self.global_steps)
-            tf.summary.scalar("eps_kl", self.eps, step=self.global_steps)
+        #with self.summary_writer.as_default():
+        #    tf.summary.scalar("eta", self.eta, step=self.global_steps)
+        #    tf.summary.scalar("eps_kl", self.eps, step=self.global_steps)
 
     def testplay(self, n_repeat, monitor_dir):
-
-        env = wrappers.Monitor(
-            gym.make(self.env_id), monitor_dir, force=True, video_callable=(lambda ep: True)
-        )
 
         total_rewards = []
 
         for n in range(n_repeat):
+
+            env = wrappers.RecordVideo(
+                gym.make(self.env_id),
+                video_folder=monitor_dir,
+                step_trigger=lambda i: True,
+                name_prefix=f"test{n}"
+            )
 
             state = env.reset()
 
@@ -151,7 +159,7 @@ class MPOAgent:
 
             while not done:
 
-                action, _ = self.policy.sample_action(np.atleast_2d(state))
+                action = self.policy.sample_action(np.atleast_2d(state))
 
                 action = action.numpy()[0]
 
@@ -166,7 +174,7 @@ class MPOAgent:
             print(total_reward)
 
 
-def main(env_id="BipedalWalker-v3", n_episodes=1000, n_testplay=10):
+def main(env_id="BipedalWalker-v3", n_episodes=1000, n_testplay=5):
     """
     Note:
         if you failed to "pip install gym[box2d]", try "pip install box2d"
@@ -178,25 +186,24 @@ def main(env_id="BipedalWalker-v3", n_episodes=1000, n_testplay=10):
 
     agent = MPOAgent(env_id=env_id, logdir=LOGDIR)
 
-    summary_writer = tf.summary.create_file_writer(str(LOGDIR))
-
     for n in range(n_episodes):
 
         rewards, steps = agent.rollout()
 
         if n % 10 == 0:
             print(f"Episode {n}: {rewards}, {steps} steps")
+        break
 
-    agent.save_weights("checkpoints/")
+    agent.save("checkpoints/")
 
     if n_testplay:
         MONITOR_DIR = Path(__file__).parent / "mp4"
         if MONITOR_DIR.exists():
             shutil.rmtree(MONITOR_DIR)
 
-        agent = MPOAgent(env_id=env_id)
-        agent.load_weights("checkpoints/")
-        agent.testplay(n=n_testplay, monitor_dir=MONITOR_DIR)
+        agent = MPOAgent(env_id=env_id, logdir=LOGDIR)
+        agent.load("checkpoints/")
+        agent.testplay(n_repeat=n_testplay, monitor_dir=MONITOR_DIR)
 
 
 if __name__ == '__main__':

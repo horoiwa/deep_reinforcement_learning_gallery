@@ -46,10 +46,8 @@ class PolicyNetwork(tf.keras.Model):
         covariance_matrix = tf.matmul(A, tf.transpose(A, perm=[0, 2, 1])) + 1e-6
 
         dist = tfd.Independent(
-            tfd.MultivariateNormalFullCovariance(
-                loc=mean, covariance_matrix=covariance_matrix
-                )
-            )
+            tfd.MultivariateNormalFullCovariance(loc=mean, covariance_matrix=covariance_matrix),
+            reinterpreted_batch_ndims=1)
 
         return dist
 
