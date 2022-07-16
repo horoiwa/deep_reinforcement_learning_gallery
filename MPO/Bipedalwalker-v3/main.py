@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from collections import namedtuple
 
 import tensorflow as tf
+import tensorflow_probability as tfp
+from tensorflow_probability import distributions as tfd
 import gym
 from gym import wrappers
 import numpy as np
@@ -33,18 +35,35 @@ class MPOAgent:
         self.critic = CriticNetwork()
         self.target_critic = CriticNetwork()
 
-        self.log_eta = tf.Variable(0.)
-        self.log_alpha = tf.Variable(0.)
+        self.log_temperature = tf.Variable(0.)
+        self.temperature_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
-        self.policy_optimizer = tf.keras.optimizers.Adam()
-        self.critic_optimizer = tf.keras.optimizers.Adam()
-        self.eta_optimizer = tf.keras.optimizers.Adam()
-        self.eps_mu_optimizer = tf.keras.optimizers.Adam()
-        self.eps_std_optimizer = tf.keras.optimizers.Adam()
+        self.log_alpha_mu = tf.Variable(0.)
+        self.log_alpha_sigma = tf.Variable(0.)
 
-        self.batch_size = 256
+        self.eps_mean_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
+        self.eps_stddev_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
+
+        self.eps = 0.1
+        self.eps_mu = 0.1
+        self.eps_sigma = 0.0001
+
+        self.policy_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
+        self.critic_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
+
+
+        #self.batch_size = 256
+        self.batch_size = 16
+
+        self.n_samples = 20
 
         self.update_period = 4
+
+        self.gamma = 0.99
+
+        self.target_policy_update_period = 100
+
+        self.target_critic_update_period = 300
 
         self.global_steps = 0
 
@@ -115,8 +134,15 @@ class MPOAgent:
 
             self.global_steps += 1
 
-            if (len(self.replay_buffer) >= 5000 and self.global_steps % self.update_period == 0):
+            #if (len(self.replay_buffer) >= 5000 and self.global_steps % self.update_period == 0):
+            if (len(self.replay_buffer) >= 50 and self.global_steps % self.update_period == 0):
                 self.update_networks()
+
+            if self.global_steps % self.target_critic_update_period:
+                self.target_critic.set_weights(self.critic.get_weights())
+
+            if self.global_steps % self.target_policy_update_period:
+                self.target_policy.set_weights(self.policy.get_weights())
 
         with self.summary_writer.as_default():
             tf.summary.scalar("episode_reward", episode_rewards, step=self.global_steps)
@@ -127,13 +153,109 @@ class MPOAgent:
     def update_networks(self):
 
         (states, actions, rewards,
-         next_states, dones) = self.buffer.get_minibatch(batch_size=self.batch_size)
+         next_states, dones) = self.replay_buffer.get_minibatch(batch_size=self.batch_size)
 
-        #: Update Q-network
+        B, M = self.batch_size, self.n_samples
 
-        #: E-step
+        # [B, obs_dim] -> [B, obs_dim * M] -> [B * M, obs_dim]
+        next_states_tiled = tf.reshape(
+            tf.tile(next_states, multiples=(1, M)), shape=(B * M, -1)
+            )
 
-        #: M-step
+        sampled_actions = self.target_policy(next_states_tiled).sample()         # [B * M,  action_dim]
+
+
+        # Update Q-network:
+        sampled_qvalues = tf.reshape(
+            self.target_critic(next_states_tiled, sampled_actions),
+            shape=(B, M, -1)
+            )
+        mean_qvalues = tf.reduce_mean(sampled_qvalues, axis=1)
+        TQ = rewards + self.gamma * (1.0 - dones) * mean_qvalues
+
+        with tf.GradientTape() as tape1:
+            Q = self.critic(states, actions)
+            loss_critic = tf.reduce_mean(tf.square(TQ - Q))
+
+        variables = self.critic.trainable_variables
+        grads = tape1.gradient(loss_critic, variables)
+        self.critic_optimizer.apply_gradients(zip(grads, variables))
+
+
+        # E-step:
+        # Obtain η* by minimising g(η)
+        with tf.GradientTape() as tape2:
+            temperature = tf.math.softplus(self.log_temperature)
+            q_logmeanexp = tf.math.log(
+                tf.reduce_mean(tf.math.exp(sampled_qvalues / temperature), axis=1)
+                )
+            loss_temperature = temperature * (self.eps + tf.reduce_mean(q_logmeanexp, axis=0))
+
+        grad = tape2.gradient(loss_temperature, self.log_temperature)
+        self.temperature_optimizer.apply_gradients([(grad, self.log_temperature)])
+
+        # Obtain sample-based variational distribution q(a|s)
+        temperature = tf.math.softplus(self.log_temperature)
+
+
+        # M-step: Optimize the lower bound J with respect to θ
+        weights = tf.squeeze(
+            tf.math.softmax(tf.math.exp(sampled_qvalues / temperature), axis=1),
+            axis=2)                                                              # [B, M, 1]
+
+        target_mean, target_cov = self.target_policy(next_states_tiled, no_dist=True)
+        target_dist = tfd.MultivariateNormalFullCovariance(loc=target_mean, covariance_matrix=target_cov)
+
+
+        with tf.GradientTape() as tape3:
+
+            online_mean, online_cov = self.policy(next_states_tiled, no_dist=True)
+
+            online_dist = tfd.MultivariateNormalFullCovariance(loc=online_mean, covariance_matrix=online_cov)
+
+            log_probs = tf.reshape(
+                online_dist.log_prob(sampled_actions),
+                shape=(B, M))                                                    # [B * M, ] -> [B, M]
+
+            cross_entropy_qp =   tf.reduce_sum(weights * log_probs, axis=1)       # [B, M] -> [B,]
+
+            # KL decoupling
+            online_dist_fixedmu = tfd.MultivariateNormalFullCovariance(loc=target_mean, covariance_matrix=online_cov)
+            online_dist_fixedsigma= tfd.MultivariateNormalFullCovariance(loc=online_mean, covariance_matrix=target_cov)
+
+            kl_mu = tf.reshape(
+                target_dist.kl_divergence(online_dist_fixedsigma),
+                shape=(B, M))                                                    # [B * M, ] -> [B, M]
+
+            kl_sigma = tf.reshape(
+                target_dist.kl_divergence(online_dist_fixedmu),
+                shape=(B, M))                                                    # [B * M, ] -> [B, M]
+
+
+            alpha_mu = tf.math.softplus(self.log_alpha_mu)
+            alpha_sigma = tf.math.softplus(self.log_alpha_sigma)
+
+            loss_policy = - cross_entropy_qp                                      # [B,]
+            loss_policy += tf.stop_gradient(alpha_mu) * tf.reduce_mean(kl_mu, axis=1)
+            loss_policy += tf.stop_gradient(alpha_sigma) * tf.reduce_mean(kl_sigma, axis=1)
+            loss_policy = tf.reduce_mean(loss_policy)                            # [B,] -> [1]
+
+            loss_alpha_mu = tf.reduce_mean(
+                alpha_mu * tf.stop_gradient(self.eps_mu - tf.reduce_mean(kl_mu, axis=1))
+                )
+
+            loss_alpha_sigma = tf.reduce_mean(
+                alpha_sigma * tf.stop_gradient(self.eps_sigma - tf.reduce_mean(kl_sigma, axis=1))
+                )
+
+        import pdb; pdb.set_trace()
+
+
+
+        # M-step
+        alpha_mu= tf.math.softplus(self.log_alpha_mu)
+        alpha_sigma = tf.math.softplus(self.log_alpha_sigma)
+
         #with self.summary_writer.as_default():
         #    tf.summary.scalar("eta", self.eta, step=self.global_steps)
         #    tf.summary.scalar("eps_kl", self.eps, step=self.global_steps)
@@ -192,7 +314,6 @@ def main(env_id="BipedalWalker-v3", n_episodes=1000, n_testplay=5):
 
         if n % 10 == 0:
             print(f"Episode {n}: {rewards}, {steps} steps")
-        break
 
     agent.save("checkpoints/")
 

@@ -31,7 +31,7 @@ class PolicyNetwork(tf.keras.Model):
                                kernel_initializer="Orthogonal")
 
     #@tf.function
-    def call(self, x):
+    def call(self, x, no_dist=False):
 
         x = self.dense1(x)
 
@@ -43,11 +43,12 @@ class PolicyNetwork(tf.keras.Model):
             tf.math.softplus(self.cholesky_factor(x))
         )
 
-        covariance_matrix = tf.matmul(A, tf.transpose(A, perm=[0, 2, 1])) + 1e-6
+        covariance_matrix = 0.2 * tf.matmul(A, tf.transpose(A, perm=[0, 2, 1])) + 1e-6
 
-        dist = tfd.Independent(
-            tfd.MultivariateNormalFullCovariance(loc=mean, covariance_matrix=covariance_matrix),
-            reinterpreted_batch_ndims=1)
+        if no_dist:
+            return mean, covariance_matrix
+
+        dist = tfd.MultivariateNormalFullCovariance(loc=mean, covariance_matrix=covariance_matrix)
 
         return dist
 
@@ -56,6 +57,8 @@ class PolicyNetwork(tf.keras.Model):
         dist = self(states)
 
         actions = dist.sample()
+
+        actions = tf.clip_by_value(actions, -1.0, 1.0)
 
         return actions
 
