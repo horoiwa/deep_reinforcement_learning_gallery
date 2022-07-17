@@ -54,7 +54,7 @@ class PolicyNetwork(tf.keras.Model):
 
         actions = dist.sample()
 
-        #actions = tf.clip_by_value(actions, -1.0, 1.0)
+        actions = tf.clip_by_value(actions, -1.0, 1.0)
 
         return actions
 

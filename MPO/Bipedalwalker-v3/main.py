@@ -58,7 +58,7 @@ class MPOAgent:
 
         self.gamma = 0.99
 
-        self.target_policy_update_period = 400
+        self.target_policy_update_period = 800
 
         self.target_critic_update_period = 400
 
@@ -169,7 +169,8 @@ class MPOAgent:
         target_mean, target_cov = self.target_policy(next_states_tiled)
         target_dist = tfd.MultivariateNormalFullCovariance(loc=target_mean, covariance_matrix=target_cov)
         try:
-            sampled_actions = target_dist.sample()      # [B * M,  action_dim]
+            _sampled_actions = target_dist.sample()                             # [B * M,  action_dim]
+            sampled_actions = tf.clip_by_value(_sampled_actions, -1.0, 1.0)
         except Exception as err:
             print(err)
             import pdb; pdb.set_trace()
@@ -210,8 +211,7 @@ class MPOAgent:
 
         # M-step: Optimize the lower bound J with respect to θ
         weights = tf.squeeze(
-            tf.math.softmax(tf.math.exp(sampled_qvalues / temperature), axis=1),
-            axis=2)                                                              # [B, M, 1]
+            tf.math.softmax(sampled_qvalues / temperature, axis=1), axis=2)    # [B, M, 1]
 
 
         with tf.GradientTape(persistent=True) as tape3:
@@ -265,8 +265,8 @@ class MPOAgent:
 
         del tape3
 
-        if self.global_steps > 50000:
-            import pdb; pdb.set_trace()
+        #if self.global_steps > 30000:
+        #    import pdb; pdb.set_trace()
 
         with self.summary_writer.as_default():
             tf.summary.scalar("loss_policy", loss_policy, step=self.global_steps)
