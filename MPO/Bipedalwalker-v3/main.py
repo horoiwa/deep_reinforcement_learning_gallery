@@ -41,19 +41,18 @@ class MPOAgent:
         self.log_alpha_mu = tf.Variable(0.)
         self.log_alpha_sigma = tf.Variable(0.)
 
-        self.alpha_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
-
         self.eps = 0.1
+
         self.eps_mu = 0.1
         self.eps_sigma = 0.0001
 
         self.policy_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
         self.critic_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
+        self.alpha_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
-        #self.batch_size = 256
-        self.batch_size = 16
+        self.batch_size = 256
 
-        self.n_samples = 20
+        self.n_samples = 32
 
         self.update_period = 4
 
@@ -160,7 +159,7 @@ class MPOAgent:
             tf.tile(next_states, multiples=(1, M)), shape=(B * M, -1)
             )
 
-        sampled_actions = self.target_policy(next_states_tiled).sample()         # [B * M,  action_dim]
+        sampled_actions = self.target_policy(next_states_tiled).sample()      # [B * M,  action_dim]
 
 
         # Update Q-network:
