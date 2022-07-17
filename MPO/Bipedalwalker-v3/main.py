@@ -23,7 +23,7 @@ class MPOAgent:
 
         self.env_id = env_id
 
-        self.summary_writer = tf.summary.create_file_writer(str(logdir))
+        self.summary_writer = tf.summary.create_file_writer(str(logdir)) if logdir else None
 
         self.action_space = gym.make(self.env_id).action_space.shape[0]
 
@@ -50,19 +50,21 @@ class MPOAgent:
         self.critic_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
         self.alpha_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
-        self.batch_size = 256
+        self.batch_size = 64
 
-        self.n_samples = 32
+        self.n_samples = 20
 
         self.update_period = 4
 
         self.gamma = 0.99
 
-        self.target_policy_update_period = 100
+        self.target_policy_update_period = 400
 
-        self.target_critic_update_period = 300
+        self.target_critic_update_period = 400
 
         self.global_steps = 0
+
+        self.episode_count = 0
 
         self.setup()
 
@@ -113,11 +115,14 @@ class MPOAgent:
 
         while not done:
 
-            action = self.policy.sample_action(np.atleast_2d(state))
+            try:
+                action = self.policy.sample_action(np.atleast_2d(state))
 
-            action = action.numpy()[0]
+                action = action.numpy()[0]
 
-            next_state, reward, done, _ = env.step(action)
+                next_state, reward, done, _ = env.step(action)
+            except Exception as err:
+                import pdb; pdb.set_trace()
 
             transition = Transition(state, action, reward, next_state, done)
 
@@ -131,8 +136,7 @@ class MPOAgent:
 
             self.global_steps += 1
 
-            #if (len(self.replay_buffer) >= 5000 and self.global_steps % self.update_period == 0):
-            if (len(self.replay_buffer) >= 50 and self.global_steps % self.update_period == 0):
+            if (len(self.replay_buffer) >= 5000 and self.global_steps % self.update_period == 0):
                 self.update_networks()
 
             if self.global_steps % self.target_critic_update_period:
@@ -141,9 +145,12 @@ class MPOAgent:
             if self.global_steps % self.target_policy_update_period:
                 self.target_policy.set_weights(self.policy.get_weights())
 
+        self.episode_count += 1
         with self.summary_writer.as_default():
-            tf.summary.scalar("episode_reward", episode_rewards, step=self.global_steps)
-            tf.summary.scalar("episode_steps", episode_steps, step=self.global_steps)
+            tf.summary.scalar("episode_reward_stp", episode_rewards, step=self.global_steps)
+            tf.summary.scalar("episode_steps_stp", episode_steps, step=self.global_steps)
+            tf.summary.scalar("episode_reward", episode_rewards, step=self.episode_count)
+            tf.summary.scalar("episode_steps", episode_steps, step=self.episode_count)
 
         return episode_rewards, episode_steps
 
@@ -159,8 +166,13 @@ class MPOAgent:
             tf.tile(next_states, multiples=(1, M)), shape=(B * M, -1)
             )
 
-        sampled_actions = self.target_policy(next_states_tiled).sample()      # [B * M,  action_dim]
-
+        target_mean, target_cov = self.target_policy(next_states_tiled)
+        target_dist = tfd.MultivariateNormalFullCovariance(loc=target_mean, covariance_matrix=target_cov)
+        try:
+            sampled_actions = target_dist.sample()      # [B * M,  action_dim]
+        except Exception as err:
+            print(err)
+            import pdb; pdb.set_trace()
 
         # Update Q-network:
         sampled_qvalues = tf.reshape(
@@ -176,6 +188,7 @@ class MPOAgent:
 
         variables = self.critic.trainable_variables
         grads = tape1.gradient(loss_critic, variables)
+        grads, _ = tf.clip_by_global_norm(grads, 40.)
         self.critic_optimizer.apply_gradients(zip(grads, variables))
 
 
@@ -184,7 +197,7 @@ class MPOAgent:
         with tf.GradientTape() as tape2:
             temperature = tf.math.softplus(self.log_temperature)
             q_logmeanexp = tf.math.log(
-                tf.reduce_mean(tf.math.exp(sampled_qvalues / temperature), axis=1)
+                tf.reduce_mean(tf.math.exp(sampled_qvalues / temperature), axis=1) + 1e-6
                 )
             loss_temperature = temperature * (self.eps + tf.reduce_mean(q_logmeanexp, axis=0))
 
@@ -200,25 +213,22 @@ class MPOAgent:
             tf.math.softmax(tf.math.exp(sampled_qvalues / temperature), axis=1),
             axis=2)                                                              # [B, M, 1]
 
-        target_mean, target_cov = self.target_policy(next_states_tiled, no_dist=True)
-        target_dist = tfd.MultivariateNormalFullCovariance(loc=target_mean, covariance_matrix=target_cov)
-
 
         with tf.GradientTape(persistent=True) as tape3:
 
-            online_mean, online_cov = self.policy(next_states_tiled, no_dist=True)
+            online_mean, online_cov = self.policy(next_states_tiled)
 
             online_dist = tfd.MultivariateNormalFullCovariance(loc=online_mean, covariance_matrix=online_cov)
 
             log_probs = tf.reshape(
-                online_dist.log_prob(sampled_actions),
+                online_dist.log_prob(sampled_actions) + 1e-6,
                 shape=(B, M))                                                    # [B * M, ] -> [B, M]
 
-            cross_entropy_qp =   tf.reduce_sum(weights * log_probs, axis=1)      # [B, M] -> [B,]
+            cross_entropy_qp = tf.reduce_sum(weights * log_probs, axis=1)      # [B, M] -> [B,]
 
             # KL decoupling
             online_dist_fixedmu = tfd.MultivariateNormalFullCovariance(loc=target_mean, covariance_matrix=online_cov)
-            online_dist_fixedsigma= tfd.MultivariateNormalFullCovariance(loc=online_mean, covariance_matrix=target_cov)
+            online_dist_fixedsigma = tfd.MultivariateNormalFullCovariance(loc=online_mean, covariance_matrix=target_cov)
 
             kl_mu = tf.reshape(
                 target_dist.kl_divergence(online_dist_fixedsigma), shape=(B, M))  # [B * M, ] -> [B, M]
@@ -247,7 +257,7 @@ class MPOAgent:
 
         variables = self.policy.trainable_variables
         grads = tape3.gradient(loss_policy, variables)
-        self.policy_optimizer.apply_gradients(zip(grads, variables))
+        grads, _ = tf.clip_by_global_norm(grads, 40.)
 
         variables = [self.log_alpha_mu, self.log_alpha_sigma]
         grads = tape3.gradient(loss_alpha, variables)
@@ -255,14 +265,18 @@ class MPOAgent:
 
         del tape3
 
+        if self.global_steps > 50000:
+            import pdb; pdb.set_trace()
+
         with self.summary_writer.as_default():
             tf.summary.scalar("loss_policy", loss_policy, step=self.global_steps)
-            tf.summary.scalar("loss_critic", loss_policy, step=self.global_steps)
+            tf.summary.scalar("loss_critic", loss_critic, step=self.global_steps)
             tf.summary.scalar("kl_mu", tf.reduce_mean(kl_mu), step=self.global_steps)
             tf.summary.scalar("kl_sigma", tf.reduce_mean(kl_sigma), step=self.global_steps)
             tf.summary.scalar("temperature", temperature, step=self.global_steps)
             tf.summary.scalar("alpha_mu", alpha_mu, step=self.global_steps)
             tf.summary.scalar("alpha_sigma", alpha_sigma, step=self.global_steps)
+            tf.summary.scalar("replay_buffer", len(self.replay_buffer), step=self.global_steps)
 
     def testplay(self, n_repeat, monitor_dir):
 
@@ -297,10 +311,10 @@ class MPOAgent:
 
             total_rewards.append(total_reward)
 
-            print(total_reward)
+            print(f"Ep. {n}", total_reward)
 
 
-def main(env_id="BipedalWalker-v3", n_episodes=1000, n_testplay=5):
+def train(env_id="BipedalWalker-v3", n_episodes=10000):
     """
     Note:
         if you failed to "pip install gym[box2d]", try "pip install box2d"
@@ -316,20 +330,30 @@ def main(env_id="BipedalWalker-v3", n_episodes=1000, n_testplay=5):
 
         rewards, steps = agent.rollout()
 
-        if n % 10 == 0:
-            print(f"Episode {n}: {rewards}, {steps} steps")
+        print(f"Episode {n}: {rewards}, {steps} steps")
 
     agent.save("checkpoints/")
+    print("Training finshed")
 
-    if n_testplay:
-        MONITOR_DIR = Path(__file__).parent / "mp4"
-        if MONITOR_DIR.exists():
-            shutil.rmtree(MONITOR_DIR)
 
-        agent = MPOAgent(env_id=env_id, logdir=LOGDIR)
-        agent.load("checkpoints/")
-        agent.testplay(n_repeat=n_testplay, monitor_dir=MONITOR_DIR)
+def test(env_id="BipedalWalker-v3", n_testplay=5):
+    import os
+    os.environ["SDL_VIDEODRIVER"] = "dummy"   # Needed only for ubuntu
+
+    MONITOR_DIR = Path(__file__).parent / "mp4"
+    if MONITOR_DIR.exists():
+        shutil.rmtree(MONITOR_DIR)
+
+    agent = MPOAgent(env_id=env_id, logdir=None)
+    agent.load("checkpoints/")
+    agent.testplay(n_repeat=n_testplay, monitor_dir=MONITOR_DIR)
 
 
 if __name__ == '__main__':
-    main()
+    """
+    tensorflow 2.4.0
+    tensorflow-probability 0.11.1
+    gym[box2d] 0.24.1
+    """
+    train()
+    test()

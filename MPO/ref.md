@@ -1,4 +1,6 @@
 
-- 多量正規分布に基づくアクション出力はtfd.MultivariateNormalDiagで簡単
+[ICLR2018 MAXIMUM A POSTERIORI POLICY OPTIMISATION](https://arxiv.org/pdf/1806.06920.pdf)
 
-https://github.com/deepmind/acme/blob/d58cfb5680af9961b37139501b676b50ead05029/acme/tf/networks/distributional.py#L80
+[A Distributional View on Multi-Objective Policy Optimization](https://arxiv.org/pdf/2005.07513.pdf)
+
+[deepmind/acme](https://github.com/deepmind/acme)

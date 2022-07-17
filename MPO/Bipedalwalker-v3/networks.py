@@ -6,7 +6,6 @@ import tensorflow_probability as tfp
 from tensorflow_probability import distributions as tfd
 
 
-
 class PolicyNetwork(tf.keras.Model):
     """
     Gussian Policy with full covariance matrix
@@ -28,10 +27,10 @@ class PolicyNetwork(tf.keras.Model):
                              kernel_initializer="Orthogonal")
 
         self.cholesky_factor = kl.Dense(sum(range(self.action_space+1)),
-                               kernel_initializer="Orthogonal")
+                                        kernel_initializer="Orthogonal")
 
-    #@tf.function
-    def call(self, x, no_dist=False):
+    @tf.function
+    def call(self, x):
 
         x = self.dense1(x)
 
@@ -43,22 +42,19 @@ class PolicyNetwork(tf.keras.Model):
             tf.math.softplus(self.cholesky_factor(x))
         )
 
-        covariance_matrix = 0.2 * tf.matmul(A, tf.transpose(A, perm=[0, 2, 1])) + 1e-6
+        covariance_matrix = tf.matmul(A, tf.transpose(A, perm=[0, 2, 1]))
 
-        if no_dist:
-            return mean, covariance_matrix
-
-        dist = tfd.MultivariateNormalFullCovariance(loc=mean, covariance_matrix=covariance_matrix)
-
-        return dist
+        return mean, covariance_matrix
 
     def sample_action(self, states):
 
-        dist = self(states)
+        mean, covariance_matrix = self(states)
+
+        dist = tfd.MultivariateNormalFullCovariance(loc=mean, covariance_matrix=covariance_matrix)
 
         actions = dist.sample()
 
-        actions = tf.clip_by_value(actions, -1.0, 1.0)
+        #actions = tf.clip_by_value(actions, -1.0, 1.0)
 
         return actions
 
