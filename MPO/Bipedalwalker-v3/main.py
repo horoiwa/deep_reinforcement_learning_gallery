@@ -41,8 +41,7 @@ class MPOAgent:
         self.log_alpha_mu = tf.Variable(0.)
         self.log_alpha_sigma = tf.Variable(0.)
 
-        self.eps_mean_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
-        self.eps_stddev_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
+        self.alpha_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
         self.eps = 0.1
         self.eps_mu = 0.1
@@ -50,7 +49,6 @@ class MPOAgent:
 
         self.policy_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
         self.critic_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
-
 
         #self.batch_size = 256
         self.batch_size = 16
@@ -207,7 +205,7 @@ class MPOAgent:
         target_dist = tfd.MultivariateNormalFullCovariance(loc=target_mean, covariance_matrix=target_cov)
 
 
-        with tf.GradientTape() as tape3:
+        with tf.GradientTape(persistent=True) as tape3:
 
             online_mean, online_cov = self.policy(next_states_tiled, no_dist=True)
 
@@ -217,20 +215,17 @@ class MPOAgent:
                 online_dist.log_prob(sampled_actions),
                 shape=(B, M))                                                    # [B * M, ] -> [B, M]
 
-            cross_entropy_qp =   tf.reduce_sum(weights * log_probs, axis=1)       # [B, M] -> [B,]
+            cross_entropy_qp =   tf.reduce_sum(weights * log_probs, axis=1)      # [B, M] -> [B,]
 
             # KL decoupling
             online_dist_fixedmu = tfd.MultivariateNormalFullCovariance(loc=target_mean, covariance_matrix=online_cov)
             online_dist_fixedsigma= tfd.MultivariateNormalFullCovariance(loc=online_mean, covariance_matrix=target_cov)
 
             kl_mu = tf.reshape(
-                target_dist.kl_divergence(online_dist_fixedsigma),
-                shape=(B, M))                                                    # [B * M, ] -> [B, M]
+                target_dist.kl_divergence(online_dist_fixedsigma), shape=(B, M))  # [B * M, ] -> [B, M]
 
             kl_sigma = tf.reshape(
-                target_dist.kl_divergence(online_dist_fixedmu),
-                shape=(B, M))                                                    # [B * M, ] -> [B, M]
-
+                target_dist.kl_divergence(online_dist_fixedmu), shape=(B, M))     # [B * M, ] -> [B, M]
 
             alpha_mu = tf.math.softplus(self.log_alpha_mu)
             alpha_sigma = tf.math.softplus(self.log_alpha_sigma)
@@ -238,6 +233,7 @@ class MPOAgent:
             loss_policy = - cross_entropy_qp                                      # [B,]
             loss_policy += tf.stop_gradient(alpha_mu) * tf.reduce_mean(kl_mu, axis=1)
             loss_policy += tf.stop_gradient(alpha_sigma) * tf.reduce_mean(kl_sigma, axis=1)
+
             loss_policy = tf.reduce_mean(loss_policy)                            # [B,] -> [1]
 
             loss_alpha_mu = tf.reduce_mean(
@@ -248,17 +244,26 @@ class MPOAgent:
                 alpha_sigma * tf.stop_gradient(self.eps_sigma - tf.reduce_mean(kl_sigma, axis=1))
                 )
 
-        import pdb; pdb.set_trace()
+            loss_alpha = loss_alpha_mu + loss_alpha_sigma
 
+        variables = self.policy.trainable_variables
+        grads = tape3.gradient(loss_policy, variables)
+        self.policy_optimizer.apply_gradients(zip(grads, variables))
 
+        variables = [self.log_alpha_mu, self.log_alpha_sigma]
+        grads = tape3.gradient(loss_alpha, variables)
+        self.alpha_optimizer.apply_gradients(zip(grads, variables))
 
-        # M-step
-        alpha_mu= tf.math.softplus(self.log_alpha_mu)
-        alpha_sigma = tf.math.softplus(self.log_alpha_sigma)
+        del tape3
 
-        #with self.summary_writer.as_default():
-        #    tf.summary.scalar("eta", self.eta, step=self.global_steps)
-        #    tf.summary.scalar("eps_kl", self.eps, step=self.global_steps)
+        with self.summary_writer.as_default():
+            tf.summary.scalar("loss_policy", loss_policy, step=self.global_steps)
+            tf.summary.scalar("loss_critic", loss_policy, step=self.global_steps)
+            tf.summary.scalar("kl_mu", tf.reduce_mean(kl_mu), step=self.global_steps)
+            tf.summary.scalar("kl_sigma", tf.reduce_mean(kl_sigma), step=self.global_steps)
+            tf.summary.scalar("temperature", temperature, step=self.global_steps)
+            tf.summary.scalar("alpha_mu", alpha_mu, step=self.global_steps)
+            tf.summary.scalar("alpha_sigma", alpha_sigma, step=self.global_steps)
 
     def testplay(self, n_repeat, monitor_dir):
 
