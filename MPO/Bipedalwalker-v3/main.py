@@ -35,11 +35,11 @@ class MPOAgent:
         self.critic = CriticNetwork()
         self.target_critic = CriticNetwork()
 
-        self.log_temperature = tf.Variable(0.)
+        self.log_temperature = tf.Variable(2.)
         self.temperature_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
-        self.log_alpha_mu = tf.Variable(0.)
-        self.log_alpha_sigma = tf.Variable(0.)
+        self.log_alpha_mu = tf.Variable(1.)
+        self.log_alpha_sigma = tf.Variable(1.)
 
         self.eps = 0.1
 
