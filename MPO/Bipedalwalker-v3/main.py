@@ -11,7 +11,7 @@ from gym import wrappers
 import numpy as np
 
 from buffer import ReplayBuffer
-from networks import MultiVariateGaussianPolicyNetwork, QNetwork
+from networks import MultiVariateGaussianPolicyNetwork, GaussianPolicyNetwork, QNetwork
 
 
 Transition = namedtuple('Transition', ["state", "action", "reward", "next_state", "done"])
@@ -27,10 +27,10 @@ class MPOAgent:
 
         self.action_space = gym.make(self.env_id).action_space.shape[0]
 
-        self.replay_buffer = ReplayBuffer(maxlen=100000)
+        self.replay_buffer = ReplayBuffer(maxlen=50000)
 
-        self.policy = MultiVariateGaussianPolicyNetwork(action_space=self.action_space)
-        self.target_policy = MultiVariateGaussianPolicyNetwork(action_space=self.action_space)
+        self.policy = GaussianPolicyNetwork(action_space=self.action_space)
+        self.target_policy = GaussianPolicyNetwork(action_space=self.action_space)
 
         self.critic = QNetwork()
         self.target_critic = QNetwork()
@@ -44,15 +44,15 @@ class MPOAgent:
         self.eps = 0.1
 
         self.eps_mu = 0.1
-        self.eps_sigma = 0.0001
+        self.eps_sigma = 0.01
 
         self.policy_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
         self.critic_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
         self.alpha_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
-        self.batch_size = 64
+        self.batch_size = 128
 
-        self.n_samples = 20
+        self.n_samples = 10
 
         self.update_period = 4
 
@@ -126,7 +126,7 @@ class MPOAgent:
                 import pdb; pdb.set_trace()
 
             #: Bipedalwalkerの転倒ペナルティ-100は大きすぎるためclip
-            transition = Transition(state, action, np.clip(reward, -3., 3.), next_state, done)
+            transition = Transition(state, action, np.clip(reward, 0., 1.), next_state, done)
 
             self.replay_buffer.add(transition)
 
@@ -146,9 +146,6 @@ class MPOAgent:
 
             if self.global_steps % self.target_policy_update_period == 0:
                 self.target_policy.set_weights(self.policy.get_weights())
-
-            if self.global_steps % 10000 == 0:
-                self.save("checkpoints_debug/")
 
         self.episode_count += 1
         with self.summary_writer.as_default():
@@ -171,15 +168,15 @@ class MPOAgent:
             tf.tile(next_states, multiples=(1, M)), shape=(B * M, -1)
             )
 
-        # MultivariateGaussianPolicy
-        target_mean, target_cov = self.target_policy(next_states_tiled)
-        target_dist = tfd.MultivariateNormalFullCovariance(loc=target_mean, covariance_matrix=target_cov)
+        target_mu, target_sigma = self.target_policy(next_states_tiled)
+
+        # For MultivariateGaussianPolicy
+        #target_dist = tfd.MultivariateNormalFullCovariance(loc=target_mu, covariance_matrix=target_sigma)
 
         # For IndependentGaussianPolicy
-        # target_mean, target_scale = self.target_policy(next_states_tiled)
-        # target_dist = tfd.Independent(
-        #     tfd.Normal(loc=target_mean, scale=target_scale),
-        #     reinterpreted_batch_ndims=1)
+        target_dist = tfd.Independent(
+            tfd.Normal(loc=target_mu, scale=target_sigma),
+            reinterpreted_batch_ndims=1)
 
         sampled_actions = target_dist.sample()                             # [B * M,  action_dim]
         sampled_actions = tf.clip_by_value(sampled_actions, -1.0, 1.0)
@@ -222,9 +219,15 @@ class MPOAgent:
 
         with tf.GradientTape(persistent=True) as tape3:
 
-            online_mean, online_cov = self.policy(next_states_tiled)
+            online_mu, online_sigma = self.policy(next_states_tiled)
 
-            online_dist = tfd.MultivariateNormalFullCovariance(loc=online_mean, covariance_matrix=online_cov)
+            # For MultivariateGaussianPolicy
+            #online_dist = tfd.MultivariateNormalFullCovariance(loc=online_mu, covariance_matrix=online_sigma)
+
+            # For IndependentGaussianPolicy
+            online_dist = tfd.Independent(
+                tfd.Normal(loc=online_mu, scale=online_sigma),
+                reinterpreted_batch_ndims=1)
 
             log_probs = tf.reshape(
                 online_dist.log_prob(sampled_actions) + 1e-6,
@@ -232,9 +235,17 @@ class MPOAgent:
 
             cross_entropy_qp = tf.reduce_sum(weights * log_probs, axis=1)      # [B, M] -> [B,]
 
-            # KL decoupling
-            online_dist_fixedmu = tfd.MultivariateNormalFullCovariance(loc=target_mean, covariance_matrix=online_cov)
-            online_dist_fixedsigma = tfd.MultivariateNormalFullCovariance(loc=online_mean, covariance_matrix=target_cov)
+            # For MultivariateGaussianPolicy
+            # online_dist_fixedmu = tfd.MultivariateNormalFullCovariance(loc=target_mu, covariance_matrix=online_sigma)
+            # online_dist_fixedsigma = tfd.MultivariateNormalFullCovariance(loc=online_mu, covariance_matrix=target_sigma)
+
+            # For IndependentGaussianPolicy
+            online_dist_fixedmu = tfd.Independent(
+                tfd.Normal(loc=target_mu, scale=online_sigma),
+                reinterpreted_batch_ndims=1)
+            online_dist_fixedsigma = tfd.Independent(
+                tfd.Normal(loc=online_mu, scale=target_sigma),
+                reinterpreted_batch_ndims=1)
 
             kl_mu = tf.reshape(
                 target_dist.kl_divergence(online_dist_fixedsigma), shape=(B, M))  # [B * M, ] -> [B, M]
@@ -272,12 +283,10 @@ class MPOAgent:
 
         del tape3
 
-        # if self.global_steps > 12398:
-        #     import pdb; pdb.set_trace()
-
         with self.summary_writer.as_default():
             tf.summary.scalar("loss_policy", loss_policy, step=self.global_steps)
             tf.summary.scalar("loss_critic", loss_critic, step=self.global_steps)
+            tf.summary.scalar("sigma", tf.reduce_mean(online_sigma), step=self.global_steps)
             tf.summary.scalar("kl_mu", tf.reduce_mean(kl_mu), step=self.global_steps)
             tf.summary.scalar("kl_sigma", tf.reduce_mean(kl_sigma), step=self.global_steps)
             tf.summary.scalar("temperature", temperature, step=self.global_steps)
@@ -319,7 +328,7 @@ class MPOAgent:
         print(f"{name}", total_reward)
 
 
-def train(env_id="BipedalWalker-v3", n_episodes=500):
+def train(env_id="BipedalWalker-v3", n_episodes=1500):
     """
     Note:
         if you failed to "pip install gym[box2d]", try "pip install box2d"
@@ -343,8 +352,9 @@ def train(env_id="BipedalWalker-v3", n_episodes=500):
 
         print(f"Episode {n}: {rewards}, {steps} steps")
 
-        if n % 50 == 0:
+        if n % 100 == 0:
             agent.testplay(name=f"ep_{n}", monitor_dir=MONITOR_DIR)
+            agent.save("checkpoints/")
 
     agent.save("checkpoints/")
     print("Training finshed")
@@ -369,3 +379,4 @@ if __name__ == '__main__':
     gym[box2d] 0.24.1
     """
     train()
+    test()

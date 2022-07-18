@@ -8,7 +8,7 @@ from tensorflow_probability import distributions as tfd
 
 class GaussianPolicyNetwork(tf.keras.Model):
     """
-    Gussian Policy with full covariance matrix
+    Independent Gaussian Policy
     """
 
     def __init__(self, action_space):
@@ -17,17 +17,13 @@ class GaussianPolicyNetwork(tf.keras.Model):
 
         self.action_space = action_space
 
-        self.dense1 = kl.Dense(256, activation="relu",
-                               kernel_initializer="Orthogonal")
+        self.dense1 = kl.Dense(256, activation="relu")
 
-        self.dense2 = kl.Dense(256, activation="relu",
-                               kernel_initializer="Orthogonal")
+        self.dense2 = kl.Dense(256, activation="relu")
 
-        self.mean = kl.Dense(self.action_space, activation="tanh",
-                             kernel_initializer="Orthogonal")
+        self.mean = kl.Dense(self.action_space, activation="tanh")
 
-        self.sigma = kl.Dense(self.action_space, activation="softplus",
-                              kernel_initializer="Orthogonal")
+        self.sigma = kl.Dense(self.action_space, activation="softplus")
 
     @tf.function
     def call(self, x):
@@ -38,7 +34,10 @@ class GaussianPolicyNetwork(tf.keras.Model):
 
         mean = self.mean(x)
 
-        sigma = self.sigma(x)
+        #sigma = self.sigma(x)
+
+        # fixed scale
+        sigma = tf.zeros_like(mean) + 0.2
 
         return mean, sigma
 
@@ -119,10 +118,10 @@ class QNetwork(tf.keras.Model):
         super(QNetwork, self).__init__()
 
         self.dense_1 = kl.Dense(256, activation="relu",
-                               kernel_initializer="Orthogonal")
+                                kernel_initializer="Orthogonal")
 
         self.dense_2 = kl.Dense(256, activation="relu",
-                               kernel_initializer="Orthogonal")
+                                kernel_initializer="Orthogonal")
 
         self.q = kl.Dense(1, kernel_initializer="Orthogonal")
 
@@ -146,7 +145,7 @@ if __name__ == "__main__":
     env = gym.make("BipedalWalker-v3")
 
     policy = MultiVariateGaussianPolicyNetwork(action_space=4)
-    critic = CriticNetwork()
+    critic = QNetwork()
 
     dummy_state = env.reset()
     dummy_state = (dummy_state[np.newaxis, ...]).astype(np.float32)
