@@ -279,6 +279,7 @@ class MPOAgent:
 
         variables = [self.log_alpha_mu, self.log_alpha_sigma]
         grads = tape3.gradient(loss_alpha, variables)
+        grads, _ = tf.clip_by_global_norm(grads, 40.)
         self.alpha_optimizer.apply_gradients(zip(grads, variables))
 
         del tape3

@@ -17,9 +17,9 @@ class GaussianPolicyNetwork(tf.keras.Model):
 
         self.action_space = action_space
 
-        self.dense1 = kl.Dense(256, activation="relu")
+        self.dense1 = kl.Dense(128, activation="relu")
 
-        self.dense2 = kl.Dense(256, activation="relu")
+        self.dense2 = kl.Dense(128, activation="relu")
 
         self.mean = kl.Dense(self.action_space, activation="tanh")
 
@@ -34,10 +34,9 @@ class GaussianPolicyNetwork(tf.keras.Model):
 
         mean = self.mean(x)
 
-        #sigma = self.sigma(x)
+        sigma = self.sigma(x) + 0.1
 
-        # fixed scale
-        sigma = tf.zeros_like(mean) + 0.2
+        #sigma = tf.zeros_like(mean) + 0.2
 
         return mean, sigma
 
@@ -68,10 +67,10 @@ class MultiVariateGaussianPolicyNetwork(tf.keras.Model):
 
         self.action_space = action_space
 
-        self.dense1 = kl.Dense(256, activation="relu",
+        self.dense1 = kl.Dense(128, activation="relu",
                                kernel_initializer="Orthogonal")
 
-        self.dense2 = kl.Dense(256, activation="relu",
+        self.dense2 = kl.Dense(128, activation="relu",
                                kernel_initializer="Orthogonal")
 
         self.mean = kl.Dense(self.action_space, activation="tanh",
@@ -117,13 +116,13 @@ class QNetwork(tf.keras.Model):
 
         super(QNetwork, self).__init__()
 
-        self.dense_1 = kl.Dense(256, activation="relu",
-                                kernel_initializer="Orthogonal")
+        self.dense_1 = kl.Dense(128, activation="relu",
+                                kernel_initializer="he_normal")
 
-        self.dense_2 = kl.Dense(256, activation="relu",
-                                kernel_initializer="Orthogonal")
+        self.dense_2 = kl.Dense(128, activation="relu",
+                                kernel_initializer="he_normal")
 
-        self.q = kl.Dense(1, kernel_initializer="Orthogonal")
+        self.q = kl.Dense(1)
 
     @tf.function
     def call(self, states, actions):
