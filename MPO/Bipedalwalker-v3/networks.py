@@ -6,14 +6,66 @@ import tensorflow_probability as tfp
 from tensorflow_probability import distributions as tfd
 
 
-class PolicyNetwork(tf.keras.Model):
+class GaussianPolicyNetwork(tf.keras.Model):
     """
     Gussian Policy with full covariance matrix
     """
 
     def __init__(self, action_space):
 
-        super(PolicyNetwork, self).__init__()
+        super(GaussianPolicyNetwork, self).__init__()
+
+        self.action_space = action_space
+
+        self.dense1 = kl.Dense(256, activation="relu",
+                               kernel_initializer="Orthogonal")
+
+        self.dense2 = kl.Dense(256, activation="relu",
+                               kernel_initializer="Orthogonal")
+
+        self.mean = kl.Dense(self.action_space, activation="tanh",
+                             kernel_initializer="Orthogonal")
+
+        self.sigma = kl.Dense(self.action_space, activation="softplus",
+                              kernel_initializer="Orthogonal")
+
+    @tf.function
+    def call(self, x):
+
+        x = self.dense1(x)
+
+        x = self.dense2(x)
+
+        mean = self.mean(x)
+
+        sigma = self.sigma(x)
+
+        return mean, sigma
+
+    def sample_action(self, states):
+
+        mean, scale = self(states)
+
+        dist = tfd.Independent(
+            tfd.Normal(loc=mean, scale=scale),
+            reinterpreted_batch_ndims=1,
+        )
+
+        actions = dist.sample()
+
+        actions = tf.clip_by_value(actions, -1.0, 1.0)
+
+        return actions
+
+
+class MultiVariateGaussianPolicyNetwork(tf.keras.Model):
+    """
+    Gussian Policy with full covariance matrix
+    """
+
+    def __init__(self, action_space):
+
+        super(MultiVariateGaussianPolicyNetwork, self).__init__()
 
         self.action_space = action_space
 
@@ -50,7 +102,8 @@ class PolicyNetwork(tf.keras.Model):
 
         mean, covariance_matrix = self(states)
 
-        dist = tfd.MultivariateNormalFullCovariance(loc=mean, covariance_matrix=covariance_matrix)
+        dist = tfd.MultivariateNormalFullCovariance(
+            loc=mean, covariance_matrix=covariance_matrix)
 
         actions = dist.sample()
 
@@ -59,11 +112,11 @@ class PolicyNetwork(tf.keras.Model):
         return actions
 
 
-class CriticNetwork(tf.keras.Model):
+class QNetwork(tf.keras.Model):
 
     def __init__(self):
 
-        super(CriticNetwork, self).__init__()
+        super(QNetwork, self).__init__()
 
         self.dense_1 = kl.Dense(256, activation="relu",
                                kernel_initializer="Orthogonal")
@@ -92,7 +145,7 @@ if __name__ == "__main__":
 
     env = gym.make("BipedalWalker-v3")
 
-    policy = PolicyNetwork(action_space=4)
+    policy = MultiVariateGaussianPolicyNetwork(action_space=4)
     critic = CriticNetwork()
 
     dummy_state = env.reset()

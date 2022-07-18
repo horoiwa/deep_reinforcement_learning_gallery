@@ -11,7 +11,7 @@ from gym import wrappers
 import numpy as np
 
 from buffer import ReplayBuffer
-from networks import PolicyNetwork, CriticNetwork
+from networks import MultiVariateGaussianPolicyNetwork, QNetwork
 
 
 Transition = namedtuple('Transition', ["state", "action", "reward", "next_state", "done"])
@@ -29,13 +29,13 @@ class MPOAgent:
 
         self.replay_buffer = ReplayBuffer(maxlen=100000)
 
-        self.policy = PolicyNetwork(action_space=self.action_space)
-        self.target_policy = PolicyNetwork(action_space=self.action_space)
+        self.policy = MultiVariateGaussianPolicyNetwork(action_space=self.action_space)
+        self.target_policy = MultiVariateGaussianPolicyNetwork(action_space=self.action_space)
 
-        self.critic = CriticNetwork()
-        self.target_critic = CriticNetwork()
+        self.critic = QNetwork()
+        self.target_critic = QNetwork()
 
-        self.log_temperature = tf.Variable(2.)
+        self.log_temperature = tf.Variable(1.)
         self.temperature_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
         self.log_alpha_mu = tf.Variable(1.)
@@ -115,14 +115,11 @@ class MPOAgent:
 
         while not done:
 
-            try:
-                action = self.policy.sample_action(np.atleast_2d(state))
+            action = self.policy.sample_action(np.atleast_2d(state))
 
-                action = action.numpy()[0]
+            action = action.numpy()[0]
 
-                next_state, reward, done, _ = env.step(action)
-            except Exception as err:
-                import pdb; pdb.set_trace()
+            next_state, reward, done, _ = env.step(action)
 
             transition = Transition(state, action, reward, next_state, done)
 
@@ -169,14 +166,18 @@ class MPOAgent:
             tf.tile(next_states, multiples=(1, M)), shape=(B * M, -1)
             )
 
+        # MultivariateGaussianPolicy
         target_mean, target_cov = self.target_policy(next_states_tiled)
         target_dist = tfd.MultivariateNormalFullCovariance(loc=target_mean, covariance_matrix=target_cov)
-        try:
-            _sampled_actions = target_dist.sample()                             # [B * M,  action_dim]
-            sampled_actions = tf.clip_by_value(_sampled_actions, -1.0, 1.0)
-        except Exception as err:
-            print(err)
-            import pdb; pdb.set_trace()
+
+        # For IndependentGaussianPolicy
+        # target_mean, target_scale = self.target_policy(next_states_tiled)
+        # target_dist = tfd.Independent(
+        #     tfd.Normal(loc=target_mean, scale=target_scale),
+        #     reinterpreted_batch_ndims=1)
+
+        sampled_actions = target_dist.sample()                             # [B * M,  action_dim]
+        sampled_actions = tf.clip_by_value(sampled_actions, -1.0, 1.0)
 
         # Update Q-network:
         sampled_qvalues = tf.reshape(
@@ -195,7 +196,6 @@ class MPOAgent:
         grads, _ = tf.clip_by_global_norm(grads, 40.)
         self.critic_optimizer.apply_gradients(zip(grads, variables))
 
-
         # E-step:
         # Obtain η* by minimising g(η)
         with tf.GradientTape() as tape2:
@@ -211,11 +211,9 @@ class MPOAgent:
         # Obtain sample-based variational distribution q(a|s)
         temperature = tf.math.softplus(self.log_temperature)
 
-
         # M-step: Optimize the lower bound J with respect to θ
         weights = tf.squeeze(
             tf.math.softmax(sampled_qvalues / temperature, axis=1), axis=2)    # [B, M, 1]
-
 
         with tf.GradientTape(persistent=True) as tape3:
 
@@ -261,6 +259,7 @@ class MPOAgent:
         variables = self.policy.trainable_variables
         grads = tape3.gradient(loss_policy, variables)
         grads, _ = tf.clip_by_global_norm(grads, 40.)
+        self.policy_optimizer.apply_gradients(zip(grads, variables))
 
         variables = [self.log_alpha_mu, self.log_alpha_sigma]
         grads = tape3.gradient(loss_alpha, variables)
@@ -268,7 +267,7 @@ class MPOAgent:
 
         del tape3
 
-        if self.global_steps > 5000:
+        if self.global_steps > 15000:
             import pdb; pdb.set_trace()
 
         with self.summary_writer.as_default():
