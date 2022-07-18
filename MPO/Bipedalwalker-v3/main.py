@@ -145,6 +145,9 @@ class MPOAgent:
             if self.global_steps % self.target_policy_update_period:
                 self.target_policy.set_weights(self.policy.get_weights())
 
+            if self.global_steps % 10000:
+                self.save("checkpoints_debug/")
+
         self.episode_count += 1
         with self.summary_writer.as_default():
             tf.summary.scalar("episode_reward_stp", episode_rewards, step=self.global_steps)
@@ -265,8 +268,8 @@ class MPOAgent:
 
         del tape3
 
-        #if self.global_steps > 30000:
-        #    import pdb; pdb.set_trace()
+        if self.global_steps > 5000:
+            import pdb; pdb.set_trace()
 
         with self.summary_writer.as_default():
             tf.summary.scalar("loss_policy", loss_policy, step=self.global_steps)
@@ -314,7 +317,7 @@ class MPOAgent:
             print(f"Ep. {n}", total_reward)
 
 
-def train(env_id="BipedalWalker-v3", n_episodes=10000):
+def train(env_id="BipedalWalker-v3", n_episodes=1500):
     """
     Note:
         if you failed to "pip install gym[box2d]", try "pip install box2d"
@@ -347,6 +350,7 @@ def test(env_id="BipedalWalker-v3", n_testplay=5):
     agent = MPOAgent(env_id=env_id, logdir=None)
     agent.load("checkpoints/")
     agent.testplay(n_repeat=n_testplay, monitor_dir=MONITOR_DIR)
+
 
 
 if __name__ == '__main__':
