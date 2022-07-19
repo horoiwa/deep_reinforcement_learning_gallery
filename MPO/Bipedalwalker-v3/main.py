@@ -27,7 +27,7 @@ class MPOAgent:
 
         self.action_space = gym.make(self.env_id).action_space.shape[0]
 
-        self.replay_buffer = ReplayBuffer(maxlen=50000)
+        self.replay_buffer = ReplayBuffer(maxlen=10000)
 
         self.policy = GaussianPolicyNetwork(action_space=self.action_space)
         self.target_policy = GaussianPolicyNetwork(action_space=self.action_space)
@@ -42,8 +42,8 @@ class MPOAgent:
 
         self.eps = 0.1
 
-        self.eps_mu = 0.1
-        self.eps_sigma = 0.01
+        self.eps_mu = 0.01
+        self.eps_sigma = 0.001
 
         self.policy_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
         self.critic_optimizer = tf.keras.optimizers.Adam(lr=0.0005)

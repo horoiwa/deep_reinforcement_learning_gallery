@@ -34,8 +34,7 @@ class GaussianPolicyNetwork(tf.keras.Model):
 
         mean = self.mean(x)
 
-        #sigma = 0.2 * self.sigma(x) + 0.1
-        sigma = tf.zeros_like(mean) + 0.2
+        sigma = tf.clip_by_value(self.sigma(x), 0.05, 0.15)
 
         return mean, sigma
 
@@ -49,8 +48,6 @@ class GaussianPolicyNetwork(tf.keras.Model):
         )
 
         actions = dist.sample()
-
-        #actions = tf.clip_by_value(actions, -1.0, 1.0)
 
         return actions
 
@@ -103,8 +100,6 @@ class MultiVariateGaussianPolicyNetwork(tf.keras.Model):
             loc=mean, covariance_matrix=covariance_matrix)
 
         actions = dist.sample()
-
-        actions = tf.clip_by_value(actions, -1.0, 1.0)
 
         return actions
 
