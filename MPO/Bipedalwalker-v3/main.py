@@ -36,7 +36,6 @@ class MPOAgent:
         self.target_critic = QNetwork()
 
         self.log_temperature = tf.Variable(1.)
-        self.temperature_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
         self.log_alpha_mu = tf.Variable(1.)
         self.log_alpha_sigma = tf.Variable(1.)
@@ -48,6 +47,7 @@ class MPOAgent:
 
         self.policy_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
         self.critic_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
+        self.temperature_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
         self.alpha_optimizer = tf.keras.optimizers.Adam(lr=0.0005)
 
         self.batch_size = 128
@@ -126,7 +126,7 @@ class MPOAgent:
                 import pdb; pdb.set_trace()
 
             #: Bipedalwalkerの転倒ペナルティ-100は大きすぎるためclip
-            transition = Transition(state, action, np.clip(reward, 0., 1.), next_state, done)
+            transition = Transition(state, action, np.clip(reward, -1., 1.), next_state, done)
 
             self.replay_buffer.add(transition)
 
@@ -179,7 +179,7 @@ class MPOAgent:
             reinterpreted_batch_ndims=1)
 
         sampled_actions = target_dist.sample()                             # [B * M,  action_dim]
-        sampled_actions = tf.clip_by_value(sampled_actions, -1.0, 1.0)
+        #sampled_actions = tf.clip_by_value(sampled_actions, -1.0, 1.0)
 
         # Update Q-network:
         sampled_qvalues = tf.reshape(
@@ -202,13 +202,15 @@ class MPOAgent:
         # Obtain η* by minimising g(η)
         with tf.GradientTape() as tape2:
             temperature = tf.math.softplus(self.log_temperature)
-            q_logmeanexp = tf.math.log(
-                tf.reduce_mean(tf.math.exp(sampled_qvalues / temperature), axis=1) + 1e-6
-                )
-            loss_temperature = temperature * (self.eps + tf.reduce_mean(q_logmeanexp, axis=0))
+            q_logsumexp = tf.math.reduce_logsumexp(sampled_qvalues / temperature, axis=1)
+            loss_temperature = temperature * (self.eps + tf.reduce_mean(q_logsumexp, axis=0))
 
         grad = tape2.gradient(loss_temperature, self.log_temperature)
-        self.temperature_optimizer.apply_gradients([(grad, self.log_temperature)])
+        if tf.math.is_nan(grad).numpy().sum() != 0:
+            print("NAN GRAD in TEMPERATURE !!!!!!!!!")
+            import pdb; pdb.set_trace()
+        else:
+            self.temperature_optimizer.apply_gradients([(grad, self.log_temperature)])
 
         # Obtain sample-based variational distribution q(a|s)
         temperature = tf.math.softplus(self.log_temperature)
@@ -216,6 +218,10 @@ class MPOAgent:
         # M-step: Optimize the lower bound J with respect to θ
         weights = tf.squeeze(
             tf.math.softmax(sampled_qvalues / temperature, axis=1), axis=2)    # [B, M, 1]
+
+        if tf.math.is_nan(weights).numpy().sum() != 0:
+            print("NAN in weights !!!!!!!!!")
+            import pdb; pdb.set_trace()
 
         with tf.GradientTape(persistent=True) as tape3:
 
