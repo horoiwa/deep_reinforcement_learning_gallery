@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 tmp/
 .vscode/
+dqn-replay-dataset/
 
 ref/
 mp4/
