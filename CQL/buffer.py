@@ -10,7 +10,7 @@ class OfflineReplayBuffer:
     # DQNは50M遷移(4frame skipなので実質200M遷移)が50分割で保存
     N_CKPT_FILES = 1
 
-    def __init__(self, dataset_dir, capacity=10000, batch_size=32):
+    def __init__(self, dataset_dir, capacity=500000, batch_size=32):
         """
         Args:
             dataset_dir (str): path to dqn-replay-dataset (50M sample = 1M * 50 files)
