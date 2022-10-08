@@ -5,6 +5,7 @@ import time
 
 import tensorflow as tf
 import gym
+from gym.wrappers import RecordVideo
 import numpy as np
 from PIL import Image
 
@@ -21,8 +22,8 @@ def preprocess(frame):
 
 class CQLAgent:
 
-    def __init__(self, env_id, dataset_dir, dataset_size,
-                 n_atoms=200, batch_size=32, gamma=0.99, k=1.0):
+    def __init__(self, env_id, dataset_dir, dataset_size, num_ckpt_files,
+                 n_atoms=200, batch_size=32, gamma=0.99, kappa=1.0, alpha=1.0):
 
         self.env_id = env_id
 
@@ -41,11 +42,16 @@ class CQLAgent:
         self.batch_size = batch_size
 
         self.offline_replaybuffer = OfflineReplayBuffer(
-            dataset_dir=dataset_dir, capacity=dataset_size, batch_size=self.batch_size)
+            dataset_dir=dataset_dir,
+            capacity=dataset_size,
+            num_ckpt_files=num_ckpt_files,
+            batch_size=self.batch_size)
 
-        self.gamma = 0.99
+        self.gamma = gamma
 
-        self.k = 1.0
+        self.kappa = kappa
+
+        self.alpha = alpha
 
         self.setup()
 
@@ -67,20 +73,35 @@ class CQLAgent:
 
         self.sync_target_weights()
 
-    def rollout(self):
+    def save(self, save_dir="checkpoints/"):
+        save_dir = Path(save_dir)
+        self.qnetwork.save_weights(str(save_dir / "qnetwork"))
+
+    def load(self, load_dir="checkpoints/"):
+        load_dir = Path(load_dir)
+        self.qnetwork.load_weights(str(load_dir / "qnetwork"))
+        self.target_qnetwork.load_weights(str(load_dir / "qnetwork"))
+
+    def rollout(self, monitor_dir=None, name_prefix=None):
 
         rewards, steps = 0., 0.
 
         env = gym.make(self.env_id)
+        if monitor_dir is not None:
+            assert name_prefix is not None
+            env = RecordVideo(env, monitor_dir, name_prefix=name_prefix)
 
         frames = collections.deque(maxlen=4)
 
         frame = preprocess(env.reset())
-        for _ in range(self.n_frames):
+
+        for _ in range(4):
             frames.append(frame)
 
         done = False
+
         while (not done) and (steps < 3000):
+
             state = np.stack(frames, axis=2)[np.newaxis, ...]
             action = self.qnetwork.sample_action(state)
             next_frame, reward, done, _ = env.step(action)
@@ -109,23 +130,22 @@ class CQLAgent:
             td_loss = self.quantile_huberloss(target_quantile_qvalues, quantile_qvalues)  # (B, )
 
             #: CQL(H)
-            qvalues_all = tf.reduce_mean(quantile_qvalues_all, axis=2)  # (B, A)
+            Q_learned_all = tf.reduce_mean(quantile_qvalues_all, axis=2)  # (B, A)
 
-            cql_loss = tf.reduce_logsumexp(qvalues_all, axis=1)  # (B, )
+            log_Z = tf.reduce_logsumexp(Q_learned_all, axis=1)  # (B, )
 
+            Q_behavior = tf.reduce_mean(quantile_qvalues, axis=1)  # (B, )
+
+            cql_loss = log_Z - Q_behavior
             loss = tf.reduce_mean(self.alpha * cql_loss + td_loss)
 
         variables = self.qnetwork.trainable_variables
         grads = tape.gradient(loss, variables)
         self.optimizer.apply_gradients(zip(grads, variables))
 
-        import pdb; pdb.set_trace()
-        Q_max = tf.maximum(qvalues_all, axis=1)
-        Q_behavior = tf.reduce_mean(quantile_qvalues, axis=2)
-        Q_diff = Q_behavior - Q_max
-
-        info = {"total_loss": loss, "cql_loss": tf.reduce_mean(cql_loss),
-                "td_loss": tf.reduce_mean(td_loss), "Q_diff": tf.reduce_mean(Q_diff)}
+        info = {"total_loss": loss,
+                "cql_loss": tf.reduce_mean(cql_loss),
+                "td_loss": tf.reduce_mean(td_loss)}
 
         return info
 
@@ -157,9 +177,9 @@ class CQLAgent:
 
         errors = target_quantile_values - quantile_values
 
-        is_smaller_than_k = tf.abs(errors) < self.k
+        is_smaller_than_k = tf.abs(errors) < self.kappa
         squared_loss = 0.5 * tf.square(errors)
-        linear_loss = self.k * (tf.abs(errors) - 0.5 * self.k)
+        linear_loss = self.kappa * (tf.abs(errors) - 0.5 * self.kappa)
         huber_loss = tf.where(is_smaller_than_k, squared_loss, linear_loss)
 
         indicator = tf.stop_gradient(tf.where(errors < 0, 1., 0.))
@@ -168,9 +188,9 @@ class CQLAgent:
 
         quantile_huber_loss = quantile_weights * huber_loss
 
-        loss = tf.reduce_mean(tf.reduce_sum(quantile_huber_loss, axis=2), axis=1)
+        td_loss = tf.reduce_mean(tf.reduce_sum(quantile_huber_loss, axis=2), axis=1)
 
-        return loss
+        return td_loss
 
     def sync_target_weights(self):
         self.target_qnetwork.set_weights(self.qnetwork.get_weights())
@@ -179,29 +199,34 @@ class CQLAgent:
 def main(n_iter=20000000,
          env_id="BreakoutDeterministic-v4",
          dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs",
-         dataset_size=5000,
+         dataset_size=500000,
+         num_ckpt_files=10,
          target_update_period=8000):
 
     logdir = Path(__file__).parent / "log"
     if logdir.exists():
         shutil.rmtree(logdir)
 
+    monitor_dir = Path(__file__).parent / "mp4"
+    if monitor_dir.exists():
+        shutil.rmtree(monitor_dir)
+
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
     agent = CQLAgent(
         env_id=env_id, dataset_dir=dataset_dir,
-        dataset_size=dataset_size)
+        dataset_size=dataset_size, num_ckpt_files=num_ckpt_files)
 
     s = time.time()
     for n in range(n_iter):
 
         info = agent.update_network()
 
-        with summary_writer.as_default():
-            tf.summary.scalar("loss", info["total_loss"], step=n)
-            tf.summary.scalar("cql_loss", info["cql_loss"], step=n)
-            tf.summary.scalar("td_loss", info["td_loss"], step=n)
-            tf.summary.scalar("Q_diff", info["Q_diff"], step=n)
+        if n % 10 == 0:
+            with summary_writer.as_default():
+                tf.summary.scalar("loss", info["total_loss"], step=n)
+                tf.summary.scalar("cql_loss", info["cql_loss"], step=n)
+                tf.summary.scalar("td_loss", info["td_loss"], step=n)
 
         if n % target_update_period == 0:
             agent.sync_target_weights()
@@ -213,11 +238,16 @@ def main(n_iter=20000000,
                 tf.summary.scalar("test_steps", steps, step=n)
                 tf.summary.scalar("laptime", time.time() - s, step=n)
             s = time.time()
+            print(f"== test: {n} ===")
+            print(f"score: {rewards}, step: {steps}")
 
         if n % 100000 == 0:
             agent.save()
 
+    for i in range(10):
+        agent.rollout(monitor_dir=monitor_dir, name_prefix=f"test_{i}")
 
+    print("Finished")
 
 if __name__ == '__main__':
     main()
