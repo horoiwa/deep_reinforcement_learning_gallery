@@ -238,6 +238,8 @@ def main(n_iter=20000000,
 
         if n % 100000 == 0:
             agent.save()
+            #: increasing memory use 対策
+            agent.offline_replaybuffer.reload_dataset()
 
 
 def test(env_id="BreakoutDeterministic-v4",

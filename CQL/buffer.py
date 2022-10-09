@@ -31,11 +31,14 @@ class OfflineReplayBuffer:
 
         self.batch_size = batch_size
 
-        self._load_dataset()
+        self.reload_dataset()
 
-    def _load_dataset(self):
+    def reload_dataset(self):
 
         assert self.dataset_dir.exists()
+
+        for buffer in self.buffers:
+            del buffer
 
         for i in range(0, self.num_buffers):
 
