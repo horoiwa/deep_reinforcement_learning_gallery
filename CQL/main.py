@@ -22,7 +22,7 @@ def preprocess(frame):
 
 class CQLAgent:
 
-    def __init__(self, env_id, dataset_dir, dataset_size, num_ckpt_files,
+    def __init__(self, env_id, dataset_dir, num_buffers, capacity_of_each_buffer,
                  n_atoms=200, batch_size=32, gamma=0.99, kappa=1.0, alpha=1.0):
 
         self.env_id = env_id
@@ -43,8 +43,8 @@ class CQLAgent:
 
         self.offline_replaybuffer = OfflineReplayBuffer(
             dataset_dir=dataset_dir,
-            capacity=dataset_size,
-            num_ckpt_files=num_ckpt_files,
+            num_buffers=num_buffers,
+            capacity_of_each_buffer=capacity_of_each_buffer,
             batch_size=self.batch_size)
 
         self.gamma = gamma
@@ -199,8 +199,7 @@ class CQLAgent:
 def main(n_iter=20000000,
          env_id="BreakoutDeterministic-v4",
          dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs",
-         dataset_size=500000,
-         num_ckpt_files=10,
+         num_buffers=10,
          target_update_period=8000):
 
     logdir = Path(__file__).parent / "log"
@@ -215,7 +214,7 @@ def main(n_iter=20000000,
 
     agent = CQLAgent(
         env_id=env_id, dataset_dir=dataset_dir,
-        dataset_size=dataset_size, num_ckpt_files=num_ckpt_files)
+        num_buffers=num_buffers, capacity_of_each_buffer=1000000)
 
     s = time.time()
     for n in range(n_iter):
