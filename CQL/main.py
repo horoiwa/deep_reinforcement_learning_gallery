@@ -199,16 +199,12 @@ class CQLAgent:
 def main(n_iter=20000000,
          env_id="BreakoutDeterministic-v4",
          dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs",
-         num_buffers=10,
+         num_buffers=5,
          target_update_period=8000):
 
     logdir = Path(__file__).parent / "log"
     if logdir.exists():
         shutil.rmtree(logdir)
-
-    monitor_dir = Path(__file__).parent / "mp4"
-    if monitor_dir.exists():
-        shutil.rmtree(monitor_dir)
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
@@ -243,10 +239,26 @@ def main(n_iter=20000000,
         if n % 100000 == 0:
             agent.save()
 
+
+def test(env_id="BreakoutDeterministic-v4",
+         dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs"):
+
+    monitor_dir = Path(__file__).parent / "mp4"
+    if monitor_dir.exists():
+        shutil.rmtree(monitor_dir)
+
+    agent = CQLAgent(
+        env_id=env_id, dataset_dir=dataset_dir,
+        num_buffers=0, capacity_of_each_buffer=1000000)
+
+    agent.load()
+
     for i in range(10):
         agent.rollout(monitor_dir=monitor_dir, name_prefix=f"test_{i}")
 
     print("Finished")
 
+
 if __name__ == '__main__':
     main()
+    test()

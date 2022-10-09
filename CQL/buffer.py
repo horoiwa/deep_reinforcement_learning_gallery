@@ -52,7 +52,7 @@ class OfflineReplayBuffer:
 
     def sample_minibatch(self):
 
-        idx = random.randint(0, len(self.buffers))
+        idx = random.randint(0, len(self.buffers)-1)
 
         (states, actions, rewards, next_states,
          _, _, dones, _) = self.buffers[idx].sample_transition_batch()
