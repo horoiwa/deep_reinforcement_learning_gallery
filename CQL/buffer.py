@@ -1,6 +1,7 @@
 from pathlib import Path
 import random
 import numpy as np
+import copy
 
 from dopamine.replay_memory import circular_replay_buffer
 
@@ -31,14 +32,11 @@ class OfflineReplayBuffer:
 
         self.batch_size = batch_size
 
-        self.reload_dataset()
+        self.load_dataset()
 
-    def reload_dataset(self):
+    def load_dataset(self):
 
         assert self.dataset_dir.exists()
-
-        for buffer in self.buffers:
-            del buffer
 
         for i in range(0, self.num_buffers):
 
@@ -64,7 +62,9 @@ class OfflineReplayBuffer:
         next_states = next_states.astype(np.float32)
         dones = dones.astype(np.float32)
 
-        return (states, actions, rewards, next_states, dones)
+        minibatch = (states, actions, rewards, next_states, dones)
+
+        return copy.deepcopy(minibatch)
 
 
 if __name__ == '__main__':

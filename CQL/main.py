@@ -27,6 +27,12 @@ class CQLAgent:
 
         self.env_id = env_id
 
+        self.dataset_dir = dataset_dir
+
+        self.num_buffers = num_buffers
+
+        self.capacity_of_each_buffer = capacity_of_each_buffer
+
         self.action_space = gym.make(self.env_id).action_space.n
 
         self.n_atoms = n_atoms
@@ -42,9 +48,9 @@ class CQLAgent:
         self.batch_size = batch_size
 
         self.offline_replaybuffer = OfflineReplayBuffer(
-            dataset_dir=dataset_dir,
-            num_buffers=num_buffers,
-            capacity_of_each_buffer=capacity_of_each_buffer,
+            dataset_dir=self.dataset_dir,
+            num_buffers=self.num_buffers,
+            capacity_of_each_buffer=self.capacity_of_each_buffer,
             batch_size=self.batch_size)
 
         self.gamma = gamma
@@ -137,6 +143,7 @@ class CQLAgent:
             Q_behavior = tf.reduce_mean(quantile_qvalues, axis=1)  # (B, )
 
             cql_loss = log_Z - Q_behavior
+
             loss = tf.reduce_mean(self.alpha * cql_loss + td_loss)
 
         variables = self.qnetwork.trainable_variables
@@ -167,7 +174,6 @@ class CQLAgent:
 
         return target_quantile_qvalues
 
-    @tf.function
     def quantile_huberloss(self, target_quantile_values, quantile_values):
         target_quantile_values = tf.repeat(
             tf.expand_dims(target_quantile_values, axis=1), self.n_atoms, axis=1)  # (B, N_ATOMS, N_ATOMS)
@@ -196,11 +202,11 @@ class CQLAgent:
         self.target_qnetwork.set_weights(self.qnetwork.get_weights())
 
 
-def main(n_iter=20000000,
-         env_id="BreakoutDeterministic-v4",
-         dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs",
-         num_buffers=5,
-         target_update_period=8000):
+def train(n_iter=20000000,
+          env_id="BreakoutDeterministic-v4",
+          dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs",
+          num_buffers=5,
+          target_update_period=8000):
 
     logdir = Path(__file__).parent / "log"
     if logdir.exists():
@@ -217,7 +223,7 @@ def main(n_iter=20000000,
 
         info = agent.update_network()
 
-        if n % 10 == 0:
+        if n % 20 == 0:
             with summary_writer.as_default():
                 tf.summary.scalar("loss", info["total_loss"], step=n)
                 tf.summary.scalar("cql_loss", info["cql_loss"], step=n)
@@ -226,7 +232,7 @@ def main(n_iter=20000000,
         if n % target_update_period == 0:
             agent.sync_target_weights()
 
-        if n % 10000 == 0:
+        if n % 5000 == 0:
             rewards, steps = agent.rollout()
             with summary_writer.as_default():
                 tf.summary.scalar("test_score", rewards, step=n)
@@ -238,8 +244,6 @@ def main(n_iter=20000000,
 
         if n % 100000 == 0:
             agent.save()
-            #: increasing memory use 対策
-            agent.offline_replaybuffer.reload_dataset()
 
 
 def test(env_id="BreakoutDeterministic-v4",
@@ -251,7 +255,7 @@ def test(env_id="BreakoutDeterministic-v4",
 
     agent = CQLAgent(
         env_id=env_id, dataset_dir=dataset_dir,
-        num_buffers=0, capacity_of_each_buffer=1000000)
+        num_buffers=0, capacity_of_each_buffer=100)
 
     agent.load()
 
@@ -262,5 +266,5 @@ def test(env_id="BreakoutDeterministic-v4",
 
 
 if __name__ == '__main__':
-    main()
+    train()
     test()
