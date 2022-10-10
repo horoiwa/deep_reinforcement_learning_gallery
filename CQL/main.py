@@ -209,7 +209,7 @@ def train(n_iter=20000000,
           target_update_period=8000, resume_from=None):
 
     logdir = Path(__file__).parent / "log"
-    if logdir.exists() and resume_from is not None:
+    if logdir.exists() and resume_from is None:
         shutil.rmtree(logdir)
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
