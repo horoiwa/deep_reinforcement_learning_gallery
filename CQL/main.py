@@ -206,10 +206,10 @@ def train(n_iter=20000000,
           env_id="BreakoutDeterministic-v4",
           dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs",
           num_buffers=5,
-          target_update_period=8000):
+          target_update_period=8000, resume_from=None):
 
     logdir = Path(__file__).parent / "log"
-    if logdir.exists():
+    if logdir.exists() and resume_from is not None:
         shutil.rmtree(logdir)
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
@@ -218,8 +218,14 @@ def train(n_iter=20000000,
         env_id=env_id, dataset_dir=dataset_dir,
         num_buffers=num_buffers, capacity_of_each_buffer=1000000)
 
+    if resume_from is not None:
+        agent.load()
+        step_init = int(resume_from * 1000)
+    else:
+        step_init = 1
+
     s = time.time()
-    for n in range(n_iter):
+    for n in range(step_init, n_iter):
 
         info = agent.update_network()
 
@@ -266,5 +272,5 @@ def test(env_id="BreakoutDeterministic-v4",
 
 
 if __name__ == '__main__':
-    train()
+    train(resume_from=418.8)
     test()
