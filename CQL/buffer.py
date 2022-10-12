@@ -98,22 +98,23 @@ class OfflineBuffer:
 
         assert self.dataset_dir.exists()
 
-        if self.cache_dir.exists():
-            shutil.rmtree(self.cache_dir)
-        self.cache_dir.mkdir()
+        if not self.cache_dir.exists():
+            print(f"==== Create tfrecords in {self.cache_dir} ====")
+            self.cache_dir.mkdir()
+            for i in range(0, self.num_data_files):
 
-        for i in range(0, self.num_data_files):
+                tmp_buffer = TmpOutOfGraphReplayBuffer(
+                    replay_capacity=self.capacity,
+                    observation_shape=(84, 84),
+                    stack_size=4,
+                    batch_size=self.batch_size,
+                    update_horizon=1,
+                    gamma=0.99)
 
-            tmp_buffer = TmpOutOfGraphReplayBuffer(
-                replay_capacity=self.capacity,
-                observation_shape=(84, 84),
-                stack_size=4,
-                batch_size=self.batch_size,
-                update_horizon=1,
-                gamma=0.99)
-
-            tmp_buffer.load(self.dataset_dir, suffix=f"{i}")
-            tmp_buffer.save_to_tfrecords(self.cache_dir, suffix=i)
+                tmp_buffer.load(self.dataset_dir, suffix=f"{i}")
+                tmp_buffer.save_to_tfrecords(self.cache_dir, suffix=i)
+        else:
+            print(f"==== Use tfrecords in {self.cache_dir} ====")
 
         tfrecords_files = [str(pt) for pt in self.cache_dir.glob("*.tfrecords")]
         random.shuffle(tfrecords_files)
