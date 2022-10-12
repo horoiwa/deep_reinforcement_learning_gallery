@@ -33,7 +33,7 @@ class QuantileQNetwork(tf.keras.Model):
 
         batch_size = x.shape[0]
 
-        x = tf.cast(x, tf.float32) / 255
+        x = x / 255
 
         x = self.conv1(x)
         x = self.conv2(x)
@@ -51,7 +51,7 @@ class QuantileQNetwork(tf.keras.Model):
         """
 
         if epsilon is not None and random.random() > epsilon:
-            quantile_qvalues = self.call(state)
+            quantile_qvalues = self(state)
             q_means = tf.reduce_mean(quantile_qvalues, axis=2, keepdims=True)
             selected_action = tf.argmax(q_means, axis=1)
             selected_action = selected_actions[0][0].numpy()

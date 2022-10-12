@@ -98,16 +98,15 @@ class CQLAgent:
             env = RecordVideo(env, monitor_dir, name_prefix=name_prefix)
 
         frames = collections.deque(maxlen=4)
+        for _ in range(4):
+            frames.append(np.zeros((84, 84), dtype=np.float32))
 
         frame = preprocess(env.reset())
-
-        for _ in range(4):
-            frames.append(frame)
+        frames.append(frame)
 
         done = False
-
         while (not done) and (steps < 3000):
-            state = np.stack(reversed(frames), axis=2)[np.newaxis, ...]
+            state = np.stack(frames, axis=2)[np.newaxis, ...]
             action = self.qnetwork.sample_action(state)
             next_frame, reward, done, _ = env.step(action)
             frames.append(preprocess(next_frame))
@@ -121,7 +120,7 @@ class CQLAgent:
 
         states, actions, rewards, next_states, dones = self.replaybuffer.sample_minibatch()
         rewards = np.clip(rewards, 0., 1.)
-        import pdb; pdb.set_trace()
+
         #  TQ = reward + γ * max_a[Q(s, a)]
         target_quantile_qvalues = self.make_target_distribution(rewards, next_states, dones)
 
@@ -150,9 +149,9 @@ class CQLAgent:
         grads = tape.gradient(loss, variables)
         self.optimizer.apply_gradients(zip(grads, variables))
 
-        info = {"total_loss": loss,
-                "cql_loss": tf.reduce_mean(cql_loss),
-                "td_loss": tf.reduce_mean(td_loss)}
+        info = {"total_loss": loss.numpy(),
+                "cql_loss": tf.reduce_mean(cql_loss).numpy(),
+                "td_loss": tf.reduce_mean(td_loss).numpy()}
 
         return info
 
@@ -205,8 +204,8 @@ class CQLAgent:
 def train(n_iter=20000000,
           env_id="BreakoutDeterministic-v4",
           dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs",
-          #num_data_files=5, capacity_of_each_buffer=200000,
-          num_data_files=1, capacity_of_each_buffer=5000,
+          num_data_files=5, capacity_of_each_buffer=1000000,
+          #num_data_files=1, capacity_of_each_buffer=5000,
           target_update_period=8000, resume_from=None):
 
     logdir = Path(__file__).parent / "log"
@@ -273,6 +272,27 @@ def test(env_id="BreakoutDeterministic-v4",
     print("Finished")
 
 
+def check(env_id="BreakoutDeterministic-v4",
+          dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs"):
+
+    agent = CQLAgent(
+        env_id=env_id, dataset_dir=dataset_dir,
+        num_data_files=1, capacity_of_each_buffer=1000)
+
+    minibatch = agent.replaybuffer.sample_minibatch()
+    state = minibatch[0][0].numpy()
+    from PIL import Image
+    for i in range(4):
+        img = Image.fromarray(state[:, :, i])
+        img.convert("L").save(f"tmp/s{i}.png")
+
+    state = minibatch[3][0].numpy()
+    for i in range(4):
+        img = Image.fromarray(state[:, :, i])
+        img.convert("L").save(f"tmp/ns{i}.png")
+
+
 if __name__ == '__main__':
     train(resume_from=None)
     test()
+    #check()
