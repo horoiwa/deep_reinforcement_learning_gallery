@@ -9,7 +9,7 @@ from gym.wrappers import RecordVideo
 import numpy as np
 from PIL import Image
 
-from buffer import OfflineReplayBuffer
+from buffer import OfflineBuffer
 from model import QuantileQNetwork
 
 
@@ -22,14 +22,14 @@ def preprocess(frame):
 
 class CQLAgent:
 
-    def __init__(self, env_id, dataset_dir, num_buffers, capacity_of_each_buffer,
-                 n_atoms=200, batch_size=32, gamma=0.99, kappa=1.0, alpha=1.0):
+    def __init__(self, env_id, dataset_dir, num_data_files, capacity_of_each_buffer=1000000,
+                 n_atoms=200, batch_size=32, gamma=0.99, kappa=1.0, cql_weight=1.0):
 
         self.env_id = env_id
 
         self.dataset_dir = dataset_dir
 
-        self.num_buffers = num_buffers
+        self.num_data_files = num_data_files
 
         self.capacity_of_each_buffer = capacity_of_each_buffer
 
@@ -47,9 +47,9 @@ class CQLAgent:
 
         self.batch_size = batch_size
 
-        self.offline_replaybuffer = OfflineReplayBuffer(
+        self.replaybuffer = OfflineBuffer(
             dataset_dir=self.dataset_dir,
-            num_buffers=self.num_buffers,
+            num_data_files=self.num_data_files,
             capacity_of_each_buffer=self.capacity_of_each_buffer,
             batch_size=self.batch_size)
 
@@ -57,7 +57,7 @@ class CQLAgent:
 
         self.kappa = kappa
 
-        self.alpha = alpha
+        self.cql_weight = cql_weight
 
         self.setup()
 
@@ -107,8 +107,7 @@ class CQLAgent:
         done = False
 
         while (not done) and (steps < 3000):
-
-            state = np.stack(frames, axis=2)[np.newaxis, ...]
+            state = np.stack(reversed(frames), axis=2)[np.newaxis, ...]
             action = self.qnetwork.sample_action(state)
             next_frame, reward, done, _ = env.step(action)
             frames.append(preprocess(next_frame))
@@ -120,8 +119,9 @@ class CQLAgent:
 
     def update_network(self):
 
-        states, actions, rewards, next_states, dones = self.offline_replaybuffer.sample_minibatch()
-
+        states, actions, rewards, next_states, dones = self.replaybuffer.sample_minibatch()
+        rewards = np.clip(rewards, 0., 1.)
+        import pdb; pdb.set_trace()
         #  TQ = reward + γ * max_a[Q(s, a)]
         target_quantile_qvalues = self.make_target_distribution(rewards, next_states, dones)
 
@@ -144,7 +144,7 @@ class CQLAgent:
 
             cql_loss = log_Z - Q_behavior
 
-            loss = tf.reduce_mean(self.alpha * cql_loss + td_loss)
+            loss = tf.reduce_mean(self.cql_weight * cql_loss + td_loss)
 
         variables = self.qnetwork.trainable_variables
         grads = tape.gradient(loss, variables)
@@ -183,10 +183,10 @@ class CQLAgent:
 
         errors = target_quantile_values - quantile_values
 
-        is_smaller_than_k = tf.abs(errors) < self.kappa
+        is_smaller_than_kappa = tf.abs(errors) < self.kappa
         squared_loss = 0.5 * tf.square(errors)
         linear_loss = self.kappa * (tf.abs(errors) - 0.5 * self.kappa)
-        huber_loss = tf.where(is_smaller_than_k, squared_loss, linear_loss)
+        huber_loss = tf.where(is_smaller_than_kappa, squared_loss, linear_loss)
 
         indicator = tf.stop_gradient(tf.where(errors < 0, 1., 0.))
         quantiles = tf.repeat(tf.expand_dims(self.quantiles, axis=1), self.n_atoms, axis=1)
@@ -205,7 +205,8 @@ class CQLAgent:
 def train(n_iter=20000000,
           env_id="BreakoutDeterministic-v4",
           dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs",
-          num_buffers=5,
+          #num_data_files=5, capacity_of_each_buffer=200000,
+          num_data_files=1, capacity_of_each_buffer=5000,
           target_update_period=8000, resume_from=None):
 
     logdir = Path(__file__).parent / "log"
@@ -216,7 +217,8 @@ def train(n_iter=20000000,
 
     agent = CQLAgent(
         env_id=env_id, dataset_dir=dataset_dir,
-        num_buffers=num_buffers, capacity_of_each_buffer=1000000)
+        capacity_of_each_buffer=capacity_of_each_buffer,
+        num_data_files=num_data_files)
 
     if resume_from is not None:
         agent.load()
@@ -261,7 +263,7 @@ def test(env_id="BreakoutDeterministic-v4",
 
     agent = CQLAgent(
         env_id=env_id, dataset_dir=dataset_dir,
-        num_buffers=0, capacity_of_each_buffer=100)
+        num_data_files=0, capacity_of_each_buffer=100)
 
     agent.load()
 
@@ -272,5 +274,5 @@ def test(env_id="BreakoutDeterministic-v4",
 
 
 if __name__ == '__main__':
-    train(resume_from=418.8)
+    train(resume_from=None)
     test()

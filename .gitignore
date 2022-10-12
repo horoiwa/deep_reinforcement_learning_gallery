@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 tmp/
+temp/
 .vscode/
 dqn-replay-dataset/
 
