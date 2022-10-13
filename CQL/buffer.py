@@ -2,6 +2,7 @@ from pathlib import Path
 import random
 import numpy as np
 import shutil
+import gc
 
 import tensorflow as tf
 from tqdm import tqdm
@@ -10,7 +11,7 @@ from dopamine.replay_memory.circular_replay_buffer import OutOfGraphReplayBuffer
 
 class TmpOutOfGraphReplayBuffer(OutOfGraphReplayBuffer):
 
-    def save_to_tfrecords(self, cache_dir, suffix, num_chunks=4) -> tf.data.Dataset:
+    def to_tfrecords(self, cache_dir, suffix, num_chunks=4) -> tf.data.Dataset:
 
         indices = [idx for idx in range(0, self.cursor()) if self.is_valid_transition(idx)]
         random.shuffle(indices)
@@ -22,7 +23,7 @@ class TmpOutOfGraphReplayBuffer(OutOfGraphReplayBuffer):
             transitions = self.sample_transition_batch(batch_size=batch_size, indices=_indices)
             states, actions, rewards, next_states, _, _, dones, _ = transitions
 
-            filepath = str(cache_dir / f"dataset_{suffix}_{i}.tfrecords")
+            filepath = str(cache_dir / f"DQN_{suffix}_{i}.tfrecords")
             with tf.io.TFRecordWriter(filepath) as writer:
                 for s, a, r, s2, d in tqdm(zip(states, actions, rewards, next_states, dones)):
                     record = tf.train.Example(
@@ -64,31 +65,56 @@ def deserialize(serialized_transition):
     return s, a, r, s2, d
 
 
+def create_tfrecords(original_dataset_dir: str, dataset_dir: str, num_data_files: int, use_samples_per_file: int):
+    """ Convert DQN replay dataset to tfrecords
+    Args:
+        original_dataset_dir (str): Path to original dqn-replay-dataset directory
+        dataset_dir (str): Output directory
+        num_data_files (int): 50分割されたファイルのうちいくつまで使うか(max=50)
+        use_samples_per_file (int): １ファイルから何サンプルを使うか (max=1000000)
+
+    Note:
+        1. DQN Replayデータセット(50M)は1Mごとに50分割されていることに留意
+
+        2. Download dataset in advance
+          mkdir dqn-replay-dataset && cd ./dqn-replay-dataset
+          gsutil -m cp -R gs://atari-replay-datasets/dqn/BreakOut .
+    """
+
+    dataset_dir = Path(dataset_dir)
+    if not dataset_dir.exists():
+        dataset_dir.mkdir(parents=True)
+
+    print(f"==== Create tfrecords from {original_dataset_dir} ====")
+    print(f"==== Output: {dataset_dir} ====")
+
+    for i in range(0, num_data_files):
+
+        #: ここのbatch_sizeやgammaはダミーなので何でもいい
+        tmp_buffer = TmpOutOfGraphReplayBuffer(
+            replay_capacity=use_samples_per_file,
+            observation_shape=(84, 84),
+            stack_size=4,
+            batch_size=64,
+            update_horizon=1,
+            gamma=0.99)
+
+        tmp_buffer.load(original_dataset_dir, suffix=f"{i}")
+        tmp_buffer.to_tfrecords(dataset_dir, suffix=i)
+
+        del tmp_buffer
+        gc.collect()
+
+
 class OfflineBuffer:
 
-    def __init__(self, dataset_dir, num_data_files=50, cache_dir="tmp/",
-                 capacity_of_each_buffer=100000, batch_size=32):
+    def __init__(self, dataset_dir: str, batch_size: int):
         """
-        DQN Replayデータセット(50M transition)は1M transitionごとに分割されていることに留意
-
         Args:
-            dataset_dir (str): path to dqn-replay-dataset (50M遷移 = 1M * 50 files)
-            num_data_files(int): 50分割されたデータセットの何番目まで使うか, set 50 for CQL paper
-            capacity_of_each_buffer (int): 各データセットファイルからどれだけのサンプルを使うか. Max 1,000,000 = 1M transition.
-
-        Note:
-            #: Download dataset in advance
-            mkdir dqn-replay-dataset && cd ./dqn-replay-dataset
-            gsutil -m cp -R gs://atari-replay-datasets/dqn/BreakOut .
+            dataset_dir (str): tfrecords dir
         """
 
         self.dataset_dir = Path(dataset_dir)
-
-        self.cache_dir = Path(cache_dir)
-
-        self.num_data_files = num_data_files
-
-        self.capacity = capacity_of_each_buffer
 
         self.batch_size = batch_size
 
@@ -98,26 +124,10 @@ class OfflineBuffer:
 
         assert self.dataset_dir.exists()
 
-        if not self.cache_dir.exists():
-            print(f"==== Create tfrecords in {self.cache_dir} ====")
-            self.cache_dir.mkdir()
-            for i in range(0, self.num_data_files):
+        tfrecords_files = [str(pt) for pt in self.dataset_dir.glob("*.tfrecords")]
+        print(f"Detected tfrecords: {tfrecords_files}")
 
-                tmp_buffer = TmpOutOfGraphReplayBuffer(
-                    replay_capacity=self.capacity,
-                    observation_shape=(84, 84),
-                    stack_size=4,
-                    batch_size=self.batch_size,
-                    update_horizon=1,
-                    gamma=0.99)
-
-                tmp_buffer.load(self.dataset_dir, suffix=f"{i}")
-                tmp_buffer.save_to_tfrecords(self.cache_dir, suffix=i)
-        else:
-            print(f"==== Use tfrecords in {self.cache_dir} ====")
-
-        tfrecords_files = [str(pt) for pt in self.cache_dir.glob("*.tfrecords")]
-        random.shuffle(tfrecords_files)
+        random.shuffle(tfrecords_files)  #: shuffleが意味あるかは知らない
 
         dataset = tf.data.TFRecordDataset(tfrecords_files)
 
@@ -125,8 +135,8 @@ class OfflineBuffer:
             dataset.shuffle(1000, reshuffle_each_iteration=True)
                    .repeat()
                    .batch(self.batch_size, drop_remainder=True)
-                   .map(deserialize, num_parallel_calls=tf.data.AUTOTUNE)
-                   .prefetch(tf.data.AUTOTUNE)
+                   .map(deserialize)
+                   .prefetch(4)
         )
 
         return dataset
@@ -138,9 +148,3 @@ class OfflineBuffer:
     def sample_minibatch(self):
         minibatch = next(self._sample_minibatch())
         return minibatch
-
-
-if __name__ == '__main__':
-    dataset_dir = "dqn-replay-dataset/Breakout/1/replay_logs"
-    buffer = OfflineBuffer(dataset_dir=dataset_dir)
-    buffer.sample_minibatch()

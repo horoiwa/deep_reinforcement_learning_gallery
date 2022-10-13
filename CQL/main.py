@@ -9,7 +9,7 @@ from gym.wrappers import RecordVideo
 import numpy as np
 from PIL import Image
 
-from buffer import OfflineBuffer
+from buffer import OfflineBuffer, create_tfrecords
 from model import QuantileQNetwork
 
 
@@ -22,16 +22,10 @@ def preprocess(frame):
 
 class CQLAgent:
 
-    def __init__(self, env_id, dataset_dir, num_data_files, capacity_of_each_buffer=1000000,
-                 n_atoms=200, batch_size=32, gamma=0.99, kappa=1.0, cql_weight=1.0):
+    def __init__(self, env_id, dataset_dir, n_atoms=200,
+                 batch_size=32, gamma=0.99, kappa=1.0, cql_weight=1.0):
 
         self.env_id = env_id
-
-        self.dataset_dir = dataset_dir
-
-        self.num_data_files = num_data_files
-
-        self.capacity_of_each_buffer = capacity_of_each_buffer
 
         self.action_space = gym.make(self.env_id).action_space.n
 
@@ -45,13 +39,7 @@ class CQLAgent:
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.00005, epsilon=0.00031)
 
-        self.batch_size = batch_size
-
-        self.replaybuffer = OfflineBuffer(
-            dataset_dir=self.dataset_dir,
-            num_data_files=self.num_data_files,
-            capacity_of_each_buffer=self.capacity_of_each_buffer,
-            batch_size=self.batch_size)
+        self.replaybuffer = OfflineBuffer(dataset_dir=dataset_dir, batch_size=batch_size)
 
         self.gamma = gamma
 
@@ -203,9 +191,7 @@ class CQLAgent:
 
 def train(n_iter=20000000,
           env_id="BreakoutDeterministic-v4",
-          dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs",
-          num_data_files=5, capacity_of_each_buffer=1000000,
-          #num_data_files=1, capacity_of_each_buffer=5000,
+          dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/",
           target_update_period=8000, resume_from=None):
 
     logdir = Path(__file__).parent / "log"
@@ -214,10 +200,7 @@ def train(n_iter=20000000,
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
-    agent = CQLAgent(
-        env_id=env_id, dataset_dir=dataset_dir,
-        capacity_of_each_buffer=capacity_of_each_buffer,
-        num_data_files=num_data_files)
+    agent = CQLAgent(env_id=env_id, dataset_dir=dataset_dir)
 
     if resume_from is not None:
         agent.load()
@@ -254,15 +237,13 @@ def train(n_iter=20000000,
 
 
 def test(env_id="BreakoutDeterministic-v4",
-         dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs"):
+         dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
 
     monitor_dir = Path(__file__).parent / "mp4"
     if monitor_dir.exists():
         shutil.rmtree(monitor_dir)
 
-    agent = CQLAgent(
-        env_id=env_id, dataset_dir=dataset_dir,
-        num_data_files=0, capacity_of_each_buffer=100)
+    agent = CQLAgent(env_id=env_id, dataset_dir=dataset_dir)
 
     agent.load()
 
@@ -273,11 +254,9 @@ def test(env_id="BreakoutDeterministic-v4",
 
 
 def check(env_id="BreakoutDeterministic-v4",
-          dataset_dir="dqn-replay-dataset/Breakout/1/replay_logs"):
+          dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
 
-    agent = CQLAgent(
-        env_id=env_id, dataset_dir=dataset_dir,
-        num_data_files=1, capacity_of_each_buffer=1000)
+    agent = CQLAgent(env_id=env_id, dataset_dir=dataset_dir)
 
     minibatch = agent.replaybuffer.sample_minibatch()
     state = minibatch[0][0].numpy()
@@ -293,6 +272,10 @@ def check(env_id="BreakoutDeterministic-v4",
 
 
 if __name__ == '__main__':
+    original_dataset_dir = "./dqn-replay-dataset/Breakout/1/replay_logs"
+    dataset_dir = "/mnt/disks/data/tfrecords_dqn_replay_dataset/"
+
+    #create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=5, use_samples_per_file=1000000)
+    #check(dataset_dir=dataset_dir)
     train(resume_from=None)
     test()
-    #check()
