@@ -136,7 +136,7 @@ class OfflineBuffer:
                    .repeat()
                    .batch(self.batch_size, drop_remainder=True)
                    .map(deserialize)
-                   .prefetch(4)
+                   .prefetch(tf.data.AUTOTUNE)
         )
 
         return dataset

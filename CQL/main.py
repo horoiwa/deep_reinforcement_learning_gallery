@@ -107,7 +107,7 @@ class CQLAgent:
     def update_network(self):
 
         states, actions, rewards, next_states, dones = self.replaybuffer.sample_minibatch()
-        rewards = np.clip(rewards, 0., 1.)
+        rewards = tf.clip_by_value(rewards, 0., 1.)
 
         #  TQ = reward + γ * max_a[Q(s, a)]
         target_quantile_qvalues = self.make_target_distribution(rewards, next_states, dones)
@@ -139,7 +139,9 @@ class CQLAgent:
 
         info = {"total_loss": loss.numpy(),
                 "cql_loss": tf.reduce_mean(cql_loss).numpy(),
-                "td_loss": tf.reduce_mean(td_loss).numpy()}
+                "td_loss": tf.reduce_mean(td_loss).numpy(),
+                "r_mean": tf.reduce_mean(rewards).numpy(),
+                "q_mean": tf.reduce_mean(Q_behavior).numpy()}
 
         return info
 
@@ -218,6 +220,8 @@ def train(n_iter=20000000,
                 tf.summary.scalar("loss", info["total_loss"], step=n)
                 tf.summary.scalar("cql_loss", info["cql_loss"], step=n)
                 tf.summary.scalar("td_loss", info["td_loss"], step=n)
+                tf.summary.scalar("r_mean", info["r_mean"], step=n)
+                tf.summary.scalar("q_mean", info["q_mean"], step=n)
 
         if n % target_update_period == 0:
             agent.sync_target_weights()
@@ -253,8 +257,8 @@ def test(env_id="BreakoutDeterministic-v4",
     print("Finished")
 
 
-def check(env_id="BreakoutDeterministic-v4",
-          dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
+def check_buffer(env_id="BreakoutDeterministic-v4",
+                 dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
 
     agent = CQLAgent(env_id=env_id, dataset_dir=dataset_dir)
 
@@ -276,6 +280,6 @@ if __name__ == '__main__':
     dataset_dir = "/mnt/disks/data/tfrecords_dqn_replay_dataset/"
 
     #create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=5, use_samples_per_file=1000000)
-    #check(dataset_dir=dataset_dir)
+    #check_buffer(dataset_dir=dataset_dir)
     train(resume_from=None)
     test()
