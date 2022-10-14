@@ -28,12 +28,11 @@ class QuantileQNetwork(tf.keras.Model):
         self.out = kl.Dense(self.action_space * self.n_atoms,
                             kernel_initializer="he_normal")
 
-    @tf.function
     def call(self, x):
 
         batch_size = x.shape[0]
 
-        x = x / 255
+        x = x / 255.0
 
         x = self.conv1(x)
         x = self.conv2(x)

@@ -215,7 +215,7 @@ def train(n_iter=20000000,
 
         info = agent.update_network()
 
-        if n % 20 == 0:
+        if n % 25 == 0:
             with summary_writer.as_default():
                 tf.summary.scalar("loss", info["total_loss"], step=n)
                 tf.summary.scalar("cql_loss", info["cql_loss"], step=n)
@@ -236,7 +236,7 @@ def train(n_iter=20000000,
             print(f"== test: {n} ===")
             print(f"score: {rewards}, step: {steps}")
 
-        if n % 100000 == 0:
+        if n % 50000 == 0:
             agent.save()
 
 
@@ -262,17 +262,19 @@ def check_buffer(env_id="BreakoutDeterministic-v4",
 
     agent = CQLAgent(env_id=env_id, dataset_dir=dataset_dir)
 
-    minibatch = agent.replaybuffer.sample_minibatch()
-    state = minibatch[0][0].numpy()
-    from PIL import Image
-    for i in range(4):
-        img = Image.fromarray(state[:, :, i])
-        img.convert("L").save(f"tmp/s{i}.png")
+    print("=========START=======")
+    import time
+    s0 = time.time()
+    s = time.time()
+    for i in range(10000):
+        _ = agent.replaybuffer.sample_minibatch()
+        if i % 100 == 0:
+            print(time.time() - s)
+            s = time.time()
+    else:
+        print("=========FINISHED=======")
+        print(time.time() - s0)
 
-    state = minibatch[3][0].numpy()
-    for i in range(4):
-        img = Image.fromarray(state[:, :, i])
-        img.convert("L").save(f"tmp/ns{i}.png")
 
 
 if __name__ == '__main__':
@@ -280,6 +282,6 @@ if __name__ == '__main__':
     dataset_dir = "/mnt/disks/data/tfrecords_dqn_replay_dataset/"
 
     #create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=5, use_samples_per_file=1000000)
-    #check_buffer(dataset_dir=dataset_dir)
-    train(resume_from=None)
-    test()
+    check_buffer(dataset_dir=dataset_dir)
+    #train(resume_from=291)
+    #test()

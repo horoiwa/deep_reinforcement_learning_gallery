@@ -39,7 +39,7 @@ class TmpOutOfGraphReplayBuffer(OutOfGraphReplayBuffer):
 
 def deserialize(serialized_transition):
 
-    transition = tf.io.parse_example(
+    transition = tf.io.parse_single_example(
         serialized_transition,
         features={
             'state': tf.io.FixedLenFeature([], tf.string),
@@ -54,13 +54,12 @@ def deserialize(serialized_transition):
     r = transition["reward"]
     d = transition["done"]
 
-    batch_size = a.shape[0]
     s = tf.reshape(
         tf.cast(tf.io.decode_raw(transition["state"], tf.uint8), tf.float32),
-        (batch_size, 84, 84, 4))
+        (84, 84, 4))
     s2 = tf.reshape(
         tf.cast(tf.io.decode_raw(transition["next_state"], tf.uint8), tf.float32),
-        (batch_size, 84, 84, 4))
+        (84, 84, 4))
 
     return s, a, r, s2, d
 
@@ -132,10 +131,10 @@ class OfflineBuffer:
         dataset = tf.data.TFRecordDataset(tfrecords_files)
 
         dataset = (
-            dataset.shuffle(1000, reshuffle_each_iteration=True)
+            dataset.shuffle(500, reshuffle_each_iteration=True)
                    .repeat()
+                   .map(deserialize, num_parallel_calls=tf.data.AUTOTUNE)
                    .batch(self.batch_size, drop_remainder=True)
-                   .map(deserialize)
                    .prefetch(tf.data.AUTOTUNE)
         )
 
