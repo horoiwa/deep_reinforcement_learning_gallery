@@ -2,6 +2,7 @@ import collections
 from pathlib import Path
 import shutil
 import time
+import psutil
 
 import tensorflow as tf
 import gym
@@ -226,17 +227,20 @@ def train(n_iter=20000000,
         if n % target_update_period == 0:
             agent.sync_target_weights()
 
-        if n % 5000 == 0:
+        if n % 2500 == 0:
             rewards, steps = agent.rollout()
+            mem = psutil.virtual_memory().used / (1024 ** 3)
+
             with summary_writer.as_default():
                 tf.summary.scalar("test_score", rewards, step=n)
                 tf.summary.scalar("test_steps", steps, step=n)
                 tf.summary.scalar("laptime", time.time() - s, step=n)
+                tf.summary.scalar("Mem", mem, step=n)
             s = time.time()
             print(f"== test: {n} ===")
             print(f"score: {rewards}, step: {steps}")
 
-        if n % 50000 == 0:
+        if n % 25000 == 0:
             agent.save()
 
 
@@ -263,11 +267,10 @@ def check_buffer(env_id="BreakoutDeterministic-v4",
     agent = CQLAgent(env_id=env_id, dataset_dir=dataset_dir)
 
     print("=========START=======")
-    import time
     s0 = time.time()
     s = time.time()
     for i in range(10000):
-        _ = agent.replaybuffer.sample_minibatch()
+        minibatch = agent.replaybuffer.sample_minibatch()
         if i % 100 == 0:
             print(time.time() - s)
             s = time.time()
@@ -282,6 +285,6 @@ if __name__ == '__main__':
     dataset_dir = "/mnt/disks/data/tfrecords_dqn_replay_dataset/"
 
     #create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=5, use_samples_per_file=1000000)
-    check_buffer(dataset_dir=dataset_dir)
-    #train(resume_from=291)
-    #test()
+    #check_buffer(dataset_dir=dataset_dir)
+    train(resume_from=96.36)
+    test()
