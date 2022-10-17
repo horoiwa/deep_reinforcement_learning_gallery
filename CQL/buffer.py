@@ -11,7 +11,7 @@ from dopamine.replay_memory.circular_replay_buffer import OutOfGraphReplayBuffer
 
 class TmpOutOfGraphReplayBuffer(OutOfGraphReplayBuffer):
 
-    def to_tfrecords(self, cache_dir, suffix, num_chunks=4) -> tf.data.Dataset:
+    def to_tfrecords(self, cache_dir, suffix, num_chunks=10):
 
         indices = [idx for idx in range(0, self.cursor()) if self.is_valid_transition(idx)]
         random.shuffle(indices)
@@ -128,7 +128,7 @@ class OfflineBuffer:
 
         random.shuffle(tfrecords_files)  #: shuffleが意味あるかは知らない
 
-        dataset = tf.data.TFRecordDataset(tfrecords_files)
+        dataset = tf.data.TFRecordDataset(filenames=tfrecords_files, num_parallel_reads=tf.data.AUTOTUNE)
 
         dataset = (
             dataset.shuffle(500, reshuffle_each_iteration=True)

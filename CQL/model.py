@@ -32,7 +32,7 @@ class QuantileQNetwork(tf.keras.Model):
 
         batch_size = x.shape[0]
 
-        x = x / 255.0
+        x = x / 255.
 
         x = self.conv1(x)
         x = self.conv2(x)

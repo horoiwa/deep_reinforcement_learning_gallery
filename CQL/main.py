@@ -108,7 +108,6 @@ class CQLAgent:
     def update_network(self):
 
         states, actions, rewards, next_states, dones = self.replaybuffer.sample_minibatch()
-        rewards = tf.clip_by_value(rewards, 0., 1.)
 
         #  TQ = reward + γ * max_a[Q(s, a)]
         target_quantile_qvalues = self.make_target_distribution(rewards, next_states, dones)
@@ -159,8 +158,7 @@ class CQLAgent:
             next_quantile_qvalues_all * next_actions_onehot, axis=1, keepdims=False)  # (B, N_ATOMS)
 
         #  TQ = reward + γ * max_a[Q(s, a)]
-        target_quantile_qvalues = tf.expand_dims(rewards, axis=1)  #(B, 1)
-        target_quantile_qvalues += self.gamma * (1. - tf.expand_dims(dones, axis=1)) * next_quantile_qvalues  # (B, N_ATOMS)
+        target_quantile_qvalues = tf.expand_dims(rewards, axis=1) + self.gamma * (1. - tf.expand_dims(dones, axis=1)) * next_quantile_qvalues  # (B, N_ATOMS)
 
         return target_quantile_qvalues
 
@@ -184,7 +182,7 @@ class CQLAgent:
 
         quantile_huber_loss = quantile_weights * huber_loss
 
-        td_loss = tf.reduce_mean(tf.reduce_sum(quantile_huber_loss, axis=2), axis=1)
+        td_loss = tf.reduce_sum(tf.reduce_mean(quantile_huber_loss, axis=2), axis=1)
 
         return td_loss
 
@@ -261,7 +259,7 @@ def test(env_id="BreakoutDeterministic-v4",
     print("Finished")
 
 
-def check_buffer(env_id="BreakoutDeterministic-v4",
+def check_buffer(env_id="BreakoutDeterministic-v0",
                  dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
 
     agent = CQLAgent(env_id=env_id, dataset_dir=dataset_dir)
@@ -270,7 +268,7 @@ def check_buffer(env_id="BreakoutDeterministic-v4",
     s0 = time.time()
     s = time.time()
     for i in range(10000):
-        minibatch = agent.replaybuffer.sample_minibatch()
+        _ = agent.replaybuffer.sample_minibatch()
         if i % 100 == 0:
             print(time.time() - s)
             s = time.time()
@@ -279,12 +277,26 @@ def check_buffer(env_id="BreakoutDeterministic-v4",
         print(time.time() - s0)
 
 
+def check_buffer2(env_id="BreakoutDeterministic-v0",
+                 dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
+
+    from PIL import Image
+
+    agent = CQLAgent(env_id=env_id, dataset_dir=dataset_dir)
+    states, _, _, _, _ = agent.replaybuffer.sample_minibatch()
+    N = states.shape[0]
+    for i in range(N):
+        img = Image.fromarray(states[i, :, :, 0].numpy()).convert("L")
+        img.save(f"tmp/{i}.png")
+
 
 if __name__ == '__main__':
+    env_id = "BreakoutDeterministic-v4"
     original_dataset_dir = "./dqn-replay-dataset/Breakout/1/replay_logs"
     dataset_dir = "/mnt/disks/data/tfrecords_dqn_replay_dataset/"
 
-    #create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=5, use_samples_per_file=1000000)
+    #create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=50, use_samples_per_file=10000)
     #check_buffer(dataset_dir=dataset_dir)
-    train(resume_from=96.36)
-    test()
+    #check_buffer2(dataset_dir=dataset_dir)
+    train(env_id=env_id, resume_from=None)
+    #test(env_id=env_id)
