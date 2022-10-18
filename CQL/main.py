@@ -16,7 +16,7 @@ from model import QuantileQNetwork
 
 def preprocess(frame):
 
-    img = Image.fromarray(frame).convert("L").resize((84,84))
+    img = Image.fromarray(frame).convert("L").resize((84, 84))
     img = np.array(img, dtype=np.float32)
     return img
 
@@ -24,7 +24,7 @@ def preprocess(frame):
 class CQLAgent:
 
     def __init__(self, env_id, dataset_dir, n_atoms=200,
-                 batch_size=32, gamma=0.99, kappa=1.0, cql_weight=1.0):
+                 batch_size=32, gamma=0.99, kappa=1.0, cql_weight=0.):
 
         self.env_id = env_id
 
@@ -137,11 +137,17 @@ class CQLAgent:
         grads = tape.gradient(loss, variables)
         self.optimizer.apply_gradients(zip(grads, variables))
 
+        Q_learned_max = tf.reduce_max(Q_learned_all, axis=1)
+        Q_diff = (Q_behavior - Q_learned_max)
+
+        import pdb; pdb.set_trace()
+
         info = {"total_loss": loss.numpy(),
                 "cql_loss": tf.reduce_mean(cql_loss).numpy(),
                 "td_loss": tf.reduce_mean(td_loss).numpy(),
                 "r_mean": tf.reduce_mean(rewards).numpy(),
-                "q_mean": tf.reduce_mean(Q_behavior).numpy()}
+                "q_behavior": tf.reduce_mean(Q_behavior).numpy(),
+                "q_diff": tf.reduce_mean(Q_diff).numpy()}
 
         return info
 
@@ -162,6 +168,7 @@ class CQLAgent:
 
         return target_quantile_qvalues
 
+    @tf.function
     def quantile_huberloss(self, target_quantile_values, quantile_values):
         target_quantile_values = tf.repeat(
             tf.expand_dims(target_quantile_values, axis=1), self.n_atoms, axis=1)  # (B, N_ATOMS, N_ATOMS)
@@ -220,7 +227,8 @@ def train(n_iter=20000000,
                 tf.summary.scalar("cql_loss", info["cql_loss"], step=n)
                 tf.summary.scalar("td_loss", info["td_loss"], step=n)
                 tf.summary.scalar("r_mean", info["r_mean"], step=n)
-                tf.summary.scalar("q_mean", info["q_mean"], step=n)
+                tf.summary.scalar("q_behavior", info["q_behavior"], step=n)
+                tf.summary.scalar("q_diff", info["q_diff"], step=n)
 
         if n % target_update_period == 0:
             agent.sync_target_weights()
