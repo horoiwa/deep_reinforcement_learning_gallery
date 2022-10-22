@@ -23,8 +23,8 @@ def preprocess(frame):
 
 class CQLAgent:
 
-    def __init__(self, env_id, dataset_dir, n_atoms=200,
-                 batch_size=32, gamma=0.99, kappa=1.0, cql_weight=0.):
+    def __init__(self, env_id, dataset_dir, n_atoms=100,
+                 batch_size=32, gamma=0.99, kappa=1.0, cql_weight=0.1):
 
         self.env_id = env_id
 
@@ -140,14 +140,15 @@ class CQLAgent:
         Q_learned_max = tf.reduce_max(Q_learned_all, axis=1)
         Q_diff = (Q_behavior - Q_learned_max)
 
-        import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
 
         info = {"total_loss": loss.numpy(),
                 "cql_loss": tf.reduce_mean(cql_loss).numpy(),
                 "td_loss": tf.reduce_mean(td_loss).numpy(),
-                "r_mean": tf.reduce_mean(rewards).numpy(),
+                "rewards": rewards.numpy().sum(),
                 "q_behavior": tf.reduce_mean(Q_behavior).numpy(),
-                "q_diff": tf.reduce_mean(Q_diff).numpy()}
+                "q_diff": tf.reduce_mean(Q_diff).numpy(),
+                "dones": dones.numpy().sum()}
 
         return info
 
@@ -226,9 +227,10 @@ def train(n_iter=20000000,
                 tf.summary.scalar("loss", info["total_loss"], step=n)
                 tf.summary.scalar("cql_loss", info["cql_loss"], step=n)
                 tf.summary.scalar("td_loss", info["td_loss"], step=n)
-                tf.summary.scalar("r_mean", info["r_mean"], step=n)
+                tf.summary.scalar("rewards", info["r_mean"], step=n)
                 tf.summary.scalar("q_behavior", info["q_behavior"], step=n)
                 tf.summary.scalar("q_diff", info["q_diff"], step=n)
+                tf.summary.scalar("dones", info["dones"], step=n)
 
         if n % target_update_period == 0:
             agent.sync_target_weights()
@@ -286,7 +288,7 @@ def check_buffer(env_id="BreakoutDeterministic-v0",
 
 
 def check_buffer2(env_id="BreakoutDeterministic-v0",
-                 dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
+                  dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
 
     from PIL import Image
 
@@ -304,7 +306,8 @@ if __name__ == '__main__':
     dataset_dir = "/mnt/disks/data/tfrecords_dqn_replay_dataset/"
 
     #create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=50, use_samples_per_file=10000)
-    #check_buffer(dataset_dir=dataset_dir)
-    #check_buffer2(dataset_dir=dataset_dir)
     train(env_id=env_id, resume_from=None)
     #test(env_id=env_id)
+
+    #check_buffer(dataset_dir=dataset_dir)
+    #check_buffer2(dataset_dir=dataset_dir)
