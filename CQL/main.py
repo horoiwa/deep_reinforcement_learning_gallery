@@ -25,7 +25,7 @@ def preprocess(frame):
 class CQLAgent:
 
     def __init__(self, env_id, n_atoms=100,
-                 gamma=0.99, kappa=1.0, cql_weight=4.):
+                 gamma=0.99, kappa=1.0, cql_weight=1.0):
 
         self.env_id = env_id
 
@@ -80,7 +80,7 @@ class CQLAgent:
 
         env = create_atari_environment(game_name=self.env_id, sticky_actions=False)
 
-        rewards, steps = 0., 0.
+        rewards, steps = 0, 0
 
         frames = collections.deque(maxlen=4)
         for _ in range(4):
@@ -217,7 +217,7 @@ class CQLAgent:
 def train(n_iter=20000000,
           env_id="BreakoutDeterministic-v4",
           dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/",
-          batch_size=32,
+          batch_size=48,
           target_update_period=8000, resume_from=None):
 
     logdir = Path(__file__).parent / "log"
@@ -226,7 +226,7 @@ def train(n_iter=20000000,
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
-    agent = CQLAgent(env_id=env_id)
+    agent = CQLAgent(env_id=env_id, cql_weight=1.0)
     dataset = load_dataset(dataset_dir=dataset_dir, batch_size=batch_size)
 
     if resume_from is not None:
@@ -274,6 +274,8 @@ def train(n_iter=20000000,
         if n > n_iter:
             break
 
+        n += 1
+
 
 def test(env_id="BreakoutDeterministic-v4",
          dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
@@ -306,14 +308,16 @@ def check_buffer(env_id="BreakoutDeterministic-v0",
     for i, minibatch in enumerate(dataset):
         state, actions, rewards, next_state, dones = minibatch
         print(i, dones.numpy().sum(), rewards.numpy().sum(), dones.shape[0])
-        #import pdb; pdb.set_trace()
 
         if i % 100 == 0:
             print(time.time() - s)
             s = time.time()
-    else:
-        print("=========FINISHED=======")
-        print(time.time() - s0)
+
+        if i > 10000:
+            break
+
+    print("=========FINISHED=======")
+    print(time.time() - s0)
 
 
 
@@ -322,8 +326,8 @@ if __name__ == '__main__':
     original_dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
     dataset_dir = "/mnt/disks/data/tfrecords_dqn_replay_dataset/"
 
-    create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=10, use_samples_per_file=50000, num_chunks=10)
+    #create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=10, use_samples_per_file=50000, num_chunks=10)
     #check_buffer(dataset_dir=dataset_dir)
 
-    #train(env_id=env_id, resume_from=None)
+    train(env_id=env_id, resume_from=None)
     #test(env_id=env_id)

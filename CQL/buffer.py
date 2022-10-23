@@ -11,7 +11,7 @@ from dopamine.replay_memory.circular_replay_buffer import OutOfGraphReplayBuffer
 
 class TmpOutOfGraphReplayBuffer(OutOfGraphReplayBuffer):
 
-    def to_tfrecords(self, cache_dir, suffix, num_chunks=25):
+    def to_tfrecords(self, out_dir, suffix, num_chunks=25):
 
         indices = [idx for idx in range(0, self.cursor()) if self.is_valid_transition(idx)]
         random.shuffle(indices)
@@ -24,8 +24,7 @@ class TmpOutOfGraphReplayBuffer(OutOfGraphReplayBuffer):
             transitions = self.sample_transition_batch(batch_size=batch_size, indices=_indices)
             states, actions, rewards, next_states, next_actions, next_rewards, dones, indices = transitions
             dones = dones.astype(np.float32)
-            print("debug", dones.sum())
-            filepath = str(cache_dir / f"DQN_{suffix}_{i}.tfrecords")
+            filepath = str(out_dir / f"DQN_{suffix}_{i}.tfrecords")
             with tf.io.TFRecordWriter(filepath) as writer:
                 for s, a, r, s2, d in tqdm(zip(states, actions, rewards, next_states, dones)):
                     record = tf.train.Example(
