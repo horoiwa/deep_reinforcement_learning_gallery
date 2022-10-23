@@ -51,8 +51,9 @@ class QuantileQNetwork(tf.keras.Model):
 
         if epsilon is not None and random.random() > epsilon:
             quantile_qvalues = self(state)
-            q_means = tf.reduce_mean(quantile_qvalues, axis=2, keepdims=True)
+            q_means = tf.reduce_mean(quantile_qvalues, axis=2, keepdims=False)
             selected_action = tf.argmax(q_means, axis=1)
+            import pdb; pdb.set_trace()
             selected_action = selected_actions[0][0].numpy()
         else:
             selected_action = np.random.choice(self.action_space)

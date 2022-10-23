@@ -9,8 +9,9 @@ import gym
 from gym.wrappers import RecordVideo
 import numpy as np
 from PIL import Image
+from dopamine.discrete_domains.atari_lib import create_atari_environment
 
-from buffer import OfflineBuffer, create_tfrecords
+from buffer import load_dataset, create_tfrecords
 from model import QuantileQNetwork
 
 
@@ -23,8 +24,8 @@ def preprocess(frame):
 
 class CQLAgent:
 
-    def __init__(self, env_id, dataset_dir, n_atoms=100,
-                 batch_size=32, gamma=0.99, kappa=1.0, cql_weight=0.1):
+    def __init__(self, env_id, n_atoms=100,
+                 gamma=0.99, kappa=1.0, cql_weight=4.):
 
         self.env_id = env_id
 
@@ -39,8 +40,6 @@ class CQLAgent:
         self.target_qnetwork = QuantileQNetwork(actions_space=self.action_space, n_atoms=n_atoms)
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=0.00005, epsilon=0.00031)
-
-        self.replaybuffer = OfflineBuffer(dataset_dir=dataset_dir, batch_size=batch_size)
 
         self.gamma = gamma
 
@@ -77,14 +76,35 @@ class CQLAgent:
         self.qnetwork.load_weights(str(load_dir / "qnetwork"))
         self.target_qnetwork.load_weights(str(load_dir / "qnetwork"))
 
-    def rollout(self, monitor_dir=None, name_prefix=None):
+    def rollout(self):
+
+        env = create_atari_environment(game_name=self.env_id, sticky_actions=False)
 
         rewards, steps = 0., 0.
 
-        env = gym.make(self.env_id)
-        if monitor_dir is not None:
-            assert name_prefix is not None
-            env = RecordVideo(env, monitor_dir, name_prefix=name_prefix)
+        frames = collections.deque(maxlen=4)
+        for _ in range(4):
+            frames.append(np.zeros((84, 84), dtype=np.float32))
+
+        frame = env.reset()[:, :, 0]
+        frames.append(frame)
+
+        done = False
+        while (not done) and (steps < 3000):
+            state = np.stack(frames, axis=2)[np.newaxis, ...]
+            action = self.qnetwork.sample_action(state)
+            next_frame, reward, done, _ = env.step(action)
+            frames.append(next_frame[:, :, 0])
+
+            rewards += reward
+            steps += 1
+
+        return rewards, steps
+
+    def record(self, monitor_dir, name_prefix):
+
+        env = gym.make(f"{self.env_id}Deterministic-v4")
+        env = RecordVideo(env, monitor_dir, name_prefix=name_prefix)
 
         frames = collections.deque(maxlen=4)
         for _ in range(4):
@@ -93,21 +113,17 @@ class CQLAgent:
         frame = preprocess(env.reset())
         frames.append(frame)
 
-        done = False
+        done, steps = False, 0
         while (not done) and (steps < 3000):
             state = np.stack(frames, axis=2)[np.newaxis, ...]
             action = self.qnetwork.sample_action(state)
             next_frame, reward, done, _ = env.step(action)
             frames.append(preprocess(next_frame))
-
-            rewards += reward
             steps += 1
 
-        return rewards, steps
+    def update_network(self, minibatch):
 
-    def update_network(self):
-
-        states, actions, rewards, next_states, dones = self.replaybuffer.sample_minibatch()
+        states, actions, rewards, next_states, dones = minibatch
 
         #  TQ = reward + γ * max_a[Q(s, a)]
         target_quantile_qvalues = self.make_target_distribution(rewards, next_states, dones)
@@ -201,6 +217,7 @@ class CQLAgent:
 def train(n_iter=20000000,
           env_id="BreakoutDeterministic-v4",
           dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/",
+          batch_size=32,
           target_update_period=8000, resume_from=None):
 
     logdir = Path(__file__).parent / "log"
@@ -209,25 +226,26 @@ def train(n_iter=20000000,
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
-    agent = CQLAgent(env_id=env_id, dataset_dir=dataset_dir)
+    agent = CQLAgent(env_id=env_id)
+    dataset = load_dataset(dataset_dir=dataset_dir, batch_size=batch_size)
 
     if resume_from is not None:
         agent.load()
-        step_init = int(resume_from * 1000)
+        n = int(resume_from * 1000)
     else:
-        step_init = 1
+        n = 1
 
     s = time.time()
-    for n in range(step_init, n_iter):
+    for minibatch in dataset:
 
-        info = agent.update_network()
+        info = agent.update_network(minibatch)
 
         if n % 25 == 0:
             with summary_writer.as_default():
                 tf.summary.scalar("loss", info["total_loss"], step=n)
                 tf.summary.scalar("cql_loss", info["cql_loss"], step=n)
                 tf.summary.scalar("td_loss", info["td_loss"], step=n)
-                tf.summary.scalar("rewards", info["r_mean"], step=n)
+                tf.summary.scalar("rewards", info["rewards"], step=n)
                 tf.summary.scalar("q_behavior", info["q_behavior"], step=n)
                 tf.summary.scalar("q_diff", info["q_diff"], step=n)
                 tf.summary.scalar("dones", info["dones"], step=n)
@@ -244,12 +262,17 @@ def train(n_iter=20000000,
                 tf.summary.scalar("test_steps", steps, step=n)
                 tf.summary.scalar("laptime", time.time() - s, step=n)
                 tf.summary.scalar("Mem", mem, step=n)
+
             s = time.time()
             print(f"== test: {n} ===")
             print(f"score: {rewards}, step: {steps}")
 
         if n % 25000 == 0:
             agent.save()
+            agent.reload_buffer()
+
+        if n > n_iter:
+            break
 
 
 def test(env_id="BreakoutDeterministic-v4",
@@ -259,12 +282,14 @@ def test(env_id="BreakoutDeterministic-v4",
     if monitor_dir.exists():
         shutil.rmtree(monitor_dir)
 
-    agent = CQLAgent(env_id=env_id, dataset_dir=dataset_dir)
-
+    agent = CQLAgent(env_id=env_id)
     agent.load()
 
     for i in range(10):
-        agent.rollout(monitor_dir=monitor_dir, name_prefix=f"test_{i}")
+        print(agent.rollout())
+
+    for i in range(5):
+        agent.record(monitor_dir=monitor_dir, name_prefix=f"test_{i}")
 
     print("Finished")
 
@@ -272,13 +297,17 @@ def test(env_id="BreakoutDeterministic-v4",
 def check_buffer(env_id="BreakoutDeterministic-v0",
                  dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
 
-    agent = CQLAgent(env_id=env_id, dataset_dir=dataset_dir)
+    dataset = load_dataset(dataset_dir=dataset_dir, batch_size=32)
 
     print("=========START=======")
     s0 = time.time()
     s = time.time()
-    for i in range(10000):
-        _ = agent.replaybuffer.sample_minibatch()
+
+    for i, minibatch in enumerate(dataset):
+        state, actions, rewards, next_state, dones = minibatch
+        print(i, dones.numpy().sum(), rewards.numpy().sum(), dones.shape[0])
+        #import pdb; pdb.set_trace()
+
         if i % 100 == 0:
             print(time.time() - s)
             s = time.time()
@@ -287,27 +316,14 @@ def check_buffer(env_id="BreakoutDeterministic-v0",
         print(time.time() - s0)
 
 
-def check_buffer2(env_id="BreakoutDeterministic-v0",
-                  dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
-
-    from PIL import Image
-
-    agent = CQLAgent(env_id=env_id, dataset_dir=dataset_dir)
-    states, _, _, _, _ = agent.replaybuffer.sample_minibatch()
-    N = states.shape[0]
-    for i in range(N):
-        img = Image.fromarray(states[i, :, :, 0].numpy()).convert("L")
-        img.save(f"tmp/{i}.png")
-
 
 if __name__ == '__main__':
-    env_id = "BreakoutDeterministic-v4"
-    original_dataset_dir = "./dqn-replay-dataset/Breakout/1/replay_logs"
+    env_id = "Breakout"
+    original_dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
     dataset_dir = "/mnt/disks/data/tfrecords_dqn_replay_dataset/"
 
-    #create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=50, use_samples_per_file=10000)
-    train(env_id=env_id, resume_from=None)
-    #test(env_id=env_id)
-
+    create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=10, use_samples_per_file=50000, num_chunks=10)
     #check_buffer(dataset_dir=dataset_dir)
-    #check_buffer2(dataset_dir=dataset_dir)
+
+    #train(env_id=env_id, resume_from=None)
+    #test(env_id=env_id)
