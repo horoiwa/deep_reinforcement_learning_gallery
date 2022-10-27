@@ -45,16 +45,17 @@ class QuantileQNetwork(tf.keras.Model):
 
         return quantile_values
 
-    def sample_action(self, state, epsilon=None):
+    def sample_action(self, state, eps=0.0):
         """ quantilesを均等幅で取っている場合はE[Z(s, a)]は単純平均と一致 (逆関数サンプリング法)
         """
+        assert state.shape[0] == 1
 
-        if epsilon is not None and random.random() > epsilon:
+        if random.random() > eps:
+            state = tf.cast(state, tf.float32)
             quantile_qvalues = self(state)
             q_means = tf.reduce_mean(quantile_qvalues, axis=2, keepdims=False)
             selected_action = tf.argmax(q_means, axis=1)
-            import pdb; pdb.set_trace()
-            selected_action = selected_actions[0][0].numpy()
+            selected_action = int(selected_action.numpy()[0])
         else:
             selected_action = np.random.choice(self.action_space)
 

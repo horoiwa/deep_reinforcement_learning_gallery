@@ -78,7 +78,7 @@ class CQLAgent:
 
     def rollout(self):
 
-        env = create_atari_environment(game_name=self.env_id, sticky_actions=False)
+        env = create_atari_environment(game_name=self.env_id, sticky_actions=True)
 
         rewards, steps = 0, 0
 
@@ -101,8 +101,12 @@ class CQLAgent:
 
         return rewards, steps
 
-    def record(self, monitor_dir, name_prefix):
-
+    def record(self, monitor_dir=None, name_prefix=None):
+        """
+        Note:
+            この環境はcreate_atari_envの環境と完全に一致しないのでテストにはならない
+            RecordVideoで動画化することだけが目的
+        """
         env = gym.make(f"{self.env_id}Deterministic-v4")
         env = RecordVideo(env, monitor_dir, name_prefix=name_prefix)
 
@@ -113,13 +117,16 @@ class CQLAgent:
         frame = preprocess(env.reset())
         frames.append(frame)
 
-        done, steps = False, 0
+        done, steps, rewards = False, 0, 0
         while (not done) and (steps < 3000):
             state = np.stack(frames, axis=2)[np.newaxis, ...]
-            action = self.qnetwork.sample_action(state)
+            action = self.qnetwork.sample_action(state, eps=0.05)
             next_frame, reward, done, _ = env.step(action)
             frames.append(preprocess(next_frame))
             steps += 1
+            rewards += reward
+
+        return rewards, steps
 
     def update_network(self, minibatch):
 
@@ -218,6 +225,7 @@ def train(n_iter=20000000,
           env_id="BreakoutDeterministic-v4",
           dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/",
           batch_size=48,
+          cql_weight=4.0,
           target_update_period=8000, resume_from=None):
 
     logdir = Path(__file__).parent / "log"
@@ -226,7 +234,7 @@ def train(n_iter=20000000,
 
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
-    agent = CQLAgent(env_id=env_id, cql_weight=1.0)
+    agent = CQLAgent(env_id=env_id, cql_weight=cql_weight)
     dataset = load_dataset(dataset_dir=dataset_dir, batch_size=batch_size)
 
     if resume_from is not None:
@@ -269,7 +277,6 @@ def train(n_iter=20000000,
 
         if n % 25000 == 0:
             agent.save()
-            agent.reload_buffer()
 
         if n > n_iter:
             break
@@ -278,20 +285,21 @@ def train(n_iter=20000000,
 
 
 def test(env_id="BreakoutDeterministic-v4",
-         dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
+         load_dir="checkpoints/"):
 
     monitor_dir = Path(__file__).parent / "mp4"
     if monitor_dir.exists():
         shutil.rmtree(monitor_dir)
 
     agent = CQLAgent(env_id=env_id)
-    agent.load()
+    agent.load(load_dir=load_dir)
 
     for i in range(10):
         print(agent.rollout())
 
     for i in range(5):
-        agent.record(monitor_dir=monitor_dir, name_prefix=f"test_{i}")
+        rewards, steps = agent.record(monitor_dir=monitor_dir, name_prefix=f"test_{i}")
+        print(rewards, steps)
 
     print("Finished")
 
@@ -326,8 +334,17 @@ if __name__ == '__main__':
     original_dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
     dataset_dir = "/mnt/disks/data/tfrecords_dqn_replay_dataset/"
 
-    #create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=10, use_samples_per_file=50000, num_chunks=10)
+    """
+    CQL論文と同じ設定
+        num_data_files=50
+        use_sample_per_file=10000 for 1%, 100000 for 10%
+
+    REM論文と同じ設定
+        num_data_files=10
+    """
+    create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=25, use_samples_per_file=100000, num_chunks=100)
+
     #check_buffer(dataset_dir=dataset_dir)
 
-    train(env_id=env_id, resume_from=None)
-    #test(env_id=env_id)
+    train(env_id=env_id, cql_weight=1.0, resume_from=None)
+    test(env_id=env_id, load_dir="checkpoints_cqlh/")

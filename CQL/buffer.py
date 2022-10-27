@@ -121,7 +121,7 @@ def load_dataset(dataset_dir: Path, batch_size: int):
                .shuffle(256, reshuffle_each_iteration=True)
                .repeat()
                .map(deserialize, num_parallel_calls=tf.data.AUTOTUNE)
-               .batch(batch_size, drop_remainder=False)
+               .batch(batch_size, drop_remainder=True)
                .prefetch(tf.data.AUTOTUNE)
     )
     return dataset
