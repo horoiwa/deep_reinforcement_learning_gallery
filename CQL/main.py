@@ -104,8 +104,8 @@ class CQLAgent:
     def record(self, monitor_dir=None, name_prefix=None):
         """
         Note:
-            この環境はcreate_atari_envの環境と完全に一致しないのでテストにはならない
-            RecordVideoで動画化することだけが目的
+            この環境はcreate_atari_envの環境と前処理の方法が微妙に異なるのでテストにはならない
+            デバッグ目的でRecordVideoで動画化したかっただけ
         """
         env = gym.make(f"{self.env_id}Deterministic-v4")
         env = RecordVideo(env, monitor_dir, name_prefix=name_prefix)
@@ -342,9 +342,9 @@ if __name__ == '__main__':
     REM論文と同じ設定
         num_data_files=10
     """
-    create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=25, use_samples_per_file=100000, num_chunks=100)
+    create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=50, use_samples_per_file=10000, num_chunks=10)
 
     #check_buffer(dataset_dir=dataset_dir)
 
-    train(env_id=env_id, cql_weight=1.0, resume_from=None)
+    train(env_id=env_id, cql_weight=4.0, resume_from=286)
     test(env_id=env_id, load_dir="checkpoints_cqlh/")
