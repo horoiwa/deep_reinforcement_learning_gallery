@@ -304,31 +304,6 @@ def test(env_id="BreakoutDeterministic-v4",
     print("Finished")
 
 
-def check_buffer(env_id="BreakoutDeterministic-v0",
-                 dataset_dir="/mnt/disks/data/tfrecords_dqn_replay_dataset/"):
-
-    dataset = load_dataset(dataset_dir=dataset_dir, batch_size=32)
-
-    print("=========START=======")
-    s0 = time.time()
-    s = time.time()
-
-    for i, minibatch in enumerate(dataset):
-        state, actions, rewards, next_state, dones = minibatch
-        print(i, dones.numpy().sum(), rewards.numpy().sum(), dones.shape[0])
-
-        if i % 100 == 0:
-            print(time.time() - s)
-            s = time.time()
-
-        if i > 10000:
-            break
-
-    print("=========FINISHED=======")
-    print(time.time() - s0)
-
-
-
 if __name__ == '__main__':
     env_id = "Breakout"
     original_dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
@@ -343,8 +318,5 @@ if __name__ == '__main__':
         num_data_files=10
     """
     create_tfrecords(original_dataset_dir=original_dataset_dir, dataset_dir=dataset_dir, num_data_files=50, use_samples_per_file=10000, num_chunks=10)
-
-    #check_buffer(dataset_dir=dataset_dir)
-
-    train(env_id=env_id, cql_weight=4.0, resume_from=286)
+    train(env_id=env_id, cql_weight=4.0, resume_from=None)
     test(env_id=env_id, load_dir="checkpoints_cqlh/")
