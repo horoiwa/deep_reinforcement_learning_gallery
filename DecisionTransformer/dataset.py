@@ -9,7 +9,8 @@ from dopamine.replay_memory.circular_replay_buffer import OutOfGraphReplayBuffer
 
 class SequenceReplayBuffer:
 
-    def __init__(self, dataset_dir, num_data_files=50, samples_per_file=10000, context_length=30):
+    def __init__(self, dataset_dir, num_data_files=50,
+                 samples_per_file=10000, context_length=30):
 
         self.context_length = context_length
 
@@ -92,9 +93,13 @@ class SequenceReplayBuffer:
             yield sequence
 
 
-def create_dataset(dataset_dir, context_length):
+def create_dataset(dataset_dir, num_data_files=50, samples_per_file=10_000,
+                   context_length=30, batch_size=128):
 
-    buffer = SequenceReplayBuffer(dataset_dir=dataset_dir, num_data_files=1, context_length=context_length)
+    buffer = SequenceReplayBuffer(
+        dataset_dir=dataset_dir, num_data_files=num_data_files,
+        samples_per_file=samples_per_file,
+        context_length=context_length)
 
     example_seq = next(buffer.sample_sequence())
 
@@ -102,25 +107,6 @@ def create_dataset(dataset_dir, context_length):
         buffer.sample_sequence,
         output_types={k: v.dtype for k, v in example_seq.items()},
         output_shapes={k: v.shape for k, v in example_seq.items()}
-    ).batch(48)
+    ).batch(batch_size)
 
     return dataset
-
-
-def speedtest(dataset):
-    import time
-    start = time.time()
-    i = 0
-    for _ in dataset:
-        print(i, time.time() - start)
-        start = time.time()
-        i += 1
-        if i == 500:
-            break
-
-
-if __name__ == "__main__":
-    dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
-    context_length = 30
-    dataset = create_dataset(dataset_dir, context_length)
-    speedtest(dataset)
