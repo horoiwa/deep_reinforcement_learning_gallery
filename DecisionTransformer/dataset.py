@@ -1,5 +1,7 @@
 import random
+from typing import List
 
+import ray
 import pickle
 import lz4.frame as lz4f
 import numpy as np
@@ -9,7 +11,7 @@ from dopamine.replay_memory.circular_replay_buffer import OutOfGraphReplayBuffer
 
 class SequenceReplayBuffer:
 
-    def __init__(self, dataset_dir, num_data_files=50,
+    def __init__(self, dataset_dir, datafile_suffixes: List[int],
                  samples_per_file=10000, context_length=30):
 
         self.context_length = context_length
@@ -17,7 +19,7 @@ class SequenceReplayBuffer:
         # rtgs: returns to go or R
         self.rtgs, self.states, self.actions, self.dones, self.timesteps = [], [], [], [], []
 
-        self.load(dataset_dir, samples_per_file, num_data_files)
+        self.load(dataset_dir, samples_per_file, datafile_suffixes)
 
         self.terminal_indices = [i for i, done in enumerate(self.dones) if done == 1]
 
@@ -26,9 +28,9 @@ class SequenceReplayBuffer:
     def __len__(self):
         return len(self.rtgs) - self.context_length
 
-    def load(self, dataset_dir, samples_per_file, num_data_files):
+    def load(self, dataset_dir, samples_per_file, datafile_suffixes):
 
-        for i in range(0, num_data_files):
+        for i in datafile_suffixes:
             buffer = OutOfGraphReplayBuffer(
                 replay_capacity=samples_per_file,
                 observation_shape=(84, 84),
@@ -69,7 +71,9 @@ class SequenceReplayBuffer:
     def sample_sequence(self):
 
         while True:
+
             start_idx = random.randint(0, len(self))
+
             terminal_idx = next(filter(lambda v: v >= start_idx, self.terminal_indices))
 
             if terminal_idx - start_idx < self.context_length:
@@ -78,35 +82,81 @@ class SequenceReplayBuffer:
                 end_idx = start_idx + self.context_length
 
             #: states shape: (context_length, 84, 84, 4)
-            sequence = {
-                "rtgs": tf.cast(
-                    tf.stack([[self.rtgs[idx]] for idx in range(start_idx, end_idx)], axis=0), tf.float32),
-                "states": tf.cast(
-                    tf.stack([pickle.loads(lz4f.decompress(self.states[idx])) for idx in range(start_idx, end_idx)], axis=0),
-                    tf.float32),
-                "actions": tf.cast(
-                    tf.stack([[self.actions[idx]] for idx in range(start_idx, end_idx)], axis=0), tf.float32),
-                "timesteps": tf.cast(
-                    tf.stack([[self.timesteps[idx]] for idx in range(start_idx, end_idx)], axis=0), tf.float32)
-            }
+            rtgs = tf.cast(
+                tf.stack([[self.rtgs[idx]] for idx in range(start_idx, end_idx)], axis=0),
+                tf.float32)
 
-            yield sequence
+            states = tf.cast(
+                tf.stack([pickle.loads(lz4f.decompress(self.states[idx])) for idx in range(start_idx, end_idx)], axis=0),
+                tf.float32)
+
+            actions = tf.cast(
+                tf.stack([[self.actions[idx]] for idx in range(start_idx, end_idx)], axis=0),
+                tf.uint8)
+
+            timesteps = tf.cast(
+                tf.stack([[self.timesteps[idx]] for idx in range(start_idx, end_idx)], axis=0),
+                tf.float32)
+
+            yield (rtgs, states, actions, timesteps)
+
+
+class Dataloader:
+
+    def __init__(self):
+
+        buffer = SequenceReplayBuffer(
+            dataset_dir=dataset_dir, datafile_suffixes=_suffixes,
+            samples_per_file=samples_per_file,
+            context_length=context_length)
+
+        example = next(buffer.sample_sequence())
+        output_signature = tuple([tf.TensorSpec(shape=v.shape, dtype=v.dtype) for v in example])
+
+        dataset = tf.data.Dataset.from_generator(
+            buffer.sample_sequence,
+            output_signature=output_signature
+            ).batch(batch_size),
+
+        self.dataset = iter(dataset)
+
+
+    def sample_minibacth(self):
+        return next(self.dataset)
 
 
 def create_dataset(dataset_dir, num_data_files=50, samples_per_file=10_000,
-                   context_length=30, batch_size=128):
+                   context_length=30, batch_size=128, num_parallel_calls=1):
 
-    buffer = SequenceReplayBuffer(
-        dataset_dir=dataset_dir, num_data_files=num_data_files,
-        samples_per_file=samples_per_file,
-        context_length=context_length)
+    assert num_data_files >= num_parallel_calls
 
-    example_seq = next(buffer.sample_sequence())
+    N = num_parallel_calls
+    datafile_suffixes = [i for i in range(num_data_files)]
 
-    dataset = tf.data.Dataset.from_generator(
-        buffer.sample_sequence,
-        output_types={k: v.dtype for k, v in example_seq.items()},
-        output_shapes={k: v.shape for k, v in example_seq.items()}
-    ).batch(batch_size)
+    buffers = []
+    for _suffixes in np.array_split(datafile_suffixes, N):
+        buffer = SequenceReplayBuffer(
+            dataset_dir=dataset_dir, datafile_suffixes=_suffixes,
+            samples_per_file=samples_per_file,
+            context_length=context_length)
+        buffers.append(buffer)
+
+    example = next(buffers[0].sample_sequence())
+    output_signature = tuple([tf.TensorSpec(shape=v.shape, dtype=v.dtype) for v in example])
+
+    def get_generator(n):
+        gen = buffers[n].sample_sequence
+        return gen()
+
+    dataset = tf.data.Dataset.range(N).interleave(
+        lambda n: tf.data.Dataset.from_generator(get_generator,
+                                                 args=(n,),
+                                                 output_signature=output_signature
+                                                 ).batch(batch_size),
+        cycle_length=N,
+        block_length=1,
+        deterministic=False,
+        num_parallel_calls=N
+        )
 
     return dataset
