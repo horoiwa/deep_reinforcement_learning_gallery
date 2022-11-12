@@ -11,7 +11,7 @@ from dopamine.replay_memory.circular_replay_buffer import OutOfGraphReplayBuffer
 
 class SequenceReplayBuffer:
 
-    def __init__(self, dataset_dir, datafile_suffixes: List[int],
+    def __init__(self, dataset_dir, data_file_suffixes: List[str],
                  samples_per_file=10000, context_length=30):
 
         self.context_length = context_length
@@ -19,7 +19,7 @@ class SequenceReplayBuffer:
         # rtgs: returns to go or R
         self.rtgs, self.states, self.actions, self.dones, self.timesteps = [], [], [], [], []
 
-        self.load(dataset_dir, samples_per_file, datafile_suffixes)
+        self.load(dataset_dir, samples_per_file, data_file_suffixes)
 
         self.terminal_indices = [i for i, done in enumerate(self.dones) if done == 1]
 
@@ -101,62 +101,50 @@ class SequenceReplayBuffer:
             yield (rtgs, states, actions, timesteps)
 
 
-class Dataloader:
+@ray.remote(num_cpus=1, num_gpus=0)
+class DataLoader:
+    """
+    buffer.sample_sequenceが遅すぎる(15秒/minibatchくらい)ので単純並列化
+    """
 
-    def __init__(self):
+    def __init__(self, pid, buffer, batch_size):
 
-        buffer = SequenceReplayBuffer(
-            dataset_dir=dataset_dir, datafile_suffixes=_suffixes,
-            samples_per_file=samples_per_file,
-            context_length=context_length)
+        self.pid = pid
 
-        example = next(buffer.sample_sequence())
+        self.buffer = buffer
+
+        example = next(self.buffer.sample_sequence())
         output_signature = tuple([tf.TensorSpec(shape=v.shape, dtype=v.dtype) for v in example])
 
         dataset = tf.data.Dataset.from_generator(
-            buffer.sample_sequence,
+            self.buffer.sample_sequence,
             output_signature=output_signature
-            ).batch(batch_size),
+            ).batch(batch_size)
 
         self.dataset = iter(dataset)
 
+    def sample_minibatch(self):
+        mb = next(self.dataset)
+        return self.pid, mb
 
-    def sample_minibacth(self):
-        return next(self.dataset)
 
-
-def create_dataset(dataset_dir, num_data_files=50, samples_per_file=10_000,
-                   context_length=30, batch_size=128, num_parallel_calls=1):
+def create_dataloaders(dataset_dir, num_data_files=50, samples_per_file=10_000,
+                       context_length=30, batch_size=128, num_parallel_calls=1):
 
     assert num_data_files >= num_parallel_calls
 
     N = num_parallel_calls
     datafile_suffixes = [i for i in range(num_data_files)]
 
-    buffers = []
-    for _suffixes in np.array_split(datafile_suffixes, N):
+    dataloaders = []
+    for pid, _suffixes in enumerate(np.array_split(datafile_suffixes, N)):
+
         buffer = SequenceReplayBuffer(
-            dataset_dir=dataset_dir, datafile_suffixes=_suffixes,
-            samples_per_file=samples_per_file,
-            context_length=context_length)
-        buffers.append(buffer)
+            dataset_dir=dataset_dir, data_file_suffixes=_suffixes,
+            samples_per_file=samples_per_file, context_length=context_length)
 
-    example = next(buffers[0].sample_sequence())
-    output_signature = tuple([tf.TensorSpec(shape=v.shape, dtype=v.dtype) for v in example])
+        loader = DataLoader.remote(pid, buffer, batch_size)
 
-    def get_generator(n):
-        gen = buffers[n].sample_sequence
-        return gen()
+        dataloaders.append(loader)
 
-    dataset = tf.data.Dataset.range(N).interleave(
-        lambda n: tf.data.Dataset.from_generator(get_generator,
-                                                 args=(n,),
-                                                 output_signature=output_signature
-                                                 ).batch(batch_size),
-        cycle_length=N,
-        block_length=1,
-        deterministic=False,
-        num_parallel_calls=N
-        )
-
-    return dataset
+    return dataloaders
