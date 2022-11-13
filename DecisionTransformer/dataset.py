@@ -58,6 +58,9 @@ class SequenceReplayBuffer:
 
         for terminal_idx in terminal_indices:
 
+            #: 1エピソードが長すぎる場合は不毛なのでトリミング
+            terminal_idx = terminal_idx if (terminal_idx - start_idx) <= 3000 else start_idx + 3000
+
             _rewards = [rewards[i] for i in range(start_idx, terminal_idx+1)]
             self.rtgs += [sum(_rewards) - sum(_rewards[:i+1]) for i in range(len(_rewards))]
             self.timesteps += [i for i in range(len(_rewards))]
@@ -95,8 +98,8 @@ class SequenceReplayBuffer:
                 tf.uint8)
 
             timesteps = tf.cast(
-                tf.stack([[self.timesteps[idx]] for idx in range(start_idx, end_idx)], axis=0),
-                tf.float32)
+                tf.stack([[self.timesteps[start_idx]]], axis=0),
+                tf.int32)
 
             yield (rtgs, states, actions, timesteps)
 
@@ -136,15 +139,17 @@ def create_dataloaders(dataset_dir, num_data_files=50, samples_per_file=10_000,
     N = num_parallel_calls
     datafile_suffixes = [i for i in range(num_data_files)]
 
-    dataloaders = []
+    dataloaders, max_timestep = [], 0
     for pid, _suffixes in enumerate(np.array_split(datafile_suffixes, N)):
 
         buffer = SequenceReplayBuffer(
             dataset_dir=dataset_dir, data_file_suffixes=_suffixes,
             samples_per_file=samples_per_file, context_length=context_length)
 
+        max_timestep = max(max_timestep, max(buffer.timesteps))
+
         loader = DataLoader.remote(pid, buffer, batch_size)
 
         dataloaders.append(loader)
 
-    return dataloaders
+    return dataloaders, max_timestep
