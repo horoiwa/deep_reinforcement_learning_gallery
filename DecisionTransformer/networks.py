@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow as tf
 import tensorflow.keras.layers as kl
 
@@ -5,14 +6,13 @@ import tensorflow.keras.layers as kl
 class DecisionTransformer(tf.keras.Model):
 
     def __init__(self, action_space, max_timestep, context_length,
-                 n_transformer_blocks=6, n_heads=8, embed_dim=128):
+                 n_blocks=6, n_heads=8, embed_dim=128):
 
         super(DecisionTransformer, self).__init__()
 
         self.state_shape = (84, 84, 4)
         self.action_space = action_space
 
-        self.n_layers, self.n_heads = n_layers, n_heads
         self.embed_dim = embed_dim
 
         self.rtgs_embedding = kl.Dense(self.embed_dim, activation="tanh")
@@ -25,7 +25,7 @@ class DecisionTransformer(tf.keras.Model):
 
         self.dropout = kl.Dropout(0.1)
 
-        self.blocks = [TransformerBlock(n_heads) for _ in range(n_transformer_blocks)]
+        self.blocks = [DecoderBlock(n_heads, embed_dim, context_length) for _ in range(n_blocks)]
 
     def call(self, rtgs, states, actions, timesteps, training=False):
         """
@@ -63,9 +63,8 @@ class DecisionTransformer(tf.keras.Model):
             (B, 3*L, self.embed_dim))  # (B, 3L, embed_dim)
 
         x = self.dropout(tokens + pos_embed, training=training)
-
         for block in self.blocks:
-            x = block(x)
+            x = block(x, training=training)
 
         return x
 
@@ -142,21 +141,84 @@ class PositionalEmbedding(tf.keras.layers.Layer):
         return pos_embed
 
 
-class TransformerBlock(tf.keras.layers.Layer):
+class DecoderBlock(tf.keras.layers.Layer):
 
-    def __init__(self, n_heads):
-        super(TransformerBlock, self).__init__()
+    def __init__(self, n_heads, embed_dim, context_length):
+        super(DecoderBlock, self).__init__()
 
-        self.n_heads = n_heads
+        self.n_heads, self.embed_dim = n_heads, embed_dim
 
-    def call(self):
-        pass
+        self.layer_norm_1 = kl.LayerNormalization()
+        self.masked_attention = MaskedMultiHeadAttention(n_heads, embed_dim, context_length)
+
+        self.layer_norm_2 = kl.LayerNormalization()
+        self.dense_1 = kl.Dense(self.embed_dim * 4, activation="gelu")
+        self.dense_2 = kl.Dense(self.embed_dim, activation=None)
+        self.drop_1 = kl.Dropout(0.1)
+
+    def call(self, x, training=False):
+
+        x = self.layer_norm_1(x, training=training)
+        x = x + self.masked_attention(x)
+
+        x_ = self.layer_norm_2(x, training=training)
+        x_ = self.dense_1(x_)
+        x_ = self.dense_2(x_)
+        x_ = self.drop_1(x_)
+
+        x = x + x_
+
+        return x
 
 
-class MaskedMultiheadSelfAttention(tf.kreas.layers.Layer):
+class MaskedMultiHeadAttention(tf.keras.layers.Layer):
 
-    def __init__(self):
-        super(MaskedMultiheadSelfAttention, self).__init__()
+    def __init__(self, n_heads, embed_dim, context_length):
+        super(MaskedMultiHeadAttention, self).__init__()
 
-    def call(self):
-        pass
+        self.H, self.embed_dim = n_heads, embed_dim
+        self.T = context_length * 3
+
+        self.key = kl.Dense(embed_dim, activation=None)
+        self.query = kl.Dense(embed_dim, activation=None)
+        self.value = kl.Dense(embed_dim, activation=None)
+
+        self.drop_1 = kl.Dropout(0.1)
+        self.drop_2 = kl.Dropout(0.1)
+
+        #: 下三角行列
+        self.mask = tf.constant(
+            np.tril(np.ones(shape=(1, self.H, self.T, self.T))),
+            dtype=tf.bool)
+
+    def call(self, x):
+
+        B, T, C = x.shape  # batch, block_length, embed_dim
+
+        # (B, T, C) -> (B, T, C) -> (B, T, H, C//H) -> (B, H, T, C//H)
+        key = tf.transpose(
+            tf.reshape(self.key(x), [B, T, self.H, C // self.H]),
+            perm=[0, 2, 1, 3])
+        query = tf.transpose(
+            tf.reshape(self.query(x), [B, T, self.H, C // self.H]),
+            perm=[0, 2, 1, 3])
+        value = tf.transpose(
+            tf.reshape(self.value(x), [B, T, self.H, C // self.H]),
+            perm=[0, 2, 1, 3])
+
+        # (B, H, T, C//H) @ (B, H, C//H, T) -> (B, H, T, T)
+        attention = tf.matmul(key, query, transpose_b=True)
+        attention /= tf.math.sqrt(tf.constant(C//self.H, tf.float32))
+
+        mask = self.mask[:, :, :T, :T]
+        masked_attention = tf.where(mask, attention, tf.constant(-np.inf))
+        masked_attention = tf.math.softmax(masked_attention, axis=-1)
+        masked_attention = self.drop_1(masked_attention)
+
+        # (B, H, T, T) @ (B, H, T, C//H) -> (B, H, T, C//H) ->
+        # (B, H, T, C//H) -> (B, T, H, C//H) -> (B, T, C)
+        y = tf.matmul(masked_attention, value)
+        y = tf.reshape(tf.transpose(y, [0, 2, 1, 3]), shape=[B, T, C])
+        y = self.drop_2(y)
+
+        return y
