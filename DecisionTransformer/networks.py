@@ -27,6 +27,10 @@ class DecisionTransformer(tf.keras.Model):
 
         self.blocks = [DecoderBlock(n_heads, embed_dim, context_length) for _ in range(n_blocks)]
 
+        self.layer_norm = kl.LayerNormalization()
+
+        self.head = kl.Dense(self.action_space, use_bias=False, activation=None)
+
     def call(self, rtgs, states, actions, timesteps, training=False):
         """
         Args:
@@ -56,17 +60,26 @@ class DecisionTransformer(tf.keras.Model):
             )  # (B, L, 1) -> (B, L) -> (B, L, embed_dim)
         pos_embed = self.pos_embedding(timesteps, L)  # (B, 3L, embed_dim)
 
-        _tokens = tf.stack(
+        tokens = tf.stack(
             [rtgs_embed, states_embed, action_embed], axis=1)  # (B, 3, L, embed_dim)
         tokens = tf.reshape(
-            tf.transpose(_tokens, (0, 2, 1, 3)),
+            tf.transpose(tokens, (0, 2, 1, 3)),
             (B, 3*L, self.embed_dim))  # (B, 3L, embed_dim)
 
         x = self.dropout(tokens + pos_embed, training=training)
         for block in self.blocks:
             x = block(x, training=training)
 
-        return x
+        x = self.layer_norm(x)
+        logits = self.head(x)  # (B, L, action_space)
+
+        # use only predictions from state
+        logits = logits[:, 1::3, :]  # (B, L//3, action_space)
+
+        return logits
+
+    def sample_action(self, rtgs, states, actions):
+        return None
 
 
 class StateEmbedding(tf.keras.layers.Layer):

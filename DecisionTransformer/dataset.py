@@ -122,7 +122,7 @@ class DataLoader:
         dataset = tf.data.Dataset.from_generator(
             self.buffer.sample_sequence,
             output_signature=output_signature
-            ).batch(batch_size)
+            ).batch(batch_size).prefetch(5)
 
         self.dataset = iter(dataset)
 
