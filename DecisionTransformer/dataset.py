@@ -101,7 +101,9 @@ class SequenceReplayBuffer:
                 tf.stack([[self.timesteps[start_idx]]], axis=0),
                 tf.int32)
 
-            yield (rtgs, states, actions, timesteps)
+            mb = (rtgs, states, actions, timesteps)
+
+            yield mb
 
 
 @ray.remote(num_cpus=1, num_gpus=0)

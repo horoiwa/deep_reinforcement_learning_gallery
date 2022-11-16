@@ -78,8 +78,12 @@ class DecisionTransformer(tf.keras.Model):
 
         return logits
 
-    def sample_action(self, rtgs, states, actions):
-        return None
+    def sample_action(self, rtgs, states, actions, timesteps):
+        if len(actions) == 0:
+            pass
+
+        sampled_action = None
+        return sampled_action
 
 
 class StateEmbedding(tf.keras.layers.Layer):
