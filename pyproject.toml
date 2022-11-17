@@ -11,8 +11,8 @@ tensorflow = "^2.10.1"
 tensorflow-probability = "^0.18.0"
 ray = "^2.1.0"
 lz4 = "^4.0.2"
-gym = {version = "0.25.2", extras = ["all"]}
 Pillow = "^9.3.0"
+gym = {version = "0.25.2", extras = ["box2d", "atari", "accept-rom-license"]}
 
 [tool.poetry.dev-dependencies]
 
