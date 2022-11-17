@@ -81,17 +81,16 @@ class DecisionTransformerAgent:
         frame = env.reset()[:, :, 0]  # (84, 84)
         frames.append(frame)
 
-        rtgs = [target_rtg]
-        states = []
-        actions = []
+        rtgs, states, actions = [], [], []
 
         done, rewards, steps = False, 0, 0
-        while done:
+        while not done:
+
             rtgs.append(max(target_rtg - rewards, 0))
             states.append(np.stack(frames, axis=2))  # (84, 84, 4)
 
             action = self.model.sample_action(
-                rtgs=rtgs, states=states, actions=None, timestep=teps)
+                rtgs=rtgs, states=states, actions=actions, timestep=steps)
 
             next_frame, reward, done, _ = env.step(action)
             frames.append(next_frame[:, :, 0])
@@ -118,7 +117,7 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
     agent = DecisionTransformerAgent(
         env_id=env_id, context_length=context_length,
         max_timestep=max_timestep, monitor_dir=monitor_dir)
-    agent.evaluate(filename="sample")
+    agent.evaluate(filename=None)
     import pdb; pdb.set_trace()
 
     logdir = Path(__file__).parent / "log"
@@ -169,10 +168,6 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
             agent.save()
 
         n += 1
-
-
-def evaluate(env_id):
-    pass
 
 
 if __name__ == "__main__":

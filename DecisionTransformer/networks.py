@@ -1,6 +1,7 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras.layers as kl
+import tensorflow_probability as tfp
 
 
 class DecisionTransformer(tf.keras.Model):
@@ -78,11 +79,28 @@ class DecisionTransformer(tf.keras.Model):
 
         return logits
 
-    def sample_action(self, rtgs, states, actions, timesteps):
-        if len(actions) == 0:
-            pass
+    def sample_action(self, rtgs: list, states: list, actions: list, timestep: int):
 
-        sampled_action = None
+        L = len(states)
+
+        rtgs = tf.reshape(
+            tf.convert_to_tensor(rtgs, dtype=tf.float32), shape=[1, L, 1])
+        states = tf.expand_dims(tf.stack(states, axis=0), 0)
+        #: Dummy action for initial step
+        actions = actions if len(actions) else [0]
+        actions = tf.reshape(
+            tf.convert_to_tensor(actions, dtype=tf.uint8), [1, L, 1])
+        timestep = tf.reshape(
+            tf.convert_to_tensor([timestep], dtype=tf.int32), [1, 1, 1])
+
+        logits = self(rtgs, states, actions, timestep)
+
+        action_probs = tf.nn.softmax(logits + 1e-4)
+        dist = tfp.distributions.Categorical(probs=action_probs)
+        sampled_action = dist.sample()
+
+        import pdb; pdb.set_trace()
+
         return sampled_action
 
 
