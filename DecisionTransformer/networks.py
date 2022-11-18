@@ -13,6 +13,7 @@ class DecisionTransformer(tf.keras.Model):
 
         self.state_shape = (84, 84, 4)
         self.action_space = action_space
+        self.context_length = context_length
 
         self.embed_dim = embed_dim
 
@@ -72,22 +73,25 @@ class DecisionTransformer(tf.keras.Model):
             x = block(x, training=training)
 
         x = self.layer_norm(x)
-        logits = self.head(x)  # (B, L, action_space)
+        logits = self.head(x)  # (B, 3L, action_space)
 
         # use only predictions from state
-        logits = logits[:, 1::3, :]  # (B, L//3, action_space)
+        logits = logits[:, 1::3, :]  # (B, L, action_space)
 
         return logits
 
     def sample_action(self, rtgs: list, states: list, actions: list, timestep: int):
 
-        L = len(states)
+        assert len(rtgs) == len(states) == len(actions) + 1
+
+        L = min(len(rtgs), self.context_length)
 
         rtgs = tf.reshape(
             tf.convert_to_tensor(rtgs, dtype=tf.float32), shape=[1, L, 1])
         states = tf.expand_dims(tf.stack(states, axis=0), 0)
-        #: Dummy action for initial step
-        actions = actions if len(actions) else [0]
+
+        #: Add Dummy action for implementation reasonctions
+        actions = actions + [0]
         actions = tf.reshape(
             tf.convert_to_tensor(actions, dtype=tf.uint8), [1, L, 1])
         timestep = tf.reshape(
@@ -99,9 +103,7 @@ class DecisionTransformer(tf.keras.Model):
         dist = tfp.distributions.Categorical(probs=action_probs)
         sampled_action = dist.sample()
 
-        import pdb; pdb.set_trace()
-
-        return sampled_action
+        return sampled_action.numpy()[0][0]
 
 
 class StateEmbedding(tf.keras.layers.Layer):

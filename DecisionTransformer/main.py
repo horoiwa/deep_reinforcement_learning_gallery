@@ -31,7 +31,8 @@ class DecisionTransformerAgent:
             max_timestep=max_timestep,
             context_length=context_length)
 
-        self.optimizer = tf.keras.optimizers.Adam(lr=6e-4, beta_1=-0.9, beta_2=0.95)
+        self.optimizer = tf.keras.optimizers.Adam(
+            learning_rate=6e-4, beta_1=-0.9, beta_2=0.95)
 
         self.monitor_dir = Path(monitor_dir)
 
@@ -70,7 +71,7 @@ class DecisionTransformerAgent:
             terminal_on_life_loss=False, screen_size=84)
         return env
 
-    def evaluate(self, target_rtg=90, filename=None):
+    def evaluate(self, target_rtg: float=90.0, filename=None):
 
         env = self.get_env(filename)
 
@@ -81,16 +82,18 @@ class DecisionTransformerAgent:
         frame = env.reset()[:, :, 0]  # (84, 84)
         frames.append(frame)
 
-        rtgs, states, actions = [], [], []
+        rtgs = collections.deque([], maxlen=self.context_length)
+        states = collections.deque([], maxlen=self.context_length)
+        actions = collections.deque([], maxlen=self.context_length-1)
 
         done, rewards, steps = False, 0, 0
         while not done:
 
             rtgs.append(max(target_rtg - rewards, 0))
-            states.append(np.stack(frames, axis=2))  # (84, 84, 4)
+            states.append(np.stack(frames, axis=2).astype(np.float32))
 
             action = self.model.sample_action(
-                rtgs=rtgs, states=states, actions=actions, timestep=steps)
+                rtgs=rtgs, states=states, actions=list(actions), timestep=steps)
 
             next_frame, reward, done, _ = env.step(action)
             frames.append(next_frame[:, :, 0])
@@ -100,7 +103,7 @@ class DecisionTransformerAgent:
             rewards += reward
             steps += 1
 
-            if steps > 1600:
+            if steps > 1200:
                 break
 
         return rewards, steps
@@ -173,4 +176,4 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
 if __name__ == "__main__":
     env_id = "Breakout"
     dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
-    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=1, num_parallel_calls=1)
+    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=3, num_parallel_calls=3)

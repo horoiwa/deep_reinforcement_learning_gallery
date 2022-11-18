@@ -15,3 +15,10 @@ https://offline-rl.github.io/
 ```
 gsutil -m cp -R gs://atari-replay-datasets/dqn/BreakOut .
 ```
+
+
+## Dopamine-rl required
+
+```
+pip install dopamine-rl
+```
