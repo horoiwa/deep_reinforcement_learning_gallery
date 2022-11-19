@@ -1,5 +1,7 @@
 import random
+import time
 from typing import List
+import collections
 
 import ray
 import pickle
@@ -9,12 +11,17 @@ import tensorflow as tf
 from dopamine.replay_memory.circular_replay_buffer import OutOfGraphReplayBuffer
 
 
-class SequenceReplayBuffer:
+@ray.remote(num_cpus=1, num_gpus=0)
+class SequenceLoader:
 
-    def __init__(self, dataset_dir, data_file_suffixes: List[str],
-                 samples_per_file=10000, context_length=30):
+    def __init__(self, pid, dataset_dir, data_file_suffixes: List[str],
+                 max_timestep: int, samples_per_file=10000, context_length=30):
+
+        self.pid = pid
 
         self.context_length = context_length
+
+        self.max_timestep = max_timestep
 
         # rtgs: returns to go or R
         self.rtgs, self.states, self.actions, self.dones, self.timesteps = [], [], [], [], []
@@ -31,20 +38,19 @@ class SequenceReplayBuffer:
     def load(self, dataset_dir, samples_per_file, datafile_suffixes):
 
         for i in datafile_suffixes:
-            buffer = OutOfGraphReplayBuffer(
+            tmp_buffer = OutOfGraphReplayBuffer(
                 replay_capacity=samples_per_file,
                 observation_shape=(84, 84),
                 stack_size=4,
                 batch_size=64,
                 update_horizon=1,
                 gamma=0.99)
-            buffer.load(dataset_dir, suffix=f"{i}")
+            tmp_buffer.load(dataset_dir, suffix=f"{i}")
 
-            indices = [idx for idx in range(0, buffer.cursor()) if buffer.is_valid_transition(idx)]
-            transitions = buffer.sample_transition_batch(batch_size=len(indices), indices=indices)
+            indices = [idx for idx in range(0, tmp_buffer.cursor()) if tmp_buffer.is_valid_transition(idx)]
+            transitions = tmp_buffer.sample_transition_batch(batch_size=len(indices), indices=indices)
             self.add_transitions(transitions)
-
-            del buffer
+            del tmp_buffer
 
     def add_transitions(self, transitions):
         """
@@ -58,8 +64,8 @@ class SequenceReplayBuffer:
 
         for terminal_idx in terminal_indices:
 
-            #: 1エピソードが長すぎる場合は不毛なのでトリミング
-            terminal_idx = terminal_idx if (terminal_idx - start_idx) <= 3000 else start_idx + 3000
+            #: 1エピソードが長すぎる場合は不毛なのでtruncate
+            terminal_idx = terminal_idx if (terminal_idx - start_idx) < self.max_timestep else start_idx + self.max_timestep - 100
 
             _rewards = [rewards[i] for i in range(start_idx, terminal_idx+1)]
             self.rtgs += [sum(_rewards) - sum(_rewards[:i+1]) for i in range(len(_rewards))]
@@ -71,10 +77,10 @@ class SequenceReplayBuffer:
 
             start_idx = terminal_idx + 1
 
-    def sample_sequence(self):
+    def sample_sequences(self, num_sample=64) -> List:
 
-        while True:
-
+        sequences = []
+        for _ in range(num_sample):
             start_idx = random.randint(0, len(self))
 
             terminal_idx = next(filter(lambda v: v >= start_idx, self.terminal_indices))
@@ -101,57 +107,65 @@ class SequenceReplayBuffer:
                 tf.stack([[self.timesteps[start_idx]]], axis=0),
                 tf.int32)
 
-            mb = (rtgs, states, actions, timesteps)
+            seq = (rtgs, states, actions, timesteps)
+            seq = lz4f.compress(pickle.dumps(seq))
+            sequences.append(seq)
 
-            yield mb
+        return self.pid, sequences
 
 
-@ray.remote(num_cpus=1, num_gpus=0)
-class DataLoader:
-    """
-    buffer.sample_sequenceが遅すぎる(15秒/minibatchくらい)ので単純並列化
-    """
 
-    def __init__(self, pid, buffer, batch_size):
+class SequenceBuffer:
 
-        self.pid = pid
+    def __init__(self, maxlen, batch_size):
+        self.buffer = collections.deque(maxlen=maxlen)
+        self.batch_size = batch_size
+        self.dataset = None
 
-        self.buffer = buffer
+    def __len__(self):
+        return len(self.buffer)
 
-        example = next(self.buffer.sample_sequence())
+    def add_sequences(self, sequences: list):
+        for seq in sequences:
+            self.buffer.append(seq)
+
+    def sample_sequence(self):
+        while True:
+            selected_idx = random.randint(0, len(self.buffer)-1)
+            sequence = pickle.loads(lz4f.decompress(self.buffer[selected_idx]))
+            yield sequence
+
+    def _initialize_dataset(self):
+        example = next(self.sample_sequence())
         output_signature = tuple([tf.TensorSpec(shape=v.shape, dtype=v.dtype) for v in example])
-
         dataset = tf.data.Dataset.from_generator(
-            self.buffer.sample_sequence,
+            self.sample_sequence,
             output_signature=output_signature
-            ).batch(batch_size).prefetch(5)
-
-        self.dataset = iter(dataset)
+            ).batch(self.batch_size).prefetch(5)
+        return iter(dataset)
 
     def sample_minibatch(self):
+        if self.dataset is None:
+            assert len(self) > 0
+            self.dataset = self._initialize_dataset()
         mb = next(self.dataset)
-        return self.pid, mb
+        return mb
 
 
-def create_dataloaders(dataset_dir, num_data_files=50, samples_per_file=10_000,
+def create_dataloaders(dataset_dir, max_timestep, num_data_files=50, samples_per_file=10_000,
                        context_length=30, batch_size=128, num_parallel_calls=1):
 
     assert num_data_files >= num_parallel_calls
 
-    N = num_parallel_calls
     datafile_suffixes = [i for i in range(num_data_files)]
 
-    dataloaders, max_timestep = [], 0
-    for pid, _suffixes in enumerate(np.array_split(datafile_suffixes, N)):
-
-        buffer = SequenceReplayBuffer(
-            dataset_dir=dataset_dir, data_file_suffixes=_suffixes,
+    loaders = []
+    for pid, _suffixes in enumerate(np.array_split(datafile_suffixes, num_parallel_calls)):
+        loader = SequenceLoader.remote(
+            pid=pid, dataset_dir=dataset_dir,
+            data_file_suffixes=_suffixes, max_timestep=max_timestep,
             samples_per_file=samples_per_file, context_length=context_length)
 
-        max_timestep = max(max_timestep, max(buffer.timesteps))
+        loaders.append(loader)
 
-        loader = DataLoader.remote(pid, buffer, batch_size)
-
-        dataloaders.append(loader)
-
-    return dataloaders, max_timestep
+    return loaders

@@ -3,6 +3,7 @@ from pathlib import Path
 import random
 import shutil
 import collections
+import psutil
 from typing import Optional
 
 import gym
@@ -12,7 +13,7 @@ import numpy as np
 import tensorflow as tf
 from dopamine.discrete_domains.atari_lib import AtariPreprocessing
 
-from dataset import create_dataloaders
+from dataset import create_dataloaders, SequenceBuffer
 from networks import DecisionTransformer
 
 
@@ -72,7 +73,7 @@ class DecisionTransformerAgent:
         return env
 
     def evaluate(self, target_rtg: float=90.0, filename=None):
-
+        s = time.time()
         env = self.get_env(filename)
 
         frames = collections.deque(maxlen=4)
@@ -105,23 +106,27 @@ class DecisionTransformerAgent:
 
             if steps > 1200:
                 break
-
+        print(time.time() - s)
         return rewards, steps
 
 
+@ray.remote(num_cpus=1, num_gpus=1)
+class Learner(DecisionTransformerAgent):
+    pass
+
+
+@ray.remote(num_cpus=1, num_gpus=1)
+class Tester(DecisionTransformerAgent):
+    pass
+
+
 def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
-          samples_per_file=10_000, max_timestep=3000,
-          context_length=30, batch_size=48, resume_from=None):
+          samples_per_file=10_000, max_timestep=1800,
+          context_length=20, batch_size=32, resume_from=None):
 
     monitor_dir = Path(__file__).parent / "mp4"
     if monitor_dir.exists() and resume_from is None:
         shutil.rmtree(monitor_dir)
-
-    agent = DecisionTransformerAgent(
-        env_id=env_id, context_length=context_length,
-        max_timestep=max_timestep, monitor_dir=monitor_dir)
-    agent.evaluate(filename=None)
-    import pdb; pdb.set_trace()
 
     logdir = Path(__file__).parent / "log"
     if logdir.exists() and resume_from is None:
@@ -130,50 +135,64 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
 
     ray.init()
 
-    dataloaders, max_timestep_dataset = create_dataloaders(
-        dataset_dir=dataset_dir, num_data_files=num_data_files,
-        samples_per_file=samples_per_file, context_length=context_length,
-        num_parallel_calls=num_parallel_calls, batch_size=batch_size)
-
-    print()
-    print("Dataset maxtimestep:", max_timestep_dataset)
-    print()
-
-    assert max_timestep > max_timestep_dataset
-
     agent = DecisionTransformerAgent(
         env_id=env_id, context_length=context_length,
         max_timestep=max_timestep, monitor_dir=monitor_dir)
 
-    jobs_wip = [loader.sample_minibatch.remote() for loader in dataloaders]
+    loaders = create_dataloaders(
+        dataset_dir=dataset_dir, max_timestep=max_timestep, num_data_files=num_data_files,
+        samples_per_file=samples_per_file, context_length=context_length,
+        num_parallel_calls=num_parallel_calls, batch_size=batch_size)
 
+    buffer = SequenceBuffer(maxlen=100_000, batch_size=batch_size)
+
+    jobs_wip = [loader.sample_sequences.remote() for loader in loaders]
+
+    for _ in range(10):
+        job_done, jobs_wip = ray.wait(jobs_wip, num_returns=1)
+        pid, sequences = ray.get(job_done)[0]
+        buffer.add_sequences(sequences)
+        jobs_wip.append(loaders[pid].sample_sequences.remote())
+
+    s = time.time()
     n = 1
     while n < 1_000_000:
+        s2 = time.time()
+        job_done, jobs_wip = ray.wait(jobs_wip, num_returns=1, timeout=0)
+        if job_done:
+            pid, sequences = ray.get(job_done)[0]
+            jobs_wip.append(loaders[pid].sample_sequences.remote())
+            buffer.add_sequences(sequences)
 
-        job_done, jobs_wip = ray.wait(jobs_wip, num_returns=1)
-        pid, minibatch = ray.get(job_done)[0]
-        jobs_wip.append(dataloaders[pid].sample_minibatch.remote())
-
-        rtgs, states, actions, timesteps = minibatch
+        rtgs, states, actions, timesteps = buffer.sample_minibatch()
         loss, gnorm = agent.update_network(rtgs, states, actions, timesteps)
 
         with summary_writer.as_default():
             tf.summary.scalar("loss", loss, step=n)
             tf.summary.scalar("gnorm", gnorm, step=n)
 
-        if n % 250 == 0:
+        if n % 500 == 0:
             score, steps = agent.evaluate(filename=f"step{n}")
+
+            laptime = time.time() - s
+            mem = psutil.virtual_memory().used / (1024 ** 3)
             with summary_writer.as_default():
                 tf.summary.scalar("score", score, step=n)
                 tf.summary.scalar("steps", steps, step=n)
+                tf.summary.scalar("laptime", laptime, step=n)
+                tf.summary.scalar("Mem", mem, step=n)
+                tf.summary.scalar("buffer", len(buffer), step=n)
+
+            s = time.time()
 
         if n % 2500 == 0:
             agent.save()
 
         n += 1
+        print(time.time() - s2)
 
 
 if __name__ == "__main__":
     env_id = "Breakout"
     dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
-    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=3, num_parallel_calls=3)
+    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=50, num_parallel_calls=15)
