@@ -110,12 +110,7 @@ class DecisionTransformerAgent:
         return rewards, steps
 
 
-@ray.remote(num_cpus=1, num_gpus=1)
-class Learner(DecisionTransformerAgent):
-    pass
-
-
-@ray.remote(num_cpus=1, num_gpus=1)
+@ray.remote(num_cpus=1, num_gpus=0)
 class Tester(DecisionTransformerAgent):
     pass
 
@@ -139,6 +134,11 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
         env_id=env_id, context_length=context_length,
         max_timestep=max_timestep, monitor_dir=monitor_dir)
 
+    tester = Tester.remote(
+        env_id=env_id, context_length=context_length,
+        max_timestep=max_timestep, monitor_dir=monitor_dir)
+    test_wip = tester.evaluate.remote(filename=0)
+
     loaders = create_dataloaders(
         dataset_dir=dataset_dir, max_timestep=max_timestep, num_data_files=num_data_files,
         samples_per_file=samples_per_file, context_length=context_length,
@@ -157,7 +157,6 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
     s = time.time()
     n = 1
     while n < 1_000_000:
-        s2 = time.time()
         job_done, jobs_wip = ray.wait(jobs_wip, num_returns=1, timeout=0)
         if job_done:
             pid, sequences = ray.get(job_done)[0]
@@ -171,8 +170,12 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
             tf.summary.scalar("loss", loss, step=n)
             tf.summary.scalar("gnorm", gnorm, step=n)
 
-        if n % 500 == 0:
-            score, steps = agent.evaluate(filename=f"step{n}")
+        if n % 250 == 0:
+
+            score, steps = ray.get(test_wip)
+            agent.save()
+            ray.get(tester.load.remote())
+            test_wip = tester.evaluate.remote(filename=n)
 
             laptime = time.time() - s
             mem = psutil.virtual_memory().used / (1024 ** 3)
@@ -182,17 +185,12 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
                 tf.summary.scalar("laptime", laptime, step=n)
                 tf.summary.scalar("Mem", mem, step=n)
                 tf.summary.scalar("buffer", len(buffer), step=n)
-
             s = time.time()
 
-        if n % 2500 == 0:
-            agent.save()
-
         n += 1
-        print(time.time() - s2)
 
 
 if __name__ == "__main__":
     env_id = "Breakout"
     dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
-    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=50, num_parallel_calls=15)
+    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=48, num_parallel_calls=12)

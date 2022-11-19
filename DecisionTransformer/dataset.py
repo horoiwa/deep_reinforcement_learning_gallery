@@ -14,8 +14,7 @@ from dopamine.replay_memory.circular_replay_buffer import OutOfGraphReplayBuffer
 @ray.remote(num_cpus=1, num_gpus=0)
 class SequenceLoader:
 
-    def __init__(self, pid, dataset_dir, data_file_suffixes: List[str],
-                 max_timestep: int, samples_per_file=10000, context_length=30):
+    def __init__(self, pid, max_timestep: int, context_length=30):
 
         self.pid = pid
 
@@ -26,9 +25,7 @@ class SequenceLoader:
         # rtgs: returns to go or R
         self.rtgs, self.states, self.actions, self.dones, self.timesteps = [], [], [], [], []
 
-        self.load(dataset_dir, samples_per_file, data_file_suffixes)
-
-        self.terminal_indices = [i for i, done in enumerate(self.dones) if done == 1]
+        self.terminal_indices = None
 
         assert len(self.rtgs) == len(self.states) == len(self.actions) == len(self.timesteps)
 
@@ -52,6 +49,10 @@ class SequenceLoader:
             self.add_transitions(transitions)
             del tmp_buffer
 
+        self.terminal_indices = [i for i, done in enumerate(self.dones) if done == 1]
+
+        return "OK"
+
     def add_transitions(self, transitions):
         """
         Note:
@@ -59,23 +60,30 @@ class SequenceLoader:
         """
         states, actions, rewards, _, _, _, dones, _ = transitions
 
-        _terminal_indices = np.argwhere(dones == 1).flatten().tolist()
-        start_idx, terminal_indices = _terminal_indices[0]+1, _terminal_indices[1:]
+        terminal_indices = np.argwhere(dones == 1).flatten().tolist()
 
-        for terminal_idx in terminal_indices:
+        for start_idx, terminal_idx in zip(terminal_indices[:-1], terminal_indices[1:]):
+
+            start_idx = start_idx + 1
 
             #: 1エピソードが長すぎる場合は不毛なのでtruncate
-            terminal_idx = terminal_idx if (terminal_idx - start_idx) < self.max_timestep else start_idx + self.max_timestep - 100
+            is_truncated = False
+            if (terminal_idx - start_idx) >= self.max_timestep:
+                is_truncated = True
+                terminal_idx = start_idx + self.max_timestep - 1
 
             _rewards = [rewards[i] for i in range(start_idx, terminal_idx+1)]
             self.rtgs += [sum(_rewards) - sum(_rewards[:i+1]) for i in range(len(_rewards))]
             self.timesteps += [i for i in range(len(_rewards))]
-
             self.states += [lz4f.compress(pickle.dumps(states[i])) for i in range(start_idx, terminal_idx+1)]
             self.actions += [actions[i] for i in range(start_idx, terminal_idx+1)]
-            self.dones += [dones[i] for i in range(start_idx, terminal_idx+1)]
 
-            start_idx = terminal_idx + 1
+            _dones = [dones[i] for i in range(start_idx, terminal_idx+1)]
+            if is_truncated:
+                _dones[-1] = 1
+            self.dones += _dones
+
+        assert self.dones[-1] == 1
 
     def sample_sequences(self, num_sample=64) -> List:
 
@@ -83,7 +91,10 @@ class SequenceLoader:
         for _ in range(num_sample):
             start_idx = random.randint(0, len(self))
 
-            terminal_idx = next(filter(lambda v: v >= start_idx, self.terminal_indices))
+            try:
+                terminal_idx = next(filter(lambda v: v >= start_idx, self.terminal_indices))
+            except:
+                import pdb; pdb.set_trace()
 
             if terminal_idx - start_idx < self.context_length:
                 start_idx, end_idx = terminal_idx - self.context_length, terminal_idx
@@ -162,9 +173,10 @@ def create_dataloaders(dataset_dir, max_timestep, num_data_files=50, samples_per
     loaders = []
     for pid, _suffixes in enumerate(np.array_split(datafile_suffixes, num_parallel_calls)):
         loader = SequenceLoader.remote(
-            pid=pid, dataset_dir=dataset_dir,
-            data_file_suffixes=_suffixes, max_timestep=max_timestep,
-            samples_per_file=samples_per_file, context_length=context_length)
+            pid=pid, max_timestep=max_timestep, context_length=context_length)
+
+        ret = loader.load.remote(dataset_dir, samples_per_file, _suffixes)
+        print(pid, ray.get(ret))
 
         loaders.append(loader)
 
