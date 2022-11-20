@@ -47,6 +47,9 @@ class DecisionTransformerAgent:
 
     def update_network(self, rtgs, states, actions, timesteps):
 
+        assert timesteps.shape[1] == 1
+        assert timesteps.shape[2] == 1
+
         targets = tf.one_hot(
             tf.squeeze(actions, axis=-1),
             depth=self.action_space, on_value=1., off_value=0.)
@@ -87,7 +90,7 @@ class DecisionTransformerAgent:
         states = collections.deque([], maxlen=self.context_length)
         actions = collections.deque([], maxlen=self.context_length-1)
 
-        done, rewards, steps = False, 0, 0
+        done, rewards, score, steps = False, 0, 0, 0
         while not done:
 
             rtgs.append(max(target_rtg - rewards, 0))
@@ -101,13 +104,14 @@ class DecisionTransformerAgent:
 
             actions.append(action)
 
-            rewards += reward
+            score += reward
+            rewards += np.clip(reward, 0., 1.)
             steps += 1
 
             if steps > 1200:
                 break
         print(time.time() - s)
-        return rewards, steps
+        return score, steps
 
 
 @ray.remote(num_cpus=1, num_gpus=0)
@@ -117,7 +121,7 @@ class Tester(DecisionTransformerAgent):
 
 def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
           samples_per_file=10_000, max_timestep=1800,
-          context_length=20, batch_size=32, resume_from=None):
+          context_length=30, batch_size=32, resume_from=None):
 
     monitor_dir = Path(__file__).parent / "mp4"
     if monitor_dir.exists() and resume_from is None:
@@ -170,7 +174,7 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
             tf.summary.scalar("loss", loss, step=n)
             tf.summary.scalar("gnorm", gnorm, step=n)
 
-        if n % 250 == 0:
+        if n % 1000 == 0:
 
             score, steps = ray.get(test_wip)
             agent.save()
@@ -193,4 +197,5 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
 if __name__ == "__main__":
     env_id = "Breakout"
     dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
-    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=48, num_parallel_calls=12)
+    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=36, num_parallel_calls=12)
+    #train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=1, num_parallel_calls=1)

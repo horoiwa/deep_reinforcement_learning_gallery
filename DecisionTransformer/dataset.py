@@ -70,7 +70,7 @@ class SequenceLoader:
             is_truncated = False
             if (terminal_idx - start_idx) >= self.max_timestep:
                 is_truncated = True
-                terminal_idx = start_idx + self.max_timestep - 1
+                terminal_idx = start_idx + self.max_timestep - 100
 
             _rewards = [rewards[i] for i in range(start_idx, terminal_idx+1)]
             self.rtgs += [sum(_rewards) - sum(_rewards[:i+1]) for i in range(len(_rewards))]
@@ -84,17 +84,16 @@ class SequenceLoader:
             self.dones += _dones
 
         assert self.dones[-1] == 1
+        assert max(rewards) <= 1.0, f"MAX {max(rewards)}"
 
     def sample_sequences(self, num_sample=64) -> List:
 
         sequences = []
-        for _ in range(num_sample):
-            start_idx = random.randint(0, len(self))
 
-            try:
-                terminal_idx = next(filter(lambda v: v >= start_idx, self.terminal_indices))
-            except:
-                import pdb; pdb.set_trace()
+        for _ in range(num_sample):
+            start_idx = random.randint(0, len(self)-1)
+
+            terminal_idx = next(filter(lambda v: v >= start_idx, self.terminal_indices))
 
             if terminal_idx - start_idx < self.context_length:
                 start_idx, end_idx = terminal_idx - self.context_length, terminal_idx
@@ -141,26 +140,19 @@ class SequenceBuffer:
             self.buffer.append(seq)
 
     def sample_sequence(self):
-        while True:
-            selected_idx = random.randint(0, len(self.buffer)-1)
-            sequence = pickle.loads(lz4f.decompress(self.buffer[selected_idx]))
-            yield sequence
-
-    def _initialize_dataset(self):
-        example = next(self.sample_sequence())
-        output_signature = tuple([tf.TensorSpec(shape=v.shape, dtype=v.dtype) for v in example])
-        dataset = tf.data.Dataset.from_generator(
-            self.sample_sequence,
-            output_signature=output_signature
-            ).batch(self.batch_size).prefetch(5)
-        return iter(dataset)
+        selected_idx = random.randint(0, len(self.buffer)-1)
+        rtgs, states, actions, timesteps = pickle.loads(lz4f.decompress(self.buffer[selected_idx]))
+        return (rtgs, states, actions, timesteps)
 
     def sample_minibatch(self):
-        if self.dataset is None:
-            assert len(self) > 0
-            self.dataset = self._initialize_dataset()
-        mb = next(self.dataset)
-        return mb
+        rtgs, states, actions, timesteps = zip(*[self.sample_sequence() for _ in range(self.batch_size)])
+
+        rtgs = tf.stack(rtgs, axis=0)
+        states = tf.stack(states, axis=0)
+        actions = tf.stack(actions, axis=0)
+        timesteps = tf.stack(timesteps, axis=0)
+
+        return (rtgs, states, actions, timesteps)
 
 
 def create_dataloaders(dataset_dir, max_timestep, num_data_files=50, samples_per_file=10_000,
