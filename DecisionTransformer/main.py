@@ -124,11 +124,11 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
           context_length=30, batch_size=32, resume_from=None):
 
     monitor_dir = Path(__file__).parent / "mp4"
-    if monitor_dir.exists() and resume_from is None:
+    if resume_from is None and monitor_dir.exists():
         shutil.rmtree(monitor_dir)
 
     logdir = Path(__file__).parent / "log"
-    if logdir.exists() and resume_from is None:
+    if resume_from is None and logdir.exists():
         shutil.rmtree(logdir)
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
@@ -137,6 +137,9 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
     agent = DecisionTransformerAgent(
         env_id=env_id, context_length=context_length,
         max_timestep=max_timestep, monitor_dir=monitor_dir)
+
+    if resume_from is not None:
+        agent.load(load_dir="checkpoints/")
 
     tester = Tester.remote(
         env_id=env_id, context_length=context_length,
@@ -159,7 +162,7 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
         jobs_wip.append(loaders[pid].sample_sequences.remote())
 
     s = time.time()
-    n = 1
+    n = 1 if resume_from is None else int(resume_from) * 1000 + 1
     while n < 1_000_000:
         job_done, jobs_wip = ray.wait(jobs_wip, num_returns=1, timeout=0)
         if job_done:
@@ -197,5 +200,5 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
 if __name__ == "__main__":
     env_id = "Breakout"
     dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
-    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=36, num_parallel_calls=12)
+    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=36, num_parallel_calls=12, resume_from=150)
     #train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=1, num_parallel_calls=1)
