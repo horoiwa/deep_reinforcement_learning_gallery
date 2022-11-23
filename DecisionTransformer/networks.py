@@ -17,9 +17,15 @@ class DecisionTransformer(tf.keras.Model):
 
         self.embed_dim = embed_dim
 
-        self.rtgs_embedding = kl.Dense(self.embed_dim, activation="tanh")
-        self.state_embedding = StateEmbedding(self.embed_dim)
-        self.action_embedding = kl.Embedding(self.action_space, self.embed_dim)
+        self.rtgs_embedding = kl.Dense(
+            self.embed_dim, activation=None,
+            kernel_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.02))
+
+        self.state_embedding = StateEmbedding(self.embed_dim, input_shape=self.state_shape)
+
+        self.action_embedding = kl.Embedding(self.action_space, self.embed_dim,
+            embeddings_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.02))
+
         self.pos_embedding = PositionalEmbedding(
             max_timestep=max_timestep,
             context_length=context_length,
@@ -31,7 +37,9 @@ class DecisionTransformer(tf.keras.Model):
 
         self.layer_norm = kl.LayerNormalization()
 
-        self.head = kl.Dense(self.action_space, use_bias=False, activation=None)
+        self.head = kl.Dense(
+            self.action_space, use_bias=False, activation=None,
+            kernel_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.02))
 
     @tf.function
     def call(self, rtgs, states, actions, timesteps, training=False):
@@ -54,13 +62,14 @@ class DecisionTransformer(tf.keras.Model):
         """
         B, L = rtgs.shape[0], rtgs.shape[1]
 
-        rtgs_embed = self.rtgs_embedding(rtgs)  #  -> (B, L, embed_dim)
-        states = tf.reshape(states, shape=(-1,)+self.state_shape)  # (B*L, 84, 84, 4)
-        states_embed = tf.reshape(
-            self.state_embedding(states), shape=(B, L, -1))  # (B, L, embed_dim)
+        rtgs_embed = tf.math.tanh(self.rtgs_embedding(rtgs))  #  (B, L, embed_dim)
+
+        states_embed = tf.math.tanh(self.state_embedding(states))  # (B, L, embed_dim)
+
         action_embed = tf.math.tanh(
             self.action_embedding(tf.squeeze(actions, axis=-1))
             )  # (B, L, 1) -> (B, L) -> (B, L, embed_dim)
+
         pos_embed = self.pos_embedding(timesteps, L)  # (B, 3L, embed_dim)
 
         tokens = tf.stack(
@@ -109,21 +118,22 @@ class DecisionTransformer(tf.keras.Model):
 
 class StateEmbedding(tf.keras.layers.Layer):
 
-    def __init__(self, embed_dim):
+    def __init__(self, embed_dim, input_shape):
 
         super(StateEmbedding, self).__init__()
 
         self.conv1 = kl.Conv2D(32, 8, strides=4, activation="relu",
-                               kernel_initializer="he_normal")
+                               kernel_initializer="he_normal", input_shape=input_shape)
         self.conv2 = kl.Conv2D(64, 4, strides=2, activation="relu",
-                               kernel_initializer="he_normal")
+                               kernel_initializer="he_normal", input_shape=input_shape)
         self.conv3 = kl.Conv2D(64, 3, strides=1, activation="relu",
-                               kernel_initializer="he_normal")
+                               kernel_initializer="he_normal", input_shape=input_shape)
 
         self.flatten1 = kl.Flatten()
 
-        self.dense = kl.Dense(embed_dim, activation="tanh",
-                              kernel_initializer="he_normal")
+        self.dense = kl.Dense(
+            embed_dim, activation=None,
+            kernel_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.02))
 
     def call(self, states):
 
@@ -131,7 +141,7 @@ class StateEmbedding(tf.keras.layers.Layer):
         x = self.conv1(x)
         x = self.conv2(x)
         x = self.conv3(x)
-        x = self.flatten1(x)
+        x = tf.reshape(x, shape=(x.shape[0], x.shape[1], -1))  # (B, L, 128)
         x = self.dense(x)
 
         return x
@@ -187,24 +197,27 @@ class DecoderBlock(tf.keras.layers.Layer):
         self.n_heads, self.embed_dim = n_heads, embed_dim
 
         self.layer_norm_1 = kl.LayerNormalization()
-        self.masked_attention = MaskedMultiHeadAttention(n_heads, embed_dim, context_length)
+        self.mmha = MaskedMultiHeadAttention(n_heads, embed_dim, context_length)
 
         self.layer_norm_2 = kl.LayerNormalization()
-        self.dense_1 = kl.Dense(self.embed_dim * 4, activation="gelu")
-        self.dense_2 = kl.Dense(self.embed_dim, activation=None)
-        self.drop_1 = kl.Dropout(0.1)
+
+        self.ffn = tf.keras.Sequential([
+            kl.Dense(
+                self.embed_dim * 4, activation="gelu",
+                kernel_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.02)),
+            kl.Dense(self.embed_dim, activation=None,
+                kernel_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.02)),
+        ])
+
+        self.drop = kl.Dropout(0.1)
 
     def call(self, x, training=False):
 
-        x = self.layer_norm_1(x)
-        x = x + self.masked_attention(x, training=training)
+        x = x + self.mmha(self.layer_norm_1(x), training=training)
 
-        x_ = self.layer_norm_2(x)
-        x_ = self.dense_1(x_)
-        x_ = self.dense_2(x_)
-        x_ = self.drop_1(x_, training=training)
+        x = x + self.ffn(self.layer_norm_2(x))
 
-        x = x + x_
+        x = self.drop(x, training=training)
 
         return x
 
@@ -217,9 +230,12 @@ class MaskedMultiHeadAttention(tf.keras.layers.Layer):
         self.H, self.embed_dim = n_heads, embed_dim
         self.T = context_length * 3
 
-        self.key = kl.Dense(embed_dim, activation=None)
-        self.query = kl.Dense(embed_dim, activation=None)
-        self.value = kl.Dense(embed_dim, activation=None)
+        self.key = kl.Dense(embed_dim, activation=None,
+            kernel_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.02))
+        self.query = kl.Dense(embed_dim, activation=None,
+            kernel_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.02))
+        self.value = kl.Dense(embed_dim, activation=None,
+            kernel_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.02))
 
         self.drop_1 = kl.Dropout(0.1)
         self.drop_2 = kl.Dropout(0.1)
