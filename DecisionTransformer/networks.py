@@ -267,7 +267,7 @@ class MaskedMultiHeadAttention(tf.keras.layers.Layer):
         mask = self.mask[:, :, :T, :T]
         masked_attention = tf.where(mask, attention, tf.constant(-np.inf))
         masked_attention = tf.math.softmax(masked_attention, axis=-1)
-        masked_attention = self.drop_1(masked_attention)
+        masked_attention = self.drop_1(masked_attention, training=training)
 
         # (B, H, T, T) @ (B, H, T, C//H) -> (B, H, T, C//H) ->
         # (B, H, T, C//H) -> (B, T, H, C//H) -> (B, T, C)
