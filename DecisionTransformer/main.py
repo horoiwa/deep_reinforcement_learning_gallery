@@ -50,13 +50,13 @@ class DecisionTransformerAgent:
         assert timesteps.shape[1] == 1
         assert timesteps.shape[2] == 1
 
-        targets = tf.one_hot(
+        labels = tf.one_hot(
             tf.squeeze(actions, axis=-1),
             depth=self.action_space, on_value=1., off_value=0.)
 
         with tf.GradientTape() as tape:
             logits = self.model(rtgs, states, actions, timesteps, training=True)  # (B, context_length, 4)
-            loss = tf.nn.softmax_cross_entropy_with_logits(targets, logits, axis=-1)  # (B, context_length)
+            loss = tf.nn.softmax_cross_entropy_with_logits(labels, logits, axis=-1)  # (B, context_length)
             loss = tf.reduce_mean(loss)
 
         grads = tape.gradient(loss, self.model.trainable_variables)
@@ -132,7 +132,7 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
         shutil.rmtree(logdir)
     summary_writer = tf.summary.create_file_writer(str(logdir))
 
-    ray.init()
+    ray.init(local_mode=True)
 
     agent = DecisionTransformerAgent(
         env_id=env_id, context_length=context_length,
@@ -155,7 +155,8 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
 
     jobs_wip = [loader.sample_sequences.remote() for loader in loaders]
 
-    for _ in range(10):
+    for _ in range(5):
+        print(_, "====")
         job_done, jobs_wip = ray.wait(jobs_wip, num_returns=1)
         pid, sequences = ray.get(job_done)[0]
         buffer.add_sequences(sequences)
@@ -171,7 +172,13 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
             buffer.add_sequences(sequences)
 
         rtgs, states, actions, timesteps = buffer.sample_minibatch()
-        loss, gnorm = agent.update_network(rtgs, states, actions, timesteps)
+
+        for i in range(10000):
+            loss, gnorm = agent.update_network(rtgs, states, actions, timesteps)
+            print(i, loss.numpy())
+            if i % 2500 == 0 :
+                agent.save()
+        import pdb; pdb.set_trace()
 
         with summary_writer.as_default():
             tf.summary.scalar("loss", loss, step=n)
@@ -180,8 +187,8 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
         if n % 1000 == 0:
 
             score, steps = ray.get(test_wip)
-            agent.save()
-            ray.get(tester.load.remote())
+            agent.save("checkpoints/")
+            ray.get(tester.load.remote("checkpoints/"))
             test_wip = tester.evaluate.remote(filename=n)
 
             laptime = time.time() - s
@@ -197,8 +204,54 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
         n += 1
 
 
+def debug(env_id, dataset_dir, num_data_files,  num_parallel_calls,
+          samples_per_file=5_000, max_timestep=1800,
+          context_length=30, batch_size=32, resume_from=None):
+
+    ray.init(local_mode=True)
+
+    monitor_dir = Path(__file__).parent / "mp4"
+    agent = DecisionTransformerAgent(
+        env_id=env_id, context_length=context_length,
+        max_timestep=max_timestep, monitor_dir=monitor_dir)
+    agent.load("checkpoints/")
+
+    loaders = create_dataloaders(
+        dataset_dir=dataset_dir, max_timestep=max_timestep, num_data_files=num_data_files,
+        samples_per_file=samples_per_file, context_length=context_length,
+        num_parallel_calls=num_parallel_calls, batch_size=batch_size)
+
+    buffer = SequenceBuffer(maxlen=100_000, batch_size=batch_size)
+
+    jobs_wip = [loader.sample_sequences.remote() for loader in loaders]
+
+    for _ in range(1):
+        job_done, jobs_wip = ray.wait(jobs_wip, num_returns=1)
+        pid, sequences = ray.get(job_done)[0]
+        buffer.add_sequences(sequences)
+        jobs_wip.append(loaders[pid].sample_sequences.remote())
+
+    while True:
+        rtgs, states, actions, timesteps = buffer.sample_minibatch()
+        #if rtgs[0][0] != rtgs[0][-1]:
+        #    break
+        break
+
+    #from PIL import Image
+    #states = states[0]
+    #for t in range(states.shape[0]):
+    #    frame = states[t, :, :, -1]
+    #    img = Image.fromarray(frame.numpy()).convert("L")
+    #    img.save(f"tmp/ck1/{t}.png")
+    #import pdb; pdb.set_trace()
+
+    loss, gnorm = agent.update_network(rtgs, states, actions, timesteps)
+    import pdb; pdb.set_trace()
+
+
 if __name__ == "__main__":
     env_id = "Breakout"
     dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
-    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=36, num_parallel_calls=12, resume_from=150)
-    #train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=1, num_parallel_calls=1)
+    #train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=36, num_parallel_calls=12, resume_from=150)
+    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=1, num_parallel_calls=1, resume_from=None)
+    #debug(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=1, num_parallel_calls=1)

@@ -33,6 +33,7 @@ class DecisionTransformer(tf.keras.Model):
 
         self.head = kl.Dense(self.action_space, use_bias=False, activation=None)
 
+    @tf.function
     def call(self, rtgs, states, actions, timesteps, training=False):
         """
         Args:
@@ -195,13 +196,13 @@ class DecoderBlock(tf.keras.layers.Layer):
 
     def call(self, x, training=False):
 
-        x = self.layer_norm_1(x, training=training)
-        x = x + self.masked_attention(x)
+        x = self.layer_norm_1(x)
+        x = x + self.masked_attention(x, training=training)
 
-        x_ = self.layer_norm_2(x, training=training)
+        x_ = self.layer_norm_2(x)
         x_ = self.dense_1(x_)
         x_ = self.dense_2(x_)
-        x_ = self.drop_1(x_)
+        x_ = self.drop_1(x_, training=training)
 
         x = x + x_
 
@@ -228,7 +229,7 @@ class MaskedMultiHeadAttention(tf.keras.layers.Layer):
             np.tril(np.ones(shape=(1, self.H, self.T, self.T))),
             dtype=tf.bool)
 
-    def call(self, x):
+    def call(self, x, training=False):
 
         B, T, C = x.shape  # batch, block_length, embed_dim
 
@@ -256,6 +257,6 @@ class MaskedMultiHeadAttention(tf.keras.layers.Layer):
         # (B, H, T, C//H) -> (B, T, H, C//H) -> (B, T, C)
         y = tf.matmul(masked_attention, value)
         y = tf.reshape(tf.transpose(y, [0, 2, 1, 3]), shape=[B, T, C])
-        y = self.drop_2(y)
+        y = self.drop_2(y, training=training)
 
         return y

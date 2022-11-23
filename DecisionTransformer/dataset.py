@@ -58,8 +58,7 @@ class SequenceLoader:
         Note:
             Decision transofomerはエピソード横断しないので余剰分はトリミング
         """
-        states, actions, rewards, _, _, _, dones, _ = transitions
-
+        states, actions, rewards, _, _, _, dones, indices = transitions
         terminal_indices = np.argwhere(dones == 1).flatten().tolist()
 
         for start_idx, terminal_idx in zip(terminal_indices[:-1], terminal_indices[1:]):
