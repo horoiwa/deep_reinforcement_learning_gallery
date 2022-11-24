@@ -33,7 +33,7 @@ class DecisionTransformerAgent:
             context_length=context_length)
 
         self.optimizer = tf.keras.optimizers.Adam(
-            learning_rate=6e-4, beta_1=-0.9, beta_2=0.95)
+            learning_rate=6e-4, beta_1=0.9, beta_2=0.95)
 
         self.monitor_dir = Path(monitor_dir)
 
@@ -136,7 +136,8 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
     if resume_from is None and savedir.exists():
         shutil.rmtree(savedir)
 
-    ray.init(local_mode=True)
+    ray.init(local_mode=False)
+    #ray.init(local_mode=True)
 
     agent = DecisionTransformerAgent(
         env_id=env_id, context_length=context_length,
@@ -160,7 +161,6 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
     jobs_wip = [loader.sample_sequences.remote() for loader in loaders]
 
     for _ in range(5):
-        print(_, "====")
         job_done, jobs_wip = ray.wait(jobs_wip, num_returns=1)
         pid, sequences = ray.get(job_done)[0]
         buffer.add_sequences(sequences)
@@ -243,14 +243,15 @@ def debug(env_id, dataset_dir, num_data_files,  num_parallel_calls,
     #    img.save(f"tmp/ck1/{t}.png")
     #import pdb; pdb.set_trace()
 
-    loss, gnorm = agent.update_network(rtgs, states, actions, timesteps)
-    loss, gnorm = agent.update_network(rtgs, states, actions, timesteps)
+    for i in range(10000):
+        loss, gnorm = agent.update_network(rtgs, states, actions, timesteps)
+        print(loss.numpy())
     import pdb; pdb.set_trace()
 
 
 if __name__ == "__main__":
     env_id = "Breakout"
     dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
-    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=36, num_parallel_calls=12, resume_from=150)
+    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=36, num_parallel_calls=12, resume_from=None)
     #train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=1, num_parallel_calls=1, resume_from=None)
     #debug(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=1, num_parallel_calls=1)

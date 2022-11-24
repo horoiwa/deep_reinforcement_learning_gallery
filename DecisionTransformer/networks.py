@@ -214,9 +214,7 @@ class DecoderBlock(tf.keras.layers.Layer):
     def call(self, x, training=False):
 
         x = x + self.mmha(self.layer_norm_1(x), training=training)
-
         x = x + self.ffn(self.layer_norm_2(x))
-
         x = self.drop(x, training=training)
 
         return x
@@ -237,8 +235,8 @@ class MaskedMultiHeadAttention(tf.keras.layers.Layer):
         self.value = kl.Dense(embed_dim, activation=None,
             kernel_initializer=tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.02))
 
-        self.drop_1 = kl.Dropout(0.1)
-        self.drop_2 = kl.Dropout(0.1)
+        self.drop1 = kl.Dropout(0.1)
+        self.drop2 = kl.Dropout(0.1)
 
         #: 下三角行列
         self.mask = tf.constant(
@@ -264,15 +262,15 @@ class MaskedMultiHeadAttention(tf.keras.layers.Layer):
         attention = tf.matmul(key, query, transpose_b=True)
         attention /= tf.math.sqrt(tf.constant(C//self.H, tf.float32))
 
-        mask = self.mask[:, :, :T, :T]
-        masked_attention = tf.where(mask, attention, tf.constant(-np.inf))
-        masked_attention = tf.math.softmax(masked_attention, axis=-1)
-        masked_attention = self.drop_1(masked_attention, training=training)
+        mask = self.mask[:, :, :T, :T]  # (B, H, T, T)
+        masked_attention_weights = tf.where(mask, attention, tf.constant(-np.inf))
+        masked_attention_weights = tf.math.softmax(masked_attention_weights, axis=-1)
+        masked_attention_weights = self.drop1(masked_attention_weights, training=training)
 
-        # (B, H, T, T) @ (B, H, T, C//H) -> (B, H, T, C//H) ->
-        # (B, H, T, C//H) -> (B, T, H, C//H) -> (B, T, C)
-        y = tf.matmul(masked_attention, value)
-        y = tf.reshape(tf.transpose(y, [0, 2, 1, 3]), shape=[B, T, C])
-        y = self.drop_2(y, training=training)
+        # (B, H, T, T) @ (B, H, T, C//H) -> (B, H, T, C//H)
+        # -> (B, T, H, C//H) -> (B, T, C)
+        out = tf.matmul(masked_attention_weights, value)
+        out = tf.reshape(tf.transpose(out, [0, 2, 1, 3]), shape=[B, T, C])
+        out = self.drop2(out, training=training)
 
-        return y
+        return out
