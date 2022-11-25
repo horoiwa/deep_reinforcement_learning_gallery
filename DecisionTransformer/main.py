@@ -11,6 +11,7 @@ from gym.wrappers import RecordVideo
 import ray
 import numpy as np
 import tensorflow as tf
+import tensorflow_addons as tfa
 from dopamine.discrete_domains.atari_lib import AtariPreprocessing
 
 from dataset import create_dataloaders, SequenceBuffer
@@ -32,7 +33,7 @@ class DecisionTransformerAgent:
             max_timestep=max_timestep,
             context_length=context_length)
 
-        self.optimizer = tf.keras.optimizers.Adam(
+        self.optimizer = tfa.optimizers.RectifiedAdam(
             learning_rate=6e-4, beta_1=0.9, beta_2=0.95)
 
         self.monitor_dir = Path(monitor_dir)
@@ -59,12 +60,42 @@ class DecisionTransformerAgent:
             loss = tf.nn.softmax_cross_entropy_with_logits(labels, logits, axis=-1)  # (B, context_length)
             loss = tf.reduce_mean(loss)
 
+        """ == DEBUG =="""
+        #N = 0
+        #labels_gt = labels[N]
+        #logits_N = logits[N]
+        #probs = np.round(tf.nn.softmax(logits_N, -1), 3)
+
+        #_labels_pred = tf.argmax(tf.nn.softmax(logits_N, axis=-1), -1)
+        #labels_pred = tf.one_hot(
+        #    _labels_pred,
+        #    depth=self.action_space, on_value=1., off_value=0.)
+        #ratio = tf.reduce_mean(tf.reduce_sum(labels_gt * labels_pred, -1))
+
+        #sampled = []
+        #aprobs = []
+        #for i in range(states.shape[1]):
+        #    _rtgs = rtgs[N, :i+1, :].numpy().flatten().tolist()
+        #    _states = states[N, :i+1, :].numpy()
+        #    _states = [_states[t] for t in range(0, i+1)]
+        #    _actions = actions[N, :i, :].numpy().flatten().tolist()
+        #    _timesteps = timesteps[N].numpy()[0][0]
+
+        #    sampled_action, aprob = self.model.sample_action(
+        #        _rtgs, _states, _actions, _timesteps)
+        #    sampled.append(sampled_action)
+        #    aprobs.append(aprob)
+        #aprobs = np.round(np.array(aprobs), 3)
+        #import pdb; pdb.set_trace()
+        """== DEBUG =="""
+
+
         grads = tape.gradient(loss, self.model.trainable_variables)
         grads, gnorm = tf.clip_by_global_norm(grads, 40.0)
         self.optimizer.apply_gradients(
             zip(grads, self.model.trainable_variables))
 
-        return loss, gnorm
+        return loss, gnorm, tf.reduce_max(rtgs)
 
     def get_env(self, filename: Optional[str] = None):
         env = gym.make(f"{self.env_id}NoFrameskip-v4")
@@ -76,7 +107,7 @@ class DecisionTransformerAgent:
         return env
 
     def evaluate(self, target_rtg: float=90.0, filename=None):
-        s = time.time()
+
         env = self.get_env(filename)
 
         frames = collections.deque(maxlen=4)
@@ -89,29 +120,27 @@ class DecisionTransformerAgent:
         rtgs = collections.deque([], maxlen=self.context_length)
         states = collections.deque([], maxlen=self.context_length)
         actions = collections.deque([], maxlen=self.context_length-1)
+        timesteps = collections.deque([], maxlen=self.context_length)
 
-        done, rewards, score, steps = False, 0, 0, 0
-        while not done:
-
-            rtgs.append(max(target_rtg - rewards, 0))
+        done, sum_rewards, score = False, 0, 0
+        for step in range(1200):
+            timesteps.append(step)
+            rtgs.append(max(target_rtg - sum_rewards, 0))
             states.append(np.stack(frames, axis=2).astype(np.float32))
 
-            action = self.model.sample_action(
-                rtgs=rtgs, states=states, actions=list(actions), timestep=steps)
+            sampled_action = self.model.sample_action(
+                rtgs=rtgs, states=states,
+                actions=list(actions), timestep=timesteps[0])
 
-            next_frame, reward, done, _ = env.step(action)
+            next_frame, reward, done, _ = env.step(sampled_action)
             frames.append(next_frame[:, :, 0])
 
-            actions.append(action)
+            actions.append(sampled_action)
 
             score += reward
-            rewards += np.clip(reward, 0., 1.)
-            steps += 1
+            sum_rewards += np.clip(reward, 0., 1.)
 
-            if steps > 1200:
-                break
-        print(time.time() - s)
-        return score, steps
+        return score, step
 
 
 @ray.remote(num_cpus=1, num_gpus=0)
@@ -121,7 +150,7 @@ class Tester(DecisionTransformerAgent):
 
 def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
           samples_per_file=10_000, max_timestep=1800,
-          context_length=30, batch_size=32, resume_from=None):
+          context_length=30, batch_size=48, resume_from=None):
 
     monitor_dir = Path(__file__).parent / "mp4"
     if resume_from is None and monitor_dir.exists():
@@ -137,7 +166,6 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
         shutil.rmtree(savedir)
 
     ray.init(local_mode=False)
-    #ray.init(local_mode=True)
 
     agent = DecisionTransformerAgent(
         env_id=env_id, context_length=context_length,
@@ -149,7 +177,7 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
     tester = Tester.remote(
         env_id=env_id, context_length=context_length,
         max_timestep=max_timestep, monitor_dir=monitor_dir)
-    test_wip = tester.evaluate.remote(filename=0)
+    test_wip = tester.evaluate.remote(filename="test_0")
 
     loaders = create_dataloaders(
         dataset_dir=dataset_dir, max_timestep=max_timestep, num_data_files=num_data_files,
@@ -176,18 +204,19 @@ def train(env_id, dataset_dir, num_data_files,  num_parallel_calls,
             buffer.add_sequences(sequences)
 
         rtgs, states, actions, timesteps = buffer.sample_minibatch()
-        loss, gnorm = agent.update_network(rtgs, states, actions, timesteps)
+        loss, gnorm, rmax = agent.update_network(rtgs, states, actions, timesteps)
 
         with summary_writer.as_default():
             tf.summary.scalar("loss", loss, step=n)
             tf.summary.scalar("gnorm", gnorm, step=n)
+            tf.summary.scalar("rtgs_max", rmax, step=n)
 
         if n % 1000 == 0:
 
             score, steps = ray.get(test_wip)
             agent.save(str(savedir))
             ray.get(tester.load.remote("checkpoints/"))
-            test_wip = tester.evaluate.remote(filename=n)
+            test_wip = tester.evaluate.remote(filename=f"test_{n}")
 
             laptime = time.time() - s
             mem = psutil.virtual_memory().used / (1024 ** 3)
@@ -212,7 +241,7 @@ def debug(env_id, dataset_dir, num_data_files,  num_parallel_calls,
     agent = DecisionTransformerAgent(
         env_id=env_id, context_length=context_length,
         max_timestep=max_timestep, monitor_dir=monitor_dir)
-    #agent.load("checkpoints/")
+    agent.load("checkpoints_bkup/")
 
     loaders = create_dataloaders(
         dataset_dir=dataset_dir, max_timestep=max_timestep, num_data_files=num_data_files,
@@ -252,6 +281,6 @@ def debug(env_id, dataset_dir, num_data_files,  num_parallel_calls,
 if __name__ == "__main__":
     env_id = "Breakout"
     dataset_dir = "/mnt/disks/data/Breakout/1/replay_logs"
-    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=36, num_parallel_calls=12, resume_from=None)
-    #train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=1, num_parallel_calls=1, resume_from=None)
+    #train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=48, num_parallel_calls=12, resume_from=None)
+    train(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=1, num_parallel_calls=1, resume_from=None)
     #debug(env_id="Breakout", dataset_dir=dataset_dir, num_data_files=1, num_parallel_calls=1)

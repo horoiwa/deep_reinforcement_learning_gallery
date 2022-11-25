@@ -90,7 +90,7 @@ class DecisionTransformer(tf.keras.Model):
 
         return logits
 
-    def sample_action(self, rtgs: list, states: list, actions: list, timestep: int):
+    def sample_action(self, rtgs: list, states: list, actions: list, timestep: int) -> int:
 
         assert len(rtgs) == len(states) == len(actions) + 1
 
@@ -100,20 +100,21 @@ class DecisionTransformer(tf.keras.Model):
             tf.convert_to_tensor(rtgs, dtype=tf.float32), shape=[1, L, 1])
         states = tf.expand_dims(tf.stack(states, axis=0), 0)
 
-        #: Add Dummy action for implementation reasonctions
+        #: Add dummy action: dummy action is masked at MaskedMHA, thus do nothing
         actions = actions + [0]
         actions = tf.reshape(
             tf.convert_to_tensor(actions, dtype=tf.uint8), [1, L, 1])
         timestep = tf.reshape(
             tf.convert_to_tensor([timestep], dtype=tf.int32), [1, 1, 1])
 
-        logits = self(rtgs, states, actions, timestep)
+        logits_all = self(rtgs, states, actions, timestep)  # (1, L, A)
+        logits = logits_all[0, -1, :]
 
-        action_probs = tf.nn.softmax(logits + 1e-4)
-        dist = tfp.distributions.Categorical(probs=action_probs)
-        sampled_action = dist.sample()
+        probs = tf.nn.softmax(logits)
+        dist = tfp.distributions.Categorical(probs=probs)
+        sampled_action = dist.sample().numpy()
 
-        return sampled_action.numpy()[0][0]
+        return sampled_action, probs
 
 
 class StateEmbedding(tf.keras.layers.Layer):
