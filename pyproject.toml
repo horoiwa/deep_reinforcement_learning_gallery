@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "deep_reinforcement_learning_gallery"
+version = "0.1.0"
+description = ""
+authors = ["horoiwa"]
+license = "MIT"
+
+[tool.poetry.dependencies]
+python = ">=3.7, <3.11"
+tensorflow = "^2.10.1"
+tensorflow-probability = "^0.18.0"
+ray = "^2.1.0"
+lz4 = "^4.0.2"
+Pillow = "^9.3.0"
+gym = {version = "0.25.2", extras = ["box2d", "atari", "accept-rom-license"]}
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
