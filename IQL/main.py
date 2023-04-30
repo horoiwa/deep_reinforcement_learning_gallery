@@ -50,9 +50,9 @@ class IQLAgent:
         self.env_id = env_id
         self.action_space = gym.make(self.env_id).action_space.shape[0]
 
-        self.tau = 0.8
+        self.tau = 0.7
 
-        self.temperature = 0.1
+        self.temperature = 3.0
         self.soft_update_ratio = 0.005
         self.gamma = 0.99
 
@@ -126,7 +126,7 @@ class IQLAgent:
         Q = tf.minimum(q1, q2)
         V = self.valuenet(states)
 
-        exp_Adv = tf.minimum(tf.exp(Q - V), 100.0)
+        exp_Adv = tf.minimum(tf.exp((Q - V) * self.temperature), 100.0)
 
         with tf.GradientTape() as tape:
             dists = self.policy(states)
@@ -141,7 +141,8 @@ class IQLAgent:
 
     def update_q(self, states, actions, rewards, dones, next_states):
 
-        rewards, dones = tf.reshape(rewards, (-1, 1)), tf.reshape(dones, (-1, 1))
+        rewards = tf.clip_by_value(tf.reshape(rewards, (-1, 1)), -1.0, 1.0)
+        dones = tf.reshape(dones, (-1, 1))
 
         target_q = rewards + self.gamma * (1.0 - dones) * self.valuenet(next_states)
 
@@ -214,7 +215,7 @@ def main(env_id="BipedalWalker-v3"):
 
     agent = IQLAgent(env_id)
 
-    tf_dataset = load_dataset(dataset_path="bipedalwalker.tfrecord", batch_size=32)
+    tf_dataset = load_dataset(dataset_path="bipedalwalker.tfrecord", batch_size=256)
 
     for n, minibatch in enumerate(tf_dataset):
         states, actions, rewards, next_states, dones = minibatch
@@ -229,12 +230,14 @@ def main(env_id="BipedalWalker-v3"):
             tf.summary.scalar("loss_p", ploss, step=n)
             tf.summary.scalar("loss_q", qloss, step=n)
 
-        if n % 5000 == 0:
+        if n % 2000 == 0:
             score = agent.test_play(tag=f"{n}", monitor_dir=MONITOR_DIR)
             with summary_writer.as_default():
                 tf.summary.scalar("test", score, step=n)
 
-    agent.save("checkpoints/")
+        if n % 10000 == 0:
+            agent.save("checkpoints/")
+
 
 
 if __name__ == '__main__':

@@ -28,6 +28,7 @@ class DualQNetwork(tf.keras.Model):
         self.qnet1 = QNetwork()
         self.qnet2 = QNetwork()
 
+    @tf.function
     def call(self, states, actions):
         q1 = self.qnet1(states, actions)
         q2 = self.qnet2(states, actions)
@@ -43,6 +44,7 @@ class ValueNetwork(tf.keras.Model):
         self.dense2 = kl.Dense(256, activation="relu")
         self.v = kl.Dense(1)
 
+    @tf.function
     def call(self, states):
         x = self.dense1(states)
         x = self.dense2(x)
@@ -60,6 +62,7 @@ class GaussianPolicy(tf.keras.Model):
         self.mu = kl.Dense(self.action_space, activation="tanh")
         self.log_sigma= kl.Dense(self.action_space)
 
+    @tf.function
     def call(self, states):
         x = self.dense1(states)
         x = self.dense2(x)
