@@ -120,10 +120,24 @@ class IQLAgent:
         return loss
 
     def update_policy(self, states, actions):
-        """ Advantage weighted policy
+        """ Advantage weighted regression
         """
-        ploss = 0
-        return ploss
+        q1, q2 = self.target_qnet(states, actions)
+        Q = tf.minimum(q1, q2)
+        V = self.valuenet(states)
+
+        exp_Adv = tf.minimum(tf.exp(Q - V), 100.0)
+
+        with tf.GradientTape() as tape:
+            dists = self.policy(states)
+            log_probs = tf.reshape(dists.log_prob(actions), (-1, 1))
+            loss = tf.reduce_mean(-1 * (exp_Adv * log_probs))
+
+        variables = self.policy.trainable_variables
+        grads = tape.gradient(loss, variables)
+        self.p_optimizer.apply_gradients(zip(grads, variables))
+
+        return loss
 
     def update_q(self, states, actions, rewards, dones, next_states):
 
@@ -152,7 +166,6 @@ class IQLAgent:
         ])
 
     def test_play(self, monitor_dir, tag):
-        total_rewards = []
 
         env = wrappers.RecordVideo(
             gym.make(self.env_id),
@@ -165,23 +178,23 @@ class IQLAgent:
 
         done = False
 
-        total_reward = 0
+        episode_reward = 0
 
         while not done:
 
-            action = self.policy.sample_action(np.atleast_2d(state))
+            action = self.policy.sample_actions(np.atleast_2d(state))
 
             action = action.numpy()[0]
 
             next_state, reward, done, _ = env.step(action)
 
-            total_reward += reward
+            episode_reward += reward
 
             state = next_state
 
-        total_rewards.append(total_reward)
+        print(f"{tag}", episode_reward)
 
-        print(f"{name}", total_reward)
+        return episode_reward
 
 
 def main(env_id="BipedalWalker-v3"):
@@ -216,8 +229,10 @@ def main(env_id="BipedalWalker-v3"):
             tf.summary.scalar("loss_p", ploss, step=n)
             tf.summary.scalar("loss_q", qloss, step=n)
 
-        if n % 1000 == 0:
-            agent.test_play(tag=f"{n}", monitor_dir=MONITOR_DIR)
+        if n % 5000 == 0:
+            score = agent.test_play(tag=f"{n}", monitor_dir=MONITOR_DIR)
+            with summary_writer.as_default():
+                tf.summary.scalar("test", score, step=n)
 
     agent.save("checkpoints/")
 

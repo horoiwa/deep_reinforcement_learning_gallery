@@ -1,5 +1,7 @@
 import tensorflow as  tf
 import tensorflow.keras.layers as kl
+import tensorflow_probability as tfp
+from tensorflow_probability import distributions as tfd
 
 
 class QNetwork(tf.keras.Model):
@@ -62,5 +64,16 @@ class GaussianPolicy(tf.keras.Model):
         x = self.dense1(states)
         x = self.dense2(x)
         mu = self.mu(x)
-        sigma = tf.math.exp(self.log_sigma(x))
-        return mu, sigma
+        sigma = tf.math.exp(tf.clip_by_value(self.log_sigma(x), -2.0, 10.0))
+
+        dist = tfd.Independent(
+            tfd.Normal(loc=mu, scale=sigma),
+            reinterpreted_batch_ndims=1,
+        )
+        return dist
+
+    def sample_actions(self, states):
+
+        dist = self.call(states)
+        action = dist.sample()
+        return action
