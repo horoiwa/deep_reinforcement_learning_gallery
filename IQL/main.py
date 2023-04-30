@@ -1,9 +1,12 @@
 from pathlib import Path
+import shutil
 
+import numpy as np
 import tensorflow as tf
 import gym
+from gym import wrappers
 
-from network import DualQNetwork, GaussianPolicy, ValueNetwork
+from networks import DualQNetwork, GaussianPolicy, ValueNetwork
 
 
 def load_dataset(dataset_path: str, batch_size: int):
@@ -47,15 +50,22 @@ class IQLAgent:
         self.env_id = env_id
         self.action_space = gym.make(self.env_id).action_space.shape[0]
 
-        self.expectile = 0.8
+        self.tau = 0.8
+
         self.temperature = 0.1
-        self.tau = 0.005
+        self.soft_update_ratio = 0.005
         self.gamma = 0.99
 
         self.policy = GaussianPolicy(action_space=self.action_space)
         self.valuenet = ValueNetwork()
         self.qnet = DualQNetwork()
         self.target_qnet = DualQNetwork()
+
+        self.p_optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
+        self.v_optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
+        self.q_optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
+
+        self.setup()
 
     def setup(self):
         """ Initialize network weights """
@@ -92,16 +102,54 @@ class IQLAgent:
         self.valuenet.load_weights(str(load_dir / "valuenet"))
 
     def update_value(self, states, actions):
-        pass
+        """ Expectile Regression
+        """
+        q1, q2 = self.target_qnet(states, actions)
+        target_values = tf.minimum(q1, q2)
 
-    def update_policy(self):
-        pass
+        with tf.GradientTape() as tape:
+            values = self.valuenet(states)
+            error = (target_values - values)
+            weights = tf.where(error > 0, self.tau, 1. - self.tau)
+            loss = tf.reduce_mean(weights * tf.square(error))
 
-    def update_q(self):
-        pass
+        variables = self.valuenet.trainable_variables
+        grads = tape.gradient(loss, variables)
+        self.v_optimizer.apply_gradients(zip(grads, variables))
+
+        return loss
+
+    def update_policy(self, states, actions):
+        """ Advantage weighted policy
+        """
+        ploss = 0
+        return ploss
+
+    def update_q(self, states, actions, rewards, dones, next_states):
+
+        rewards, dones = tf.reshape(rewards, (-1, 1)), tf.reshape(dones, (-1, 1))
+
+        target_q = rewards + self.gamma * (1.0 - dones) * self.valuenet(next_states)
+
+        with tf.GradientTape() as tape:
+            q1, q2 = self.qnet(states, actions)
+            loss = tf.reduce_mean(
+                tf.square(target_q - q1) + tf.square(target_q - q2)
+            )
+
+        variables = self.qnet.trainable_variables
+        grads = tape.gradient(loss, variables)
+        self.q_optimizer.apply_gradients(zip(grads, variables))
+
+        return loss
 
     def sync_target_weight(self):
-        pass
+
+        tau = self.soft_update_ratio
+        self.target_qnet.set_weights([
+            tau * var + (1 - tau) * t_var for var, t_var
+            in zip(self.qnet.get_weights(), self.target_qnet.get_weights())
+        ])
 
     def test_play(self, monitor_dir, tag):
         total_rewards = []
@@ -136,7 +184,7 @@ class IQLAgent:
         print(f"{name}", total_reward)
 
 
-def main():
+def main(env_id="BipedalWalker-v3"):
 
     import os
     os.environ["SDL_VIDEODRIVER"] = "dummy"   # Needed only for ubuntu
@@ -149,19 +197,24 @@ def main():
     if MONITOR_DIR.exists():
         shutil.rmtree(MONITOR_DIR)
 
-    summary_writer = tf.summary.create_file_writer(str(logdir))
+    summary_writer = tf.summary.create_file_writer(str(LOGDIR))
 
-    agent = IQLAgent()
+    agent = IQLAgent(env_id)
 
     tf_dataset = load_dataset(dataset_path="bipedalwalker.tfrecord", batch_size=32)
 
     for n, minibatch in enumerate(tf_dataset):
         states, actions, rewards, next_states, dones = minibatch
 
-        agent.update_value(states, actions)
-        agent.update_policy(states, actions)
-        agent.update_q(states, actions, rewards, dones)
+        vloss = agent.update_value(states, actions)
+        ploss = agent.update_policy(states, actions)
+        qloss = agent.update_q(states, actions, rewards, dones, next_states)
         agent.sync_target_weight()
+
+        with summary_writer.as_default():
+            tf.summary.scalar("loss_v", vloss, step=n)
+            tf.summary.scalar("loss_p", ploss, step=n)
+            tf.summary.scalar("loss_q", qloss, step=n)
 
         if n % 1000 == 0:
             agent.test_play(tag=f"{n}", monitor_dir=MONITOR_DIR)

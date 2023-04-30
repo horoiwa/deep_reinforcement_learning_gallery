@@ -1,17 +1,18 @@
 import tensorflow as  tf
+import tensorflow.keras.layers as kl
 
 
-class Qnetwork(tf.keras.Model):
+class QNetwork(tf.keras.Model):
 
     def __init__(self):
-        super(Qnetwork, self).__init__()
+        super(QNetwork, self).__init__()
 
         self.dense1 = kl.Dense(256, activation="relu")
         self.dense2 = kl.Dense(256, activation="relu")
         self.q = kl.Dense(1)
 
     def call(self, states, actions):
-        x = tf.concat([states, aactions], 1)
+        x = tf.concat([states, actions], 1)
         x = self.dense1(x)
         x = self.dense2(x)
         q = self.q(x)
@@ -21,11 +22,11 @@ class Qnetwork(tf.keras.Model):
 class DualQNetwork(tf.keras.Model):
 
     def __init__(self):
-        super(DualQnetwork, self).__init__()
-        self.qnet1 = Qnetwork()
-        self.qnet2 = Qnetwork()
+        super(DualQNetwork, self).__init__()
+        self.qnet1 = QNetwork()
+        self.qnet2 = QNetwork()
 
-    def call(self, states, aactions):
+    def call(self, states, actions):
         q1 = self.qnet1(states, actions)
         q2 = self.qnet2(states, actions)
         return q1, q2
@@ -35,7 +36,7 @@ class DualQNetwork(tf.keras.Model):
 class ValueNetwork(tf.keras.Model):
 
     def __init__(self):
-        super(DualQnetwork, self).__init__()
+        super(ValueNetwork, self).__init__()
         self.dense1 = kl.Dense(256, activation="relu")
         self.dense2 = kl.Dense(256, activation="relu")
         self.v = kl.Dense(1)
@@ -50,6 +51,7 @@ class ValueNetwork(tf.keras.Model):
 class GaussianPolicy(tf.keras.Model):
     def __init__(self, action_space: int):
         super(GaussianPolicy, self).__init__()
+        self.action_space = action_space
 
         self.dense1 = kl.Dense(256, activation="relu")
         self.dense2 = kl.Dense(256, activation="relu")
