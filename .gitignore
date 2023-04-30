@@ -6,6 +6,7 @@ tmp/
 temp/
 .vscode/
 dqn-replay-dataset/
+*.tfrecord
 
 ref/
 mp4/
