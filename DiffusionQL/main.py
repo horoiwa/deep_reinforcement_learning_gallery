@@ -1,6 +1,7 @@
 from pathlib import Path
 import shutil
 import os
+import random
 
 import numpy as np
 import tensorflow as tf
@@ -53,6 +54,7 @@ class DiffusionQLAgent:
 
         self.soft_update_ratio = 0.005
         self.gamma = 0.99
+        self.eta = 1.0
 
         self.qnet = DualQNetwork()
         self.target_qnet = DualQNetwork()
@@ -80,8 +82,6 @@ class DiffusionQLAgent:
         self.target_qnet(dummy_state, dummy_action)
         self.target_qnet.set_weights(self.qnet.get_weights())
 
-        self.valuenet(dummy_state)
-
     def save(self, save_dir="checkpoints/"):
         save_dir = Path(save_dir)
 
@@ -97,17 +97,20 @@ class DiffusionQLAgent:
         self.target_qnet.load_weights(str(load_dir / "qnet"))
         self.valuenet.load_weights(str(load_dir / "valuenet"))
 
-    def update_qnetwork(self, states, actions, rewards, dones, next_states):
+    def update_qnetwork(self, states, actions, rewards, next_states, dones):
 
         rewards = tf.clip_by_value(tf.reshape(rewards, (-1, 1)), -1.0, 1.0)
         dones = tf.reshape(dones, (-1, 1))
+        next_actions = self.policy(next_states)
 
-        target_q = rewards + self.gamma * (1.0 - dones) * self.valuenet(next_states)
+        target_q1, target_q2 = self.target_qnet(next_states, next_actions)
+        target_q = tf.minimum(target_q1, target_q2)
+        target = rewards + self.gamma * (1.0 - dones) * target_q
 
         with tf.GradientTape() as tape:
             q1, q2 = self.qnet(states, actions)
             loss = tf.reduce_mean(
-                tf.square(target_q - q1) + tf.square(target_q - q2)
+                tf.square(target - q1) + tf.square(target - q2)
             )
 
         variables = self.qnet.trainable_variables
@@ -117,18 +120,18 @@ class DiffusionQLAgent:
         return loss
 
     def update_policy(self, states, actions):
-        """ Advantage weighted regression
-        """
-        q1, q2 = self.target_qnet(states, actions)
-        Q = tf.minimum(q1, q2)
-        V = self.valuenet(states)
 
-        exp_Adv = tf.minimum(tf.exp((Q - V) * self.temperature), 100.0)
+        th = random.random()
 
         with tf.GradientTape() as tape:
-            dists = self.policy(states)
-            log_probs = tf.reshape(dists.log_prob(actions), (-1, 1))
-            loss = tf.reduce_mean(-1 * (exp_Adv * log_probs))
+
+            bc_loss = self.policy.compute_loss(states, actions)
+
+            q1, q2 = self.target_qnet(states, self.policy(states))
+            q1_loss = - tf.reduce_mean(q1, axis=1) / tf.reduce_mean(tf.math.abs(q2))
+            q2_loss = - tf.reduce_mean(q2, axis=1) / tf.reduce_mean(tf.math.abs(q1))
+            q_loss = tf.where(th > 0.5, q1_loss, q2_loss)
+            loss = bc_loss + self.eta * q_loss
 
         variables = self.policy.trainable_variables
         grads = tape.gradient(loss, variables)

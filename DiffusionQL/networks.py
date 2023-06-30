@@ -4,19 +4,31 @@ import tensorflow_probability as tfp
 from tensorflow_probability import distributions as tfd
 
 
+def softplus(x):
+    return tf.math.log(tf.math.exp(x) + 1)
+
+def mish(x):
+     return x * tf.math.tanh(softplus(x))
+
+
 class QNetwork(tf.keras.Model):
 
     def __init__(self):
         super(QNetwork, self).__init__()
 
-        self.dense1 = kl.Dense(256, activation="relu")
-        self.dense2 = kl.Dense(256, activation="relu")
+        self.dense1 = kl.Dense(256, activation=None)
+        self.dense2 = kl.Dense(256, activation=None)
+        self.dense3 = kl.Dense(256, activation=None)
         self.q = kl.Dense(1)
 
     def call(self, states, actions):
         x = tf.concat([states, actions], 1)
         x = self.dense1(x)
+        x = mish(x)
         x = self.dense2(x)
+        x = mish(x)
+        x = self.dense2(x)
+        x = mish(x)
         q = self.q(x)
         return q
 
@@ -37,7 +49,7 @@ class DualQNetwork(tf.keras.Model):
 
 class DiffusionPolicy(tf.keras.Model):
     def __init__(self, action_space: int):
-        super(GaussianPolicy, self).__init__()
+        super(DiffusionPolicy, self).__init__()
         self.action_space = action_space
 
         self.dense1 = kl.Dense(256, activation="relu")
@@ -56,7 +68,7 @@ class DiffusionPolicy(tf.keras.Model):
             tfd.Normal(loc=mu, scale=sigma),
             reinterpreted_batch_ndims=1,
         )
-        return dist
+        return dist.sample()
 
     def sample_actions(self, states):
 
