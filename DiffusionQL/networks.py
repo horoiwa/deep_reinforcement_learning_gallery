@@ -1,3 +1,4 @@
+import numpy as np
 import tensorflow as  tf
 import tensorflow.keras.layers as kl
 import tensorflow_probability as tfp
@@ -16,19 +17,16 @@ class QNetwork(tf.keras.Model):
     def __init__(self):
         super(QNetwork, self).__init__()
 
-        self.dense1 = kl.Dense(256, activation=None)
-        self.dense2 = kl.Dense(256, activation=None)
-        self.dense3 = kl.Dense(256, activation=None)
+        self.dense1 = kl.Dense(256, activation=mish)
+        self.dense2 = kl.Dense(256, activation=mish)
+        self.dense3 = kl.Dense(256, activation=mish)
         self.q = kl.Dense(1)
 
     def call(self, states, actions):
         x = tf.concat([states, actions], 1)
         x = self.dense1(x)
-        x = mish(x)
         x = self.dense2(x)
-        x = mish(x)
         x = self.dense2(x)
-        x = mish(x)
         q = self.q(x)
         return q
 
@@ -47,31 +45,92 @@ class DualQNetwork(tf.keras.Model):
         return q1, q2
 
 
+def get_noise_schedule(T: int, b_max=10.0, b_min=0.1):
+    """
+    Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben
+    Poole. Score-based generative modeling through stochastic differential equations.
+    """
+    t = tf.cast(tf.range(1, T + 1), tf.float32)
+    alphas = np.exp(-b_min / T - 0.5 * (b_max - b_min) * (2 * t - 1) / T ** 2)
+    betas = 1 - alphas
+    return alphas, betas
+
+
 class DiffusionPolicy(tf.keras.Model):
+
     def __init__(self, action_space: int):
         super(DiffusionPolicy, self).__init__()
+        self.n_timesteps = 10
         self.action_space = action_space
 
-        self.dense1 = kl.Dense(256, activation="relu")
-        self.dense2 = kl.Dense(256, activation="relu")
-        self.mu = kl.Dense(self.action_space, activation="tanh")
-        self.log_sigma= kl.Dense(self.action_space)
+        self.time_embedding = SinusoidalPositionalEmbedding(L=self.n_timesteps, D=12)
+        self.dense1 = kl.Dense(256, activation=mish)
+        self.dense2 = kl.Dense(256, activation=mish)
+        self.dense3 = kl.Dense(256, activation=mish)
+        self.out = kl.Dense(self.action_space, activation=None)
 
-    @tf.function
-    def call(self, states):
-        x = self.dense1(states)
+        self.alphas, self.betas = get_noise_schedule(T=self.n_timesteps)
+        self.alphas_cumprod = tf.math.cumprod(self.alphas)
+
+    #@tf.function
+    def call(self, x, timesteps, states):
+
+        t = self.time_embedding(timesteps)
+
+        x = tf.concat([x, t, states])
+        x = self.dense1(x)
         x = self.dense2(x)
-        mu = self.mu(x)
-        sigma = tf.math.exp(tf.clip_by_value(self.log_sigma(x), -2.0, 10.0))
+        x = self.dense3(x)
 
-        dist = tfd.Independent(
-            tfd.Normal(loc=mu, scale=sigma),
-            reinterpreted_batch_ndims=1,
-        )
-        return dist.sample()
+        x = self.out(x)
+
+        return x
+
+    def compute_bc_loss(self, actions, states):
+
+        x_0 = actions
+        batch_size = x_0.shape[0]
+
+        timesteps = tf.random.uniform(shape=(batch_size, 1), minval=0, maxval=self.n_timesteps, dtype=tf.int32),
+        alphas_cumprod_t = tf.gather(self.alphas_cumprod, indices=timesteps)
+
+        eps = tf.random.normal(shape=x_0.shape, mean=0., stddev=1.)
+        x_t = tf.sqrt(alphas_cumprod_t) * x_0 + tf.sqrt(1. - alphas_cumprod_t) * eps
+        eps_pred = self(x_t, timesteps, states)
+
+        loss = tf.reduce_mean(tf.square(eps - eps_pred))
+
+        return loss
 
     def sample_actions(self, states):
 
         dist = self.call(states)
         action = dist.sample()
         return action
+
+
+class SinusoidalPositionalEmbedding(tf.keras.Model):
+    def __init__(self, L: int, D: int = 16):
+        super(SinusoidalPositionalEmbedding, self).__init__()
+        assert D % 2 == 0
+        self.L, self.D = L, D
+        self.table = self.get_time_embedding_table()
+
+
+    def get_time_embedding_table(self):
+        pos = tf.stack([tf.range(self.L, dtype=tf.float32) for _ in range(self.D // 2)], axis=0)  #(D//2, L)
+        _emb = tf.reshape(tf.pow(10000, 2.0 * tf.range(self.D // 2, dtype=tf.float32) / self.D), shape=(-1, 1))  # (D//2, 1)
+        _emb = tf.repeat(_emb, repeats=self.L, axis=1)  #(D//2, L)
+        emb = pos * _emb  #(D//2, L)
+
+        emb_sin = tf.sin(emb)
+        emb_cos = tf.cos(emb)
+
+        _time_embedding_table = tf.concat([emb_cos, emb_sin], axis=0)  #(D, L)
+        time_embedding_table = tf.transpose(_time_embedding_table)  # (L, D)
+        return time_embedding_table
+
+    def call(self, timesteps):
+        timesteps = tf.reshape(timesteps, (-1,))  # (B, 1) -> (B,)
+        time_emb = tf.gather(self.table, indices=timesteps)  # (B, D)
+        return time_emb

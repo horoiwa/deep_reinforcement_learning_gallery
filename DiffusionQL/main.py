@@ -76,8 +76,6 @@ class DiffusionQLAgent:
         dummy_action = np.random.normal(0, 0.1, size=self.action_space)
         dummy_action = (dummy_action[np.newaxis, ...]).astype(np.float32)
 
-        self.policy(dummy_state)
-
         self.qnet(dummy_state, dummy_action)
         self.target_qnet(dummy_state, dummy_action)
         self.target_qnet.set_weights(self.qnet.get_weights())
@@ -97,7 +95,7 @@ class DiffusionQLAgent:
         self.target_qnet.load_weights(str(load_dir / "qnet"))
         self.valuenet.load_weights(str(load_dir / "valuenet"))
 
-    def update_qnetwork(self, states, actions, rewards, next_states, dones):
+    def update_q(self, states, actions, rewards, next_states, dones):
 
         rewards = tf.clip_by_value(tf.reshape(rewards, (-1, 1)), -1.0, 1.0)
         dones = tf.reshape(dones, (-1, 1))
@@ -125,13 +123,15 @@ class DiffusionQLAgent:
 
         with tf.GradientTape() as tape:
 
-            bc_loss = self.policy.compute_loss(states, actions)
+            bc_loss = self.policy.compute_bc_loss(states, actions)
 
             q1, q2 = self.target_qnet(states, self.policy(states))
-            q1_loss = - tf.reduce_mean(q1, axis=1) / tf.reduce_mean(tf.math.abs(q2))
-            q2_loss = - tf.reduce_mean(q2, axis=1) / tf.reduce_mean(tf.math.abs(q1))
+            q1_loss = - tf.reduce_mean(q1, axis=1) / tf.reduce_mean(tf.math.abs(q2), axis=1)
+            q2_loss = - tf.reduce_mean(q2, axis=1) / tf.reduce_mean(tf.math.abs(q1), axis=1)
             q_loss = tf.where(th > 0.5, q1_loss, q2_loss)
-            loss = bc_loss + self.eta * q_loss
+
+            loss = tf.reduce_mean(bc_loss + self.eta * q_loss)
+
 
         variables = self.policy.trainable_variables
         grads = tape.gradient(loss, variables)
@@ -195,13 +195,13 @@ def main(env_id="BipedalWalker-v3"):
 
     agent = DiffusionQLAgent(env_id)
 
-    tf_dataset = load_dataset(dataset_path="bipedalwalker.tfrecord", batch_size=256)
+    tf_dataset = load_dataset(dataset_path="bipedalwalker.tfrecord", batch_size=16)
 
     for n, minibatch in enumerate(tf_dataset):
         states, actions, rewards, next_states, dones = minibatch
 
-        qloss = agent.update_qnetwork(states, actions, rewards, next_states, dones)
-        ploss = agent.update_policy(states, actions)
+        #qloss = agent.update_q(states, actions, rewards, next_states, dones)
+        ploss = agent.update_policy(actions, states)
         agent.sync_target_weight()
 
         #with summary_writer.as_default():
