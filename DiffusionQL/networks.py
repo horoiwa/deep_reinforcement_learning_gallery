@@ -77,14 +77,13 @@ class DiffusionPolicy(tf.keras.Model):
 
         t = self.time_embedding(timesteps)
 
-        x = tf.concat([x, t, states])
+        x = tf.concat([x, t, states], axis=1)
         x = self.dense1(x)
         x = self.dense2(x)
         x = self.dense3(x)
+        eps = self.out(x)
 
-        x = self.out(x)
-
-        return x
+        return eps
 
     def compute_bc_loss(self, actions, states):
 
@@ -92,12 +91,12 @@ class DiffusionPolicy(tf.keras.Model):
         batch_size = x_0.shape[0]
 
         timesteps = tf.random.uniform(shape=(batch_size, 1), minval=0, maxval=self.n_timesteps, dtype=tf.int32),
-        alphas_cumprod_t = tf.gather(self.alphas_cumprod, indices=timesteps)
+        alphas_cumprod_t = tf.reshape(tf.gather(self.alphas_cumprod, indices=timesteps), (-1, 1))  # (1, B, 1) -> (B, 1)
 
         eps = tf.random.normal(shape=x_0.shape, mean=0., stddev=1.)
         x_t = tf.sqrt(alphas_cumprod_t) * x_0 + tf.sqrt(1. - alphas_cumprod_t) * eps
-        eps_pred = self(x_t, timesteps, states)
 
+        eps_pred = self(x_t, timesteps, states)
         loss = tf.reduce_mean(tf.square(eps - eps_pred))
 
         return loss
