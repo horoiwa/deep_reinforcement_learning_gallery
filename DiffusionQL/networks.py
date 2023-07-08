@@ -74,7 +74,6 @@ class DiffusionPolicy(tf.keras.Model):
         self.alphas_cumprod_prev = tf.concat([[1.], self.alphas_cumprod[:-1]], axis=0)
         self.variance = self.betas * (1.0 - self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
 
-    #@tf.function
     def call(self, x, timesteps, states):
 
         t = self.time_embedding(timesteps)
@@ -86,6 +85,7 @@ class DiffusionPolicy(tf.keras.Model):
 
         return eps
 
+    @tf.function
     def compute_bc_loss(self, actions, states):
 
         x_0 = actions
@@ -102,7 +102,7 @@ class DiffusionPolicy(tf.keras.Model):
 
         return bc_loss
 
-    #@tf.function
+    @tf.function
     def sample_actions(self, states):
         batch_size = states.shape[0]
         x_t = tf.random.normal(shape=(batch_size, self.action_space), mean=0., stddev=1.)

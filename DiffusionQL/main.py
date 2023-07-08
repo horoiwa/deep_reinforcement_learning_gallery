@@ -85,7 +85,6 @@ class DiffusionQLAgent:
 
         self.policy.save_weights(str(save_dir / "policy"))
         self.qnet.save_weights(str(save_dir / "qnet"))
-        self.valuenet.save_weights(str(save_dir / "valuenet"))
 
     def load(self, load_dir="checkpoints/"):
         load_dir = Path(load_dir)
@@ -146,7 +145,7 @@ class DiffusionQLAgent:
             in zip(self.qnet.get_weights(), self.target_qnet.get_weights())
         ])
 
-    def test_play_(self, monitor_dir, tag):
+    def test_play(self, monitor_dir, tag):
 
         env = wrappers.RecordVideo(
             gym.make(self.env_id),
@@ -193,13 +192,10 @@ def main(env_id="BipedalWalker-v3"):
         qloss = agent.update_q(states, actions, rewards, next_states, dones)
         ploss = agent.update_policy(actions, states)
         agent.sync_target_weight()
-        agent.test_play()
-        import pdb; pdb.set_trace()
 
         with summary_writer.as_default():
-            tf.summary.scalar("loss_v", vloss, step=n)
-            tf.summary.scalar("loss_p", ploss, step=n)
             tf.summary.scalar("loss_q", qloss, step=n)
+            tf.summary.scalar("loss_p", ploss, step=n)
 
         if n % 2000 == 0:
             score = agent.test_play(tag=f"{n}", monitor_dir=MONITOR_DIR)
