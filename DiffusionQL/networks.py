@@ -71,12 +71,13 @@ class DiffusionPolicy(tf.keras.Model):
 
         self.alphas, self.betas = get_noise_schedule(T=self.n_timesteps)
         self.alphas_cumprod = tf.math.cumprod(self.alphas)
+        self.alphas_cumprod_prev = tf.concat([[1.], self.alphas_cumprod[:-1]], axis=0)
+        self.variance = self.betas * (1.0 - self.alphas_cumprod_prev) / (1.0 - self.alphas_cumprod)
 
     #@tf.function
     def call(self, x, timesteps, states):
 
         t = self.time_embedding(timesteps)
-
         x = tf.concat([x, t, states], axis=1)
         x = self.dense1(x)
         x = self.dense2(x)
@@ -97,15 +98,34 @@ class DiffusionPolicy(tf.keras.Model):
         x_t = tf.sqrt(alphas_cumprod_t) * x_0 + tf.sqrt(1. - alphas_cumprod_t) * eps
 
         eps_pred = self(x_t, timesteps, states)
-        loss = tf.reduce_mean(tf.square(eps - eps_pred))
+        bc_loss = tf.reduce_mean(tf.square(eps - eps_pred))
 
-        return loss
+        return bc_loss
 
+    #@tf.function
     def sample_actions(self, states):
+        batch_size = states.shape[0]
+        x_t = tf.random.normal(shape=(batch_size, self.action_space), mean=0., stddev=1.)
+        for timestep in reversed(range(0, self.n_timesteps)):
+            t = timestep * tf.ones(shape=(batch_size, 1), dtype=tf.int32)  # (B, 1)
+            x_t = self.inv_diffusion(x_t, t, states)
 
-        dist = self.call(states)
-        action = dist.sample()
-        return action
+        return x_t
+
+    def inv_diffusion(self, x_t, t, states):
+
+        beta_t = tf.reshape(tf.gather(self.betas, indices=t), (-1, 1))  # (1, B, 1) -> (B, 1)
+        alphas_cumprod_t = tf.reshape(tf.gather(self.alphas_cumprod, indices=t), (-1, 1))  # (1, B, 1) -> (B, 1)
+
+        eps_t = self(x_t, t, states)
+        mu = (1.0 / tf.sqrt(1.0 - beta_t)) * (x_t - (beta_t / tf.sqrt(1.0 - alphas_cumprod_t)) * eps_t)
+        sigma = tf.sqrt(tf.reshape(tf.gather(self.variance, indices=t), (-1, 1)))
+        noise = tf.random.normal(shape=x_t.shape, mean=0., stddev=1.)
+
+        x_t_minus_1 = mu + sigma * noise
+
+        return x_t_minus_1
+
 
 
 class SinusoidalPositionalEmbedding(tf.keras.Model):
