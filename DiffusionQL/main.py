@@ -52,7 +52,7 @@ class DiffusionQLAgent:
         self.env_id = env_id
         self.action_space = gym.make(self.env_id).action_space.shape[0]
 
-        self.soft_update_ratio = 0.005
+        self.tau = 0.005
         self.gamma = 0.99
         self.eta = 1.0
 
@@ -135,13 +135,12 @@ class DiffusionQLAgent:
         grads = tape.gradient(loss, variables)
         self.p_optimizer.apply_gradients(zip(grads, variables))
 
-        return loss
+        return bc_loss, loss
 
     def sync_target_weight(self):
 
-        tau = self.soft_update_ratio
         self.target_qnet.set_weights([
-            tau * var + (1 - tau) * t_var for var, t_var
+            self.tau * var + (1 - self.tau) * t_var for var, t_var
             in zip(self.qnet.get_weights(), self.target_qnet.get_weights())
         ])
 
@@ -183,18 +182,19 @@ def main(env_id="BipedalWalker-v3"):
 
     summary_writer = tf.summary.create_file_writer(str(LOGDIR))
 
-    tf_dataset = load_dataset(dataset_path="bipedalwalker.tfrecord", batch_size=16)
+    tf_dataset = load_dataset(dataset_path="bipedalwalker.tfrecord", batch_size=256)
     agent = DiffusionQLAgent(env_id)
 
     for n, minibatch in enumerate(tf_dataset):
         states, actions, rewards, next_states, dones = minibatch
 
         qloss = agent.update_q(states, actions, rewards, next_states, dones)
-        ploss = agent.update_policy(actions, states)
+        bc_loss, ploss = agent.update_policy(actions, states)
         agent.sync_target_weight()
 
         with summary_writer.as_default():
             tf.summary.scalar("loss_q", qloss, step=n)
+            tf.summary.scalar("loss_bc", bc_loss, step=n)
             tf.summary.scalar("loss_p", ploss, step=n)
 
         if n % 2000 == 0:

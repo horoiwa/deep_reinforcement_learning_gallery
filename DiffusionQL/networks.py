@@ -60,7 +60,7 @@ class DiffusionPolicy(tf.keras.Model):
 
     def __init__(self, action_space: int):
         super(DiffusionPolicy, self).__init__()
-        self.n_timesteps = 10
+        self.n_timesteps = 5
         self.action_space = action_space
 
         self.time_embedding = SinusoidalPositionalEmbedding(L=self.n_timesteps, D=12)
@@ -106,11 +106,12 @@ class DiffusionPolicy(tf.keras.Model):
     def sample_actions(self, states):
         batch_size = states.shape[0]
         x_t = tf.random.normal(shape=(batch_size, self.action_space), mean=0., stddev=1.)
-        for timestep in reversed(range(0, self.n_timesteps)):
-            t = timestep * tf.ones(shape=(batch_size, 1), dtype=tf.int32)  # (B, 1)
+        for t in reversed(range(0, self.n_timesteps)):
+            t = t * tf.ones(shape=(batch_size, 1), dtype=tf.int32)  # (B, 1)
             x_t = self.inv_diffusion(x_t, t, states)
 
-        return x_t
+        x_0 = tf.clip_by_value(x_t, -1.0, 1.0)
+        return x_0
 
     def inv_diffusion(self, x_t, t, states):
 
