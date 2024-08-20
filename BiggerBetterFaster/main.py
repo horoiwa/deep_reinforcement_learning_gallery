@@ -16,8 +16,8 @@ class BBFAgent:
         self.summary_writer = (
             tf.summary.create_file_writer(str(logdir)) if logdir else None
         )
-        self.network = BBFNetwork(action_space=self.action_space, target=False)
-        self.target_network = BBFNetwork(action_space=self.action_space, target=True)
+        self.network = BBFNetwork(action_space=self.action_space)
+        self.target_network = BBFNetwork(action_space=self.action_space)
         self.replay_buffer = PrioritizedReplayBuffer(maxlen=None)
         self.optimizer = tf.keras.optimizers.AdamW(lr=0.0005)
         self.gamma = 0.997
