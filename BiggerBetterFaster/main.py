@@ -1,7 +1,7 @@
 from pathlib import Path
 import shutil
 
-import tensoflow as tf
+import tensorflow as tf
 import gym
 
 from buffers import PrioritizedReplayBuffer
@@ -43,7 +43,7 @@ class BBFAgent:
         pass
 
 
-def train(env_id="BipedalWalker-v3", max_steps=100_000):
+def train(env_id="BreakoutDeterministic-v4", max_steps=100_000):
     """
     Note:
         if you failed to "pip install gym[box2d]", try "pip install box2d"
