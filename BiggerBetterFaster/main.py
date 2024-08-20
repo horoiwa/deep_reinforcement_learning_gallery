@@ -1,8 +1,8 @@
 from pathlib import Path
 import shutil
 
-import tensorflow as tf
 import gym
+import tensorflow as tf
 
 from buffers import PrioritizedReplayBuffer
 from networks import BBFNetwork
@@ -13,7 +13,9 @@ class BBFAgent:
 
         self.env_id = env_id
         self.action_space = gym.make(self.env_id).action_space.shape[0]
-        self.summary_writer = tf.summary.create_file_writer(str(logdir)) if logdir else None
+        self.summary_writer = (
+            tf.summary.create_file_writer(str(logdir)) if logdir else None
+        )
         self.network = BBFNetwork(action_space=self.action_space, target=False)
         self.target_network = BBFNetwork(action_space=self.action_space, target=True)
         self.replay_buffer = PrioritizedReplayBuffer(maxlen=None)
@@ -29,16 +31,22 @@ class BBFAgent:
 
     def setup(self):
         pass
+
     def save(self):
         pass
+
     def load(self):
         pass
+
     def rollout(self):
         pass
+
     def update_network(self):
         pass
+
     def update_target_network(self):
         pass
+
     def test_play(self):
         pass
 
@@ -55,18 +63,16 @@ def train(env_id="BreakoutDeterministic-v4", max_steps=100_000):
 
     agent = BBFAgent(env_id=env_id, logdir=LOGDIR)
 
-    episodes =  0
+    episodes = 0
     while agent.global_steps < max_steps:
         rewards, steps = agent.rollout()
         episodes += 1
         steps += steps
         print(f"Episode {episodes}: {rewards}, {agent.global_steps} steps")
 
-
     agent.save("checkpoints/")
     print("Training finshed")
 
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     train()

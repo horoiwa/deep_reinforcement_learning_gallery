@@ -24,16 +24,14 @@ class PrioritizedReplayBuffer:
     def __len__(self):
         return len(self.segment_buffer) if self.full else self.count
 
-    def add(self, priorities: list[float], elements: list[ReplayElement]):
+    def add(self, priority: float, element: ReplayElement):
+        self.priorities[self.cursor] = priority
+        self.segment_buffer[self.cursor] = element
 
-        for priority, element in zip(priorities, elements, strict=True):
-            self.priorities[self.cursor] = priority
-            self.segment_buffer[self.cursor] = element
-
-            self.cursor += 1
-            if self.cursor == self.buffer_size:
-                self.cursor = 0
-                self.full = True
+        self.cursor += 1
+        if self.cursor == self.buffer_size:
+            self.cursor = 0
+            self.full = True
 
     def update_priority(self, indices: list[int], priorities: list[float]):
         for idx, priority in zip(indices, priorities, strict=True):
