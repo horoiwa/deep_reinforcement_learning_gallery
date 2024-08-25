@@ -22,7 +22,7 @@ class BBFAgent:
         self.network = BBFNetwork(action_space=self.action_space)
         self.target_network = BBFNetwork(action_space=self.action_space)
         self.replay_buffer = PrioritizedReplayBuffer(maxlen=max_steps)
-        self.optimizer = tf.keras.optimizers.AdamW(lr=0.0005)
+        self.optimizer = tf.keras.optimizers.AdamW(learning_rate=0.0005)
         self.gamma = 0.997
         self.batch_size = 32
         self.update_period = 1
@@ -42,7 +42,7 @@ class BBFAgent:
         state = np.stack(frames, axis=2)[np.newaxis, ...]
         self.network(state)
         self.target_network(state)
-        self.target_network.set_weights(self.netowrk.get_weights())
+        self.target_network.set_weights(self.network.get_weights())
 
     def rollout(self):
         env = gym.make(self.env_id)
