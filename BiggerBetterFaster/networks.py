@@ -47,6 +47,7 @@ class BBFNetwork(tf.keras.Model):
         pass
 
     def sample_action(self, x, epsilon):
+        """quantilesを均等幅で取っている場合はE[Z(s, a)]は単純平均と一致"""
 
         if np.random.random() > epsilon:
             quantile_qvalues = self(x)
@@ -57,13 +58,6 @@ class BBFNetwork(tf.keras.Model):
             selected_action = np.random.choice(self.action_space)
 
         return selected_action
-
-    def sample_actions(self, x):
-        """quantilesを均等幅で取っている場合はE[Z(s, a)]は単純平均と一致"""
-        quantile_qvalues = self(x)
-        q_means = tf.reduce_mean(quantile_qvalues, axis=2, keepdims=True)
-        selected_actions = tf.argmax(q_means, axis=1)
-        return selected_actions, quantile_qvalues
 
 
 class Encoder(tf.keras.Model):

@@ -44,6 +44,10 @@ class BBFAgent:
         self.target_network(state)
         self.target_network.set_weights(self.network.get_weights())
 
+    @property
+    def epsilon(self):
+        return 0.8
+
     def rollout(self):
         env = gym.make(self.env_id)
         frames = collections.deque(maxlen=4)
