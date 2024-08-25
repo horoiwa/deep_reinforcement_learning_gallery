@@ -33,14 +33,24 @@ class BBFAgent:
         self.global_steps = 0
 
     def setup(self):
-        pass
+        env = gym.make(self.env_id)
+        frames = collections.deque(maxlen=4)
+        frame, _ = env.reset()
+        for _ in range(4):
+            frames.append(utils.preprocess_frame(frame))
+
+        state = np.stack(frames, axis=2)[np.newaxis, ...]
+        self.network(state)
+        self.target_network(state)
+        self.target_network.set_weights(self.netowrk.get_weights())
 
     def rollout(self):
         env = gym.make(self.env_id)
         frames = collections.deque(maxlen=4)
 
         frame, info = env.reset()
-        frames = [utils.preprocess_frame(frame)] * 4
+        for _ in range(4):
+            frames.append(utils.preprocess_frame(frame))
         lives = info["lives"]
 
         ep_rewards, ep_steps = 0, 0
@@ -49,6 +59,7 @@ class BBFAgent:
 
             state = np.stack(frames, axis=2)[np.newaxis, ...]
             action = self.network.sample_action(state, epsilon=self.epsilon)
+            import pdb; pdb.set_trace()  # fmt: skip
             next_frame, reward, done, info = env.step(action)
             ep_rewards += reward
             frames.append(utils.preprocess_frame(next_frame))
