@@ -5,11 +5,11 @@ import tensorflow.keras.layers as kl
 
 class BBFNetwork(tf.keras.Model):
 
-    def __init__(self, actions_space: int, N: int = 200):
+    def __init__(self, action_space: int, N: int = 200):
 
         super(BBFNetwork, self).__init__()
 
-        self.action_space = actions_space
+        self.action_space = action_space
 
         self.N = N
 

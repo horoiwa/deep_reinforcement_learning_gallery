@@ -5,18 +5,18 @@ import numpy as np
 
 
 @dataclass
-class ReplayElement:
+class Experience:
     state: np.ndarray
     action: int
     reward: float
-    is_terminal: int
+    is_done: int
 
 
 class PrioritizedReplayBuffer:
     def __init__(self, maxlen: int):
         self.maxlen = maxlen
         self.buffer = [None] * maxlen
-        self.priorities = SumTree(capacity=self.mexlen)
+        self.priorities = SumTree(capacity=self.maxlen)
         self.beta = 0.6  # importance sampling exponent
         self.cursor = 0
         self.full = False
@@ -24,7 +24,7 @@ class PrioritizedReplayBuffer:
     def __len__(self):
         return len(self.segment_buffer) if self.full else self.count
 
-    def add(self, priority: float, element: ReplayElement):
+    def add(self, priority: float, element: Experience):
         self.priorities[self.cursor] = priority
         self.segment_buffer[self.cursor] = element
 
