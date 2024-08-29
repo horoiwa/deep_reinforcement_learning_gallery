@@ -19,15 +19,22 @@ class BBFAgent:
         self.summary_writer = (
             tf.summary.create_file_writer(str(logdir)) if logdir else None
         )
+
         self.network = BBFNetwork(action_space=self.action_space)
         self.target_network = BBFNetwork(action_space=self.action_space)
-        self.replay_buffer = PrioritizedReplayBuffer(maxlen=max_steps)
         self.optimizer = tf.keras.optimizers.AdamW(learning_rate=0.0005)
+
+        self.replay_buffer = PrioritizedReplayBuffer(maxlen=max_steps)
+
         self.gamma = 0.997
         self.batch_size = 32
         self.update_period = 1
         self.num_updates = 2
         self.gamma = 0.99
+        self.tau = 0.005
+
+        self.shrink_factor = 0.5
+        self.perturb_factor = 0.5
 
         self.setup()
         self.global_steps = 0
@@ -41,6 +48,7 @@ class BBFAgent:
 
         state = np.stack(frames, axis=2)[np.newaxis, ...]
         self.network(state)
+        import pdb; pdb.set_trace()  # fmt: skip
         self.target_network(state)
         self.target_network.set_weights(self.network.get_weights())
 
@@ -63,7 +71,6 @@ class BBFAgent:
 
             state = np.stack(frames, axis=2)[np.newaxis, ...]
             action = self.network.sample_action(state, epsilon=self.epsilon)
-            import pdb; pdb.set_trace()  # fmt: skip
             next_frame, reward, done, info = env.step(action)
             ep_rewards += reward
             frames.append(utils.preprocess_frame(next_frame))

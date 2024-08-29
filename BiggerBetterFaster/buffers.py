@@ -24,7 +24,7 @@ class PrioritizedReplayBuffer:
     def __len__(self):
         return len(self.segment_buffer) if self.full else self.count
 
-    def add(self, priority: float, element: Experience):
+    def add(self, element: Experience, priority: float):
         self.priorities[self.cursor] = priority
         self.segment_buffer[self.cursor] = element
 
