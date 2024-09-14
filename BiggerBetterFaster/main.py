@@ -6,7 +6,7 @@ import gym
 import tensorflow as tf
 import numpy as np
 
-from buffers import PrioritizedReplayBuffer, Experience
+from buffers import ReplayBuffer, Experience
 from networks import BBFNetwork
 import utils
 
@@ -24,12 +24,11 @@ class BBFAgent:
         self.target_network = BBFNetwork(action_space=self.action_space)
         self.optimizer = tf.keras.optimizers.AdamW(learning_rate=0.0005)
 
-        self.replay_buffer = PrioritizedReplayBuffer(maxlen=max_steps)
+        self.replay_buffer = ReplayBuffer(maxlen=max_steps)
 
         self.gamma = 0.997
         self.batch_size = 32
-        self.update_period = 1
-        self.num_updates = 2
+        self.replay_ratio = 2
         self.gamma = 0.99
         self.tau = 0.005
 
@@ -48,13 +47,17 @@ class BBFAgent:
 
         state = np.stack(frames, axis=2)[np.newaxis, ...]
         self.network(state)
-        import pdb; pdb.set_trace()  # fmt: skip
         self.target_network(state)
+
         self.target_network.set_weights(self.network.get_weights())
 
     @property
     def epsilon(self):
         return 0.8
+
+    @property
+    def update_horizon(self):
+        return 5
 
     def rollout(self):
         env = gym.make(self.env_id)
@@ -76,31 +79,26 @@ class BBFAgent:
             frames.append(utils.preprocess_frame(next_frame))
 
             if done:
-                exp = Experience(
-                    state=state, action=action, reward=reward, is_done=done
-                )
-                self.replay_buffer.push(exp)
+                exp = Experience(state=state, action=action, reward=reward, is_done=1)
+                self.replay_buffer.append(exp)
                 break
             else:
+                #: life loss as episode ends
                 if info["lives"] != lives:
-                    lives = info["ale.lives"]
-                    #: life loss as episode ends
+                    lives = info["lives"]
                     exp = Experience(
-                        state=state, action=action, reward=reward, is_done=True
+                        state=state, action=action, reward=reward, is_done=1
                     )
                 else:
                     exp = Experience(
-                        state=state, action=action, reward=reward, is_done=done
+                        state=state, action=action, reward=reward, is_done=0
                     )
-                self.replay_buffer.add(exp)
+                self.replay_buffer.append(exp)
 
             #: Network update
-            if self.steps % self.update_period == 0:
-                for i in range(self.num_updates):
+            if len(self.replay_buffer) > 100:
+                for _ in range(self.replay_ratio):
                     self.update_network()
-
-            #: Target network update
-            if self.steps % self.target_update_period == 0:
                 self.update_target_network()
 
             ep_steps += 1
@@ -109,6 +107,16 @@ class BBFAgent:
         return ep_rewards, ep_steps
 
     def update_network(self):
+        n_step = self.update_horizon
+        states, actions, rewards, is_dones, next_states = (
+            self.replay_buffer.sample_batch(
+                batch_size=self.batch_size, n_step=n_step, gamma=self.gamma
+            )
+        )
+
+        next_actions, next_quantile_values_all = self.target_network.sample_actions(
+            next_states
+        )
         pass
 
     def update_target_network(self):

@@ -11,3 +11,4 @@ The official implementation uses Rainbow without NoisyNet as the base model, but
 ## Requirements
 
 `tensoflow==2.13.1`, `gym==0.25.2`
+
