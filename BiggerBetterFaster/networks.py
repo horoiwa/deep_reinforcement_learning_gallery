@@ -18,6 +18,7 @@ class BBFNetwork(tf.keras.Model):
     def __init__(
         self,
         action_space: int,
+        N: int = 200,
         width_scale: int = 4,
         hidden_dim=2048,
     ):
@@ -25,12 +26,15 @@ class BBFNetwork(tf.keras.Model):
         super(BBFNetwork, self).__init__()
 
         self.action_space = action_space
+        self.N = N
         self.width_scale = width_scale
         self.hidden_dim = hidden_dim
 
         self.encoder = ImpalaCNN(width_scale=self.width_scale)
         self.flatten = kl.Flatten()
-        self.q_head = kl.Dense(self.action_space * 200, kernel_initializer="he_normal")
+        self.q_head = kl.Dense(
+            self.action_space * self.N, kernel_initializer="he_normal"
+        )
 
         latent_dim = self.encoder.dims[-1] * self.width_scale
         self.transition_model = TransitionModel(
@@ -44,13 +48,13 @@ class BBFNetwork(tf.keras.Model):
             self.hidden_dim, activation=None, kernel_initializer="he_normal"
         )
 
-    def call(self, s_t):
-        B = s_t.shape[0]  # batch size
-        z_t = renormalize(self.encoder(s_t, renormalize=True))  # (B, 11, 11, 128)
+    def call(self, state):
+        B = state.shape[0]  # batch size
+        z_t = renormalize(self.encoder(state, renormalize=True))  # (B, 11, 11, 128)
         quantile_qvalues = tf.reshape(
-            self.q_head(self.flatten(z_t)),  # (B, 200 * action_space)
+            self.q_head(self.flatten(z_t)),  # (B, N * action_space)
             shape=[B, self.action_space, -1],
-        )  # (B, action_space, 200)
+        )  # (B, action_space, N)
         return quantile_qvalues, z_t
 
     def rollout(self, z_t, actions):
@@ -60,16 +64,33 @@ class BBFNetwork(tf.keras.Model):
 
     def sample_action(self, x, epsilon):
         """quantilesを均等幅で取っている場合はE[Z(s, a)]は単純平均と一致"""
+        assert x.shape[0] == 1
 
         if np.random.random() > epsilon:
             quantile_qvalues, _ = self(x)
-            q_means = tf.reduce_mean(quantile_qvalues, axis=2, keepdims=True)
+            q_means = tf.reduce_mean(quantile_qvalues, axis=2)
             selected_action = tf.argmax(q_means, axis=1)
-            selected_action = selected_action[0][0].numpy()
+            selected_action = selected_action[0].numpy()
         else:
             selected_action = np.random.choice(self.action_space)
 
         return selected_action
+
+    def compute_quantile_values(self, states, actions=None):
+        quantile_values_all, _ = self.call(states)  # (B, action_space, N)
+        if actions is None:
+            qvalues = tf.reduce_mean(
+                quantile_values_all, axis=2, keepdims=True
+            )  # (B, action_space, 1)
+            actions = tf.argmax(qvalues, axis=1)  # (B, 1)
+        actions_onehot = tf.one_hot(
+            actions, self.action_space, axis=1
+        )  # (B, action_space, 1)
+
+        quantile_values = tf.reduce_sum(
+            quantile_values_all * actions_onehot, axis=1, keepdims=False
+        )  # (B, N)
+        return quantile_values
 
 
 class ImpalaCNN(tf.keras.Model):
