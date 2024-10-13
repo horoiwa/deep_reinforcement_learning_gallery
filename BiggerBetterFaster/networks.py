@@ -26,33 +26,33 @@ class BBFNetwork(tf.keras.Model):
         super(BBFNetwork, self).__init__()
 
         self.action_space = action_space
-        self.N = N
+        self.n_supports = N
         self.width_scale = width_scale
         self.hidden_dim = hidden_dim
 
         self.encoder = ImpalaCNN(width_scale=self.width_scale)
         self.flatten = kl.Flatten()
+        self.project = kl.Dense(
+            self.hidden_dim, activation=None, kernel_initializer="he_normal"
+        )
         self.q_head = kl.Dense(
-            self.action_space * self.N, kernel_initializer="he_normal"
+            self.action_space * self.n_supports, kernel_initializer="he_normal"
         )
 
-        latent_dim = self.encoder.dims[-1] * self.width_scale
+        latent_dim: int = self.encoder.dims[-1] * self.width_scale
         self.transition_model = TransitionModel(
             action_space=self.action_space, latent_dim=latent_dim
         )
-
-        self.projection = kl.Dense(
-            self.hidden_dim, activation=None, kernel_initializer="he_normal"
-        )
-        self.predictor = kl.Dense(
+        self.predict = kl.Dense(
             self.hidden_dim, activation=None, kernel_initializer="he_normal"
         )
 
     def call(self, state):
         B = state.shape[0]  # batch size
         z_t = renormalize(self.encoder(state, renormalize=True))  # (B, 11, 11, 128)
+        g = self.project(self.flatten(z_t))
         quantile_qvalues = tf.reshape(
-            self.q_head(self.flatten(z_t)),  # (B, N * action_space)
+            self.q_head(g),  # (B, N * action_space)
             shape=[B, self.action_space, -1],
         )  # (B, action_space, N)
         return quantile_qvalues, z_t
@@ -232,9 +232,3 @@ class TransitionCell(tf.keras.Model):
         x = self.conv2(x)
         x = renormalize(x)
         return x
-
-
-class Projector(tf.keras.Model):
-    def __init__(self, hidden_dim: int):
-        super(Projector, self).__init__()
-        self.hidden_dim = hidden_dim
