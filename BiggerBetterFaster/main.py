@@ -55,7 +55,7 @@ class BBFAgent:
 
     @property
     def epsilon(self):
-        return 0.8
+        return 0.2
 
     @property
     def update_horizon(self):
@@ -99,17 +99,21 @@ class BBFAgent:
                 self.replay_buffer.append(exp)
 
             #: Network update
-            if len(self.replay_buffer) > 1000:
+            if len(self.replay_buffer) > 100:
                 for _ in range(self.replay_ratio):
                     loss = self.update_network()
                 self.update_target_network()
 
+                if self.global_steps % 100 == 0:
+                    with self.summary_writer.as_default():
+                        tf.summary.scalar("loss", loss, step=self.global_steps)
+
             ep_steps += 1
             self.global_steps += 1
 
-            if self.global_steps % 200 == 0:
-                with self.summary_writer.as_default():
-                    tf.summary.scalar("loss", loss, step=self.global_steps)
+        with self.summary_writer.as_default():
+            tf.summary.scalar("rewards", ep_rewards, step=self.global_steps)
+            tf.summary.scalar("steps", ep_steps, step=self.global_steps)
 
         return ep_rewards, ep_steps
 
@@ -158,9 +162,11 @@ class BBFAgent:
             quantile_weights = tf.abs(quantiles - indicator)
             quantile_huberloss = quantile_weights * huberloss
 
-            loss = tf.reduce_mean(
-                tf.reduce_sum(tf.reduce_mean(quantile_huberloss, axis=2), axis=1)
+            loss_qrdqn = tf.reduce_mean(
+                tf.reduce_mean(tf.reduce_mean(quantile_huberloss, axis=2), axis=1)
             )
+            loss_spr = 0
+            loss = loss_qrdqn + loss_spr
 
         variables = self.network.trainable_variables
         grads = tape.gradient(loss, variables)
