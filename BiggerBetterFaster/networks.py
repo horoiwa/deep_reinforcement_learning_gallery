@@ -96,11 +96,11 @@ class BBFNetwork(tf.keras.Model):
 class ImpalaCNN(tf.keras.Model):
     def __init__(self, width_scale: int):
         super(ImpalaCNN, self).__init__()
-        self.dims = (16, 32, 32)
+        self.base_dims = (16, 32, 32)
         self.width_scale = width_scale
-        self.resblock_1 = ResidualBlock(dims=self.dims[0] * self.width_scale)
-        self.resblock_2 = ResidualBlock(dims=self.dims[1] * self.width_scale)
-        self.resblock_3 = ResidualBlock(dims=self.dims[2] * self.width_scale)
+        self.resblock_1 = ResidualBlock(dims=self.base_dims[0] * self.width_scale)
+        self.resblock_2 = ResidualBlock(dims=self.base_dims[1] * self.width_scale)
+        self.resblock_3 = ResidualBlock(dims=self.base_dims[2] * self.width_scale)
 
     def call(self, x, renormalize: bool):
         x = self.resblock_1(x)
