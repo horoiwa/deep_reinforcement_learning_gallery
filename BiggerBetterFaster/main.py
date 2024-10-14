@@ -99,15 +99,18 @@ class BBFAgent:
                     )
                 self.replay_buffer.append(exp)
 
-            #: Network update
             if len(self.replay_buffer) > 100:
                 for _ in range(self.replay_ratio):
-                    loss = self.update_network()
+                    loss, loss_qrdqn, loss_spr = self.update_network()
                 self.update_target_network()
 
                 if self.global_steps % 100 == 0:
                     with self.summary_writer.as_default():
                         tf.summary.scalar("loss", loss, step=self.global_steps)
+                        tf.summary.scalar(
+                            "loss_qrdqn", loss_qrdqn, step=self.global_steps
+                        )
+                        tf.summary.scalar("loss_spr", loss_spr, step=self.global_steps)
 
             ep_steps += 1
             self.global_steps += 1
@@ -185,7 +188,7 @@ class BBFAgent:
         grads = tape.gradient(loss, variables)
         self.optimizer.apply_gradients(zip(grads, variables))
 
-        return loss
+        return loss, loss_qrdqn, loss_spr
 
     def update_target_network(self):
         self.target_network.set_weights(
