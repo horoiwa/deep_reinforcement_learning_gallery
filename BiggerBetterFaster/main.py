@@ -25,7 +25,9 @@ class BBFAgent:
         self.network = BBFNetwork(
             action_space=self.action_space, n_supports=self.N, width_scale=4
         )
-        self.target_network = BBFNetwork(action_space=self.action_space, N=self.N)
+        self.target_network = BBFNetwork(
+            action_space=self.action_space, n_supports=self.N
+        )
 
         self.batch_size = 32
         self.optimizer = tf.keras.optimizers.AdamW(
@@ -48,7 +50,7 @@ class BBFAgent:
         self.replay_ratio = 2
         self.spr_weight = 5
         self.reset_period = 20_000
-        self.cycle_period = 10_000
+        self.cycle_period = 5_000
         self.shrink_factor = 0.5
         self.perturb_factor = 0.5
 
@@ -87,13 +89,13 @@ class BBFAgent:
         return eps
 
     @property
-    def update_horizon(self) -> int:
+    def n_step(self) -> int:
         steps_left = self.global_steps % self.reset_period
-        n: float = self.max_horizon * max(
+        n_steps: float = self.max_horizon * max(
             0.0, (self.cycle_period - steps_left) / self.cycle_period
         )
-        n: int = max(3, round(n))
-        return n
+        n_steps: int = max(3, round(n_steps))
+        return n_steps
 
     def rollout(self):
         env = gym.make(self.env_id)
@@ -160,10 +162,9 @@ class BBFAgent:
     def update_network(self, k=1.0):
         """QR-DQN style loss function"""
 
-        n_step = self.update_horizon
         states, actions, rewards, is_dones, next_states = (
             self.replay_buffer.sample_batch(
-                batch_size=self.batch_size, n_step=n_step, gamma=self.gamma
+                batch_size=self.batch_size, n_step=self.n_step, gamma=self.gamma
             )
         )
 
@@ -173,10 +174,11 @@ class BBFAgent:
             )
         )
         spr_projections = _spr_projections / tf.norm(
-            spr_projections, ord=2, axis=-1, keepdims=True
+            _spr_projections, ord=2, axis=-1, keepdims=True
         )
         _target_quantile_values = (
-            rewards + (self.gamma**n_step) * (1 - is_dones) * residual_quantile_values
+            rewards
+            + (self.gamma**self.n_step) * (1 - is_dones) * residual_quantile_values
         )  # (B, N)
 
         target_quantile_values = tf.repeat(
@@ -217,7 +219,7 @@ class BBFAgent:
                 z_t, actions=actions[..., :-1]
             )
             spr_predictions = _spr_predictions / tf.norm(
-                spr_predictions, ord=2, axis=-1, keepdims=True
+                _spr_predictions, ord=2, axis=-1, keepdims=True
             )
             loss_spr = tf.reduce_mean(
                 (spr_predictions - spr_projections) ** 2,
