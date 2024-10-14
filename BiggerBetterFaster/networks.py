@@ -18,7 +18,7 @@ class BBFNetwork(tf.keras.Model):
     def __init__(
         self,
         action_space: int,
-        N: int = 200,
+        n_supports: int = 200,
         width_scale: int = 4,
         hidden_dim=2048,
     ):
@@ -26,7 +26,7 @@ class BBFNetwork(tf.keras.Model):
         super(BBFNetwork, self).__init__()
 
         self.action_space = action_space
-        self.n_supports = N
+        self.n_supports = n_supports
         self.width_scale = width_scale
         self.hidden_dim = hidden_dim
 

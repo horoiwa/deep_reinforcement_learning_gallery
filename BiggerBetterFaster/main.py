@@ -22,24 +22,38 @@ class BBFAgent:
         self.N = 200
         self.quantiles = [1 / (2 * self.N) + i * 1 / self.N for i in range(self.N)]
 
-        self.network = BBFNetwork(action_space=self.action_space, N=self.N)
+        self.network = BBFNetwork(
+            action_space=self.action_space, n_supports=self.N, width_scale=4
+        )
         self.target_network = BBFNetwork(action_space=self.action_space, N=self.N)
-        self.optimizer = tf.keras.optimizers.AdamW(learning_rate=0.0005)
 
-        self.replay_buffer = ReplayBuffer(maxlen=max_steps)
-        self.spr_weight = 5
-
-        self.gamma = 0.997
         self.batch_size = 32
-        self.replay_ratio = 2
-        self.gamma = 0.99
-        self.tau = 0.005
+        self.optimizer = tf.keras.optimizers.AdamW(
+            learning_rate=0.0005,
+            weight_decay=0.1,
+            beta_1=0.9,
+            beta_2=0.999,
+            epsilon=1.5e-4,
+        )
+        self.replay_buffer = ReplayBuffer(maxlen=max_steps)
+        self.target_update_tau = 0.005
 
+        self.eps_min = 0.0
+        self.warmup_steps = 100
+        # self.warmup_steps = 2000
+        self.epsilon_decay_period = 5_000
+        self.max_horizon = 10
+        self.min_horizon = 3
+
+        self.replay_ratio = 2
+        self.spr_weight = 5
+        self.reset_period = 20_000
+        self.cycle_period = 10_000
         self.shrink_factor = 0.5
         self.perturb_factor = 0.5
 
+        self.global_steps = 1
         self.setup()
-        self.global_steps = 0
 
     def setup(self):
         env = gym.make(self.env_id)
@@ -55,12 +69,31 @@ class BBFAgent:
         self.target_network.set_weights(self.network.get_weights())
 
     @property
-    def epsilon(self):
-        return 0.2
+    def gamma(self):
+        steps_left = self.global_steps % self.reset_period
+        gamma_1, gamma_2 = 0.97, 0.997
+        gamma = gamma_1 + min(1.0, steps_left / self.cycle_period) * (gamma_2 - gamma_1)
+        return gamma
 
     @property
-    def update_horizon(self):
-        return 3
+    def epsilon(self):
+        if self.warmup_steps > self.global_steps:
+            eps = 1.0
+        else:
+            steps_left = (
+                self.warmup_steps + self.epsilon_decay_period - self.global_steps
+            )
+            eps = (1.0 - self.eps_min) * max(0, steps_left / self.epsilon_decay_period)
+        return eps
+
+    @property
+    def update_horizon(self) -> int:
+        steps_left = self.global_steps % self.reset_period
+        n: float = self.max_horizon * max(
+            0.0, (self.cycle_period - steps_left) / self.cycle_period
+        )
+        n: int = max(3, round(n))
+        return n
 
     def rollout(self):
         env = gym.make(self.env_id)
@@ -99,7 +132,7 @@ class BBFAgent:
                     )
                 self.replay_buffer.append(exp)
 
-            if len(self.replay_buffer) > 100:
+            if self.global_steps > self.warmup_steps:
                 for _ in range(self.replay_ratio):
                     loss, loss_qrdqn, loss_spr = self.update_network()
                 self.update_target_network()
@@ -111,6 +144,9 @@ class BBFAgent:
                             "loss_qrdqn", loss_qrdqn, step=self.global_steps
                         )
                         tf.summary.scalar("loss_spr", loss_spr, step=self.global_steps)
+
+            if self.global_steps % self.reset_period == 0:
+                self.reset_weights()
 
             ep_steps += 1
             self.global_steps += 1
@@ -193,7 +229,8 @@ class BBFAgent:
     def update_target_network(self):
         self.target_network.set_weights(
             [
-                (1.0 - self.tau) * var_target + self.tau * var_online
+                (1.0 - self.target_update_tau) * var_target
+                + self.target_update_tau * var_online
                 for var_target, var_online in zip(
                     self.target_network.get_weights(),
                     self.network.get_weights(),
@@ -201,6 +238,9 @@ class BBFAgent:
                 )
             ]
         )
+
+    def reset_weights(self):
+        pass
 
     def save_weights(self, save_path: Path):
         pass
