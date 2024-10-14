@@ -167,10 +167,13 @@ class BBFAgent:
             )
         )
 
-        residual_quantile_values, _, spr_projections = (
+        residual_quantile_values, _, _spr_projections = (
             self.target_network.compute_quantile_values(
                 states=next_states, actions=None
             )
+        )
+        spr_projections = _spr_projections / tf.norm(
+            spr_projections, ord=2, axis=-1, keepdims=True
         )
         _target_quantile_values = (
             rewards + (self.gamma**n_step) * (1 - is_dones) * residual_quantile_values
@@ -210,8 +213,11 @@ class BBFAgent:
             )
 
             # BYOL Loss: 正規化後のL2ノルムはコサイン類似度と等価
-            spr_predictions = self.network.compute_prediction(
+            _spr_predictions = self.network.compute_prediction(
                 z_t, actions=actions[..., :-1]
+            )
+            spr_predictions = _spr_predictions / tf.norm(
+                spr_predictions, ord=2, axis=-1, keepdims=True
             )
             loss_spr = tf.reduce_mean(
                 (spr_predictions - spr_projections) ** 2,
