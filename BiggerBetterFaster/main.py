@@ -27,6 +27,7 @@ class BBFAgent:
         self.optimizer = tf.keras.optimizers.AdamW(learning_rate=0.0005)
 
         self.replay_buffer = ReplayBuffer(maxlen=max_steps)
+        self.spr_weight = 5
 
         self.gamma = 0.997
         self.batch_size = 32
@@ -127,8 +128,10 @@ class BBFAgent:
             )
         )
 
-        residual_quantile_values = self.target_network.compute_quantile_values(
-            states=next_states, actions=None
+        residual_quantile_values, _, spr_projections = (
+            self.target_network.compute_quantile_values(
+                states=next_states, actions=None
+            )
         )
         _target_quantile_values = (
             rewards + (self.gamma**n_step) * (1 - is_dones) * residual_quantile_values
@@ -139,7 +142,8 @@ class BBFAgent:
         )  # (B, N, N)
 
         with tf.GradientTape() as tape:
-            _quantile_values = self.network.compute_quantile_values(
+            # QR-DQN Loss
+            _quantile_values, z_t, _ = self.network.compute_quantile_values(
                 states=states, actions=actions
             )  # (B, N)
             quantile_values = tf.repeat(
@@ -165,8 +169,17 @@ class BBFAgent:
             loss_qrdqn = tf.reduce_mean(
                 tf.reduce_mean(tf.reduce_mean(quantile_huberloss, axis=2), axis=1)
             )
-            loss_spr = 0
-            loss = loss_qrdqn + loss_spr
+
+            # BYOL Loss: 正規化後のL2ノルムはコサイン類似度と等価
+            spr_predictions = self.network.compute_prediction(
+                z_t, actions=actions[..., :-1]
+            )
+            loss_spr = tf.reduce_mean(
+                (spr_predictions - spr_projections) ** 2,
+            )
+
+            # Total Loss
+            loss = loss_qrdqn + self.spr_weight * loss_spr
 
         variables = self.network.trainable_variables
         grads = tape.gradient(loss, variables)
