@@ -1,6 +1,7 @@
 from pathlib import Path
 import shutil
 import collections
+import functools
 
 import gym
 import tensorflow as tf
@@ -22,12 +23,9 @@ class BBFAgent:
         self.N = 200
         self.quantiles = [1 / (2 * self.N) + i * 1 / self.N for i in range(self.N)]
 
-        self.network = BBFNetwork(
-            action_space=self.action_space, n_supports=self.N, width_scale=4
-        )
-        self.target_network = BBFNetwork(
-            action_space=self.action_space, n_supports=self.N
-        )
+        self.network = self.build_network()
+        self.target_network = self.build_network()
+        self.target_network.set_weights(self.network.get_weights())
 
         self.batch_size = 32
         self.optimizer = tf.keras.optimizers.AdamW(
@@ -54,21 +52,28 @@ class BBFAgent:
         self.shrink_factor = 0.5
         self.perturb_factor = 0.5
 
-        self.global_steps = 1
-        self.setup()
+        self.global_steps = 0
 
-    def setup(self):
+    def build_network(self):
+        dummy_states, dummy_actions = self.get_dummy()
+        network = BBFNetwork(
+            action_space=self.action_space, n_supports=self.N, width_scale=4
+        )
+        quantile_values, z_t, g = network(self.dummy_states)
+        network.compute_predictions(z_t, dummy_actions)
+        return network
+
+    @functools.cache
+    def get_dummy(self):
         env = gym.make(self.env_id)
         frames = collections.deque(maxlen=4)
         frame, _ = env.reset()
         for _ in range(4):
             frames.append(utils.preprocess_frame(frame))
-
-        state = np.stack(frames, axis=2)[np.newaxis, ...]
-        self.network(state)
-        self.target_network(state)
-
-        self.target_network.set_weights(self.network.get_weights())
+        dummy_states = np.stack(frames, axis=2)[np.newaxis, ...]
+        dummy_actions = None
+        import pdb; pdb.set_trace()  # fmt: skip
+        return dummy_states, dummy_actions
 
     @property
     def gamma(self):
@@ -248,6 +253,13 @@ class BBFAgent:
         )
 
     def reset_weights(self):
+        # encoderと遷移モデルのリセット
+        random_network = self.build_network()
+        target_random_network = self.build_network()
+        import pdb; pdb.set_trace()  # fmt: skip
+        # Shrink
+
+        # Perturb
         pass
 
     def save_weights(self, save_path: Path):
