@@ -28,13 +28,7 @@ class BBFAgent:
         self.target_network.set_weights(self.network.get_weights())
 
         self.batch_size = 32
-        self.optimizer = tf.keras.optimizers.AdamW(
-            learning_rate=0.0005,
-            weight_decay=0.1,
-            beta_1=0.9,
-            beta_2=0.999,
-            epsilon=1.5e-4,
-        )
+        self.optimizer = self.build_optimizer()
         self.replay_buffer = ReplayBuffer(maxlen=max_steps)
         self.target_update_tau = 0.005
 
@@ -59,9 +53,19 @@ class BBFAgent:
         network = BBFNetwork(
             action_space=self.action_space, n_supports=self.N, width_scale=4
         )
-        quantile_values, z_t, g = network(self.dummy_states)
-        network.compute_predictions(z_t, dummy_actions)
+        _, z_t, _ = network(dummy_states)
+        network.compute_prediction(z_t, dummy_actions)
         return network
+
+    def build_optimizer(self):
+        optimizer = tf.keras.optimizers.AdamW(
+            learning_rate=0.0005,
+            weight_decay=0.1,
+            beta_1=0.9,
+            beta_2=0.999,
+            epsilon=1.5e-4,
+        )
+        return optimizer
 
     @functools.cache
     def get_dummy(self):
@@ -70,9 +74,10 @@ class BBFAgent:
         frame, _ = env.reset()
         for _ in range(4):
             frames.append(utils.preprocess_frame(frame))
-        dummy_states = np.stack(frames, axis=2)[np.newaxis, ...]
-        dummy_actions = None
-        import pdb; pdb.set_trace()  # fmt: skip
+        dummy_states = tf.convert_to_tensor(
+            np.stack(frames, axis=2)[np.newaxis, ...], dtype=tf.float32
+        )
+        dummy_actions = tf.convert_to_tensor([[0]], dtype=tf.int32)
         return dummy_states, dummy_actions
 
     @property
@@ -154,6 +159,7 @@ class BBFAgent:
 
             if self.global_steps % self.reset_period == 0:
                 self.reset_weights()
+                self.optimizer = self.build_optimizer()
 
             ep_steps += 1
             self.global_steps += 1
@@ -253,14 +259,25 @@ class BBFAgent:
         )
 
     def reset_weights(self):
-        # encoderと遷移モデルのリセット
-        random_network = self.build_network()
-        target_random_network = self.build_network()
-        import pdb; pdb.set_trace()  # fmt: skip
-        # Shrink
-
-        # Perturb
-        pass
+        for _network in [self.network, self.target_network]:
+            random_network = self.build_network()
+            for key in ["encoder", "project", "q_head", "transition_model", "predict"]:
+                subnet = getattr(_network, key)
+                subnet_random = getattr(random_network, key)
+                if key in ["encoder", "transition_model"]:
+                    # shirink and perturb
+                    subnet.set_weights(
+                        [
+                            self.shrink_factor * online_param
+                            + self.perturb_factor * random_param
+                            for online_param, random_param in zip(
+                                subnet.get_weights(),
+                                subnet_random.get_weights(),
+                            )
+                        ]
+                    )
+                else:
+                    subnet.set_weights(subnet_random.get_weights())
 
     def save_weights(self, save_path: Path):
         pass
