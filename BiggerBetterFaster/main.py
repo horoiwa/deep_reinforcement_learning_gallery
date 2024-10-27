@@ -2,6 +2,7 @@ from pathlib import Path
 import shutil
 import collections
 import functools
+from typing import Optional
 
 import tensorflow as tf
 import numpy as np
@@ -40,10 +41,10 @@ class BBFAgent:
         self.max_horizon = 10
         self.min_horizon = 3
 
-        self.replay_ratio = 2
+        self.replay_ratio = 2  # 2 update on every 1 environment step
         self.spr_weight = 5
-        self.reset_period = 20_000
-        self.cycle_period = 5_000
+        self.reset_period = 20_000  # every 40K gradient step
+        self.cycle_period = 5_000  # first 10K gradient step
         self.shrink_factor = 0.5
         self.perturb_factor = 0.5
 
@@ -126,6 +127,7 @@ class BBFAgent:
             action = self.network.sample_action(state, epsilon=self.epsilon)
             next_frame, reward, done, info = env.step(action)
             ep_rewards += reward
+            reward = np.clip(reward, -1, 1)
             frames.append(utils.preprocess_frame(next_frame))
 
             if done:
@@ -161,6 +163,10 @@ class BBFAgent:
             if self.global_steps % self.reset_period == 0:
                 self.reset_weights()
                 self.optimizer = self.build_optimizer()
+
+            if self.global_steps % 1000 == 0:
+                score: int = self.test_play()
+                tf.summary.scalar("test_score", score, step=self.global_steps)
 
             ep_steps += 1
             self.global_steps += 1
@@ -292,13 +298,16 @@ class BBFAgent:
         self.network.load_weights(str(load_dir / "network"))
         self.target_network.load_weights(str(load_dir / "network"))
 
-    def test_play(self, tag: int, monitor_dir: Path):
-        env = wrappers.RecordVideo(
-            gym.make(self.env_id),
-            video_folder=monitor_dir,
-            step_trigger=lambda i: True,
-            name_prefix=tag,
-        )
+    def test_play(self, tag: int, monitor_dir: Optional[Path]):
+        if monitor_dir:
+            env = wrappers.RecordVideo(
+                gym.make(self.env_id),
+                video_folder=monitor_dir,
+                step_trigger=lambda i: True,
+                name_prefix=tag,
+            )
+        else:
+            env = gym.make(self.env_id)
 
         frames = collections.deque(maxlen=4)
         frame, _ = env.reset()
