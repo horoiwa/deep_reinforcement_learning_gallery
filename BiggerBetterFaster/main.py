@@ -161,12 +161,14 @@ class BBFAgent:
                         tf.summary.scalar("loss_spr", loss_spr, step=self.global_steps)
 
             if self.global_steps % self.reset_period == 0:
+                self.save()
                 self.reset_weights()
                 self.optimizer = self.build_optimizer()
 
-            if self.global_steps % 1000 == 0:
+            if self.global_steps % 1_000 == 0:
                 score: int = self.test_play()
-                tf.summary.scalar("test_score", score, step=self.global_steps)
+                with self.summary_writer.as_default():
+                    tf.summary.scalar("test_score", score, step=self.global_steps)
 
             ep_steps += 1
             self.global_steps += 1
@@ -174,9 +176,9 @@ class BBFAgent:
         with self.summary_writer.as_default():
             tf.summary.scalar("rewards", ep_rewards, step=self.global_steps)
             tf.summary.scalar("steps", ep_steps, step=self.global_steps)
-            tf.summary.scalar("gamma", ep_steps, step=self.gamma)
-            tf.summary.scalar("epsilon", ep_steps, step=self.epsilon)
-            tf.summary.scalar("nsteps", ep_steps, step=self.n_step)
+            tf.summary.scalar("gamma", self.gamma, step=self.global_steps)
+            tf.summary.scalar("epsilon", self.epsilon, step=self.global_steps)
+            tf.summary.scalar("n_steps", self.n_step, step=self.global_steps)
 
         return ep_rewards, ep_steps
 
@@ -298,7 +300,8 @@ class BBFAgent:
         self.network.load_weights(str(load_dir / "network"))
         self.target_network.load_weights(str(load_dir / "network"))
 
-    def test_play(self, tag: int, monitor_dir: Optional[Path]):
+    def test_play(self, tag: Optional[int] = None, monitor_dir: Optional[Path] = None):
+        print("Test play")
         if monitor_dir:
             env = wrappers.RecordVideo(
                 gym.make(self.env_id),
@@ -315,14 +318,16 @@ class BBFAgent:
             frames.append(utils.preprocess_frame(frame))
 
         ep_rewards = 0
+        steps = 0
         done = False
-        while not done:
+        while not done or steps <= 5000:
             state = np.stack(frames, axis=2)[np.newaxis, ...]
             action = self.network.sample_action(state, epsilon=0.0)
             next_frame, reward, done, _ = env.step(action)
             ep_rewards += reward
             frames.append(utils.preprocess_frame(next_frame))
-
+            steps += 1
+        print(f"Test score: {ep_rewards}")
         return ep_rewards
 
 
@@ -342,7 +347,9 @@ def train(env_id="BreakoutDeterministic-v4", max_steps=2**20):
         rewards, steps = agent.rollout()
         episodes += 1
         steps += steps
+        print("----" * 5)
         print(f"Episode {episodes}: {rewards}, {agent.global_steps} steps")
+        print("----" * 5)
 
     agent.save("checkpoints/")
     print("Training finshed")

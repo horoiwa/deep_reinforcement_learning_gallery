@@ -47,6 +47,7 @@ class BBFNetwork(tf.keras.Model):
             self.hidden_dim, activation=None, kernel_initializer="he_normal"
         )
 
+    @tf.function
     def call(self, state):
         B = state.shape[0]  # batch size
         z_t = renormalize(self.encoder(state))  # (B, 11, 11, 128)
@@ -87,6 +88,7 @@ class BBFNetwork(tf.keras.Model):
         )  # (B, N)
         return quantile_values, z_t, g
 
+    @tf.function
     def compute_prediction(self, z_t, actions):
         z_t_plus_k = self.transition_model(z_t, actions)
         g = self.project(self.flatten(z_t_plus_k))
