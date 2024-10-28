@@ -34,7 +34,7 @@ class BBFAgent:
         self.replay_buffer = ReplayBuffer(maxlen=max_steps)
         self.target_update_tau = 0.005
 
-        self.eps_min = 0.0
+        self.eps_min = 0.05
         self.warmup_steps = 100
         # self.warmup_steps = 2000
         self.epsilon_decay_period = 5_000
@@ -98,7 +98,7 @@ class BBFAgent:
                 self.warmup_steps + self.epsilon_decay_period - self.global_steps
             )
             eps = (1.0 - self.eps_min) * max(
-                0.05, steps_left / self.epsilon_decay_period
+                0.0, steps_left / self.epsilon_decay_period
             )
         return eps
 
@@ -249,8 +249,7 @@ class BBFAgent:
             )
 
             # Total Loss
-            # loss = loss_qrdqn + self.spr_weight * loss_spr
-            loss = self.spr_weight * loss_spr
+            loss = loss_qrdqn + self.spr_weight * loss_spr
 
         variables = self.network.trainable_variables
         grads = tape.gradient(loss, variables)
@@ -344,11 +343,11 @@ def train(env_id="BreakoutDeterministic-v4", max_steps=2**20):
     agent = BBFAgent(env_id=env_id, max_steps=max_steps, logdir=LOGDIR)
     agent.load()
 
-    episodes = 0
-    while agent.global_steps < max_steps:
+    episodes, total_steps = 0, 0
+    while total_steps < max_steps:
         rewards, steps = agent.rollout()
         episodes += 1
-        steps += steps
+        total_steps += steps
         print("----" * 5)
         print(f"Episode {episodes}: {rewards}, {agent.global_steps} steps")
         print("----" * 5)
