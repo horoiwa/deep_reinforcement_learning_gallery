@@ -88,7 +88,7 @@ class BBFNetwork(tf.keras.Model):
         )  # (B, N)
         return quantile_values, z_t, g
 
-    # @tf.function
+    @tf.function
     def compute_prediction(self, z_t, actions):
         z_t_plus_k = self.transition_model(z_t, actions)
         g = self.project(self.flatten(z_t_plus_k))

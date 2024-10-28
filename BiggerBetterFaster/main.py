@@ -97,7 +97,9 @@ class BBFAgent:
             steps_left = (
                 self.warmup_steps + self.epsilon_decay_period - self.global_steps
             )
-            eps = (1.0 - self.eps_min) * max(0, steps_left / self.epsilon_decay_period)
+            eps = (1.0 - self.eps_min) * max(
+                0.05, steps_left / self.epsilon_decay_period
+            )
         return eps
 
     @property
