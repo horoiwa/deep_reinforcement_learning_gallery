@@ -1,5 +1,4 @@
 import random
-import functools
 import tensorflow as tf
 from dataclasses import dataclass
 

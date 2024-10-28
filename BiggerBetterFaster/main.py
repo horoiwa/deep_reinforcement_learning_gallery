@@ -161,7 +161,6 @@ class BBFAgent:
                         tf.summary.scalar("loss_spr", loss_spr, step=self.global_steps)
 
             if self.global_steps % self.reset_period == 0:
-                self.save()
                 self.reset_weights()
                 self.optimizer = self.build_optimizer()
 
@@ -245,7 +244,7 @@ class BBFAgent:
                 _spr_predictions, ord=2, axis=-1, keepdims=True
             )
             loss_spr = tf.reduce_mean(
-                (spr_predictions - spr_projections) ** 2,
+                tf.reduce_sum((spr_predictions - spr_projections) ** 2, axis=-1)
             )
 
             # Total Loss
@@ -322,7 +321,7 @@ class BBFAgent:
         done = False
         while not done or steps <= 5000:
             state = np.stack(frames, axis=2)[np.newaxis, ...]
-            action = self.network.sample_action(state, epsilon=0.0)
+            action = self.network.sample_action(state, epsilon=0.05)
             next_frame, reward, done, _ = env.step(action)
             ep_rewards += reward
             frames.append(utils.preprocess_frame(next_frame))
