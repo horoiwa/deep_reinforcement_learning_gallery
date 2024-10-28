@@ -164,7 +164,7 @@ class BBFAgent:
                 self.reset_weights()
                 self.optimizer = self.build_optimizer()
 
-            if self.global_steps % 1_000 == 0:
+            if self.global_steps != 0 and self.global_steps % 1_000 == 0:
                 score: int = self.test_play()
                 with self.summary_writer.as_default():
                     tf.summary.scalar("test_score", score, step=self.global_steps)
@@ -184,11 +184,12 @@ class BBFAgent:
     def update_network(self, k=1.0):
         """QR-DQN style loss function"""
 
-        states, actions, rewards, is_dones, next_states = (
+        states, actions_all, rewards, is_dones, next_states = (
             self.replay_buffer.sample_batch(
                 batch_size=self.batch_size, n_step=self.n_step, gamma=self.gamma
             )
         )
+        actions = actions_all[:, 0:1]
 
         residual_quantile_values, _, _spr_projections = (
             self.target_network.compute_quantile_values(
@@ -237,9 +238,7 @@ class BBFAgent:
             )
 
             # BYOL Loss: 正規化後のL2ノルムはコサイン類似度と等価
-            _spr_predictions = self.network.compute_prediction(
-                z_t, actions=actions[..., :-1]
-            )
+            _spr_predictions = self.network.compute_prediction(z_t, actions=actions_all)
             spr_predictions = _spr_predictions / tf.norm(
                 _spr_predictions, ord=2, axis=-1, keepdims=True
             )
@@ -248,7 +247,8 @@ class BBFAgent:
             )
 
             # Total Loss
-            loss = loss_qrdqn + self.spr_weight * loss_spr
+            # loss = loss_qrdqn + self.spr_weight * loss_spr
+            loss = self.spr_weight * loss_spr
 
         variables = self.network.trainable_variables
         grads = tape.gradient(loss, variables)
@@ -340,6 +340,7 @@ def train(env_id="BreakoutDeterministic-v4", max_steps=2**20):
         shutil.rmtree(LOGDIR)
 
     agent = BBFAgent(env_id=env_id, max_steps=max_steps, logdir=LOGDIR)
+    agent.load()
 
     episodes = 0
     while agent.global_steps < max_steps:

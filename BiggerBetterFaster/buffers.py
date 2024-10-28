@@ -28,20 +28,28 @@ class ReplayBuffer:
 
     def sample_batch(self, batch_size: int, n_step: int, gamma: float):
         assert n_step > 0
-        indices = [random.randint(0, len(self.buffer) - 10) for _ in range(batch_size)]
-        trajectories = [self.buffer[idx : idx + n_step] for idx in indices]
+        indices = [
+            random.randint(0, len(self.buffer) - n_step - 1) for _ in range(batch_size)
+        ]
+        trajectories = [self.buffer[idx : idx + n_step + 1] for idx in indices]
 
         states = tf.concat(
             [traj[0].state for traj in trajectories], axis=0
         )  # (B, H, W, 4)
-        actions = tf.convert_to_tensor(
-            [[traj[0].action] for traj in trajectories], dtype=tf.int64
-        )  # (B, 1)
+
+        actions = []
+        for trajectory in trajectories:
+            _actions, is_done = [], 0
+            for transition in trajectory[:-1]:
+                _actions.append(transition.action * (1 - is_done))
+                is_done = max(is_done, transition.is_done)
+            actions.append(_actions)
+        actions = tf.convert_to_tensor(actions, dtype=tf.int32)
 
         rewards, is_dones = [], []
         for trajectory in trajectories:
             reward, is_done = 0, 0
-            for i, transition in enumerate(trajectory, start=0):
+            for i, transition in enumerate(trajectory[:-1], start=0):
                 reward += transition.reward * gamma**i
                 is_done = max(is_done, transition.is_done)
                 if is_done == 1:
