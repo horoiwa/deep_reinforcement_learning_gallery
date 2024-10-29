@@ -34,15 +34,15 @@ class BBFAgent:
         self.replay_buffer = ReplayBuffer(maxlen=max_steps)
         self.target_update_tau = 0.005
 
-        self.eps_min = 0.05
-        self.warmup_steps = 100
-        # self.warmup_steps = 2000
+        self.eps_min = 0.01
+        self.warmup_steps = 500
         self.epsilon_decay_period = 5_000
         self.max_horizon = 10
         self.min_horizon = 3
 
         self.replay_ratio = 2  # 2 update on every 1 environment step
-        self.spr_weight = 5
+        # self.spr_weight = 5
+        self.spr_weight = 1
         self.reset_period = 20_000  # every 40K gradient step
         self.cycle_period = 5_000  # first 10K gradient step
         self.shrink_factor = 0.5
@@ -97,8 +97,8 @@ class BBFAgent:
             steps_left = (
                 self.warmup_steps + self.epsilon_decay_period - self.global_steps
             )
-            eps = (1.0 - self.eps_min) * max(
-                0.0, steps_left / self.epsilon_decay_period
+            eps = min(
+                1.0, max(0.0, steps_left / self.epsilon_decay_period) + self.eps_min
             )
         return eps
 
@@ -163,6 +163,7 @@ class BBFAgent:
                         tf.summary.scalar("loss_spr", loss_spr, step=self.global_steps)
 
             if self.global_steps % self.reset_period == 0:
+                self.save("checkpoints/")
                 self.reset_weights()
                 self.optimizer = self.build_optimizer()
 
@@ -304,7 +305,7 @@ class BBFAgent:
         print("Test play")
         if monitor_dir:
             env = wrappers.RecordVideo(
-                gym.make(self.env_id),
+                gym.make(self.env_id, render_mode="rgb_array"),
                 video_folder=monitor_dir,
                 step_trigger=lambda i: True,
                 name_prefix=tag,
@@ -322,7 +323,7 @@ class BBFAgent:
         done = False
         while not done or steps <= 5000:
             state = np.stack(frames, axis=2)[np.newaxis, ...]
-            action = self.network.sample_action(state, epsilon=0.05)
+            action = self.network.sample_action(state, epsilon=0.01)
             next_frame, reward, done, _ = env.step(action)
             ep_rewards += reward
             frames.append(utils.preprocess_frame(next_frame))
@@ -331,17 +332,13 @@ class BBFAgent:
         return ep_rewards
 
 
-def train(env_id="BreakoutDeterministic-v4", max_steps=2**20):
-    """
-    NOTE: 2 ** 20 = 104_8576
-    """
+def train(env_id="BreakoutDeterministic-v4", max_steps=100_000):
 
     LOGDIR = Path(__file__).parent / "log"
     if LOGDIR.exists():
         shutil.rmtree(LOGDIR)
 
     agent = BBFAgent(env_id=env_id, max_steps=max_steps, logdir=LOGDIR)
-    agent.load()
 
     episodes, total_steps = 0, 0
     while total_steps < max_steps:
@@ -349,25 +346,30 @@ def train(env_id="BreakoutDeterministic-v4", max_steps=2**20):
         episodes += 1
         total_steps += steps
         print("----" * 5)
-        print(f"Episode {episodes}: {rewards}, {agent.global_steps} steps")
+        print(f"Episode {episodes}: {rewards}, {total_steps} steps")
         print("----" * 5)
 
-    agent.save("checkpoints/")
     print("Training finshed")
 
 
 def test(env_id="BreakoutDeterministic-v4"):
+    import warnings
+
+    warnings.filterwarnings("ignore")
+
     MONITOR_DIR = Path(__file__).parent / "mp4"
     if MONITOR_DIR.exists():
         shutil.rmtree(MONITOR_DIR)
 
     agent = BBFAgent(env_id=env_id, max_steps=None, logdir=None)
     agent.load("checkpoints/")
-    for i in range(10):
+    for i in range(1, 11):
         score = agent.test_play(tag=f"{i}", monitor_dir=MONITOR_DIR)
-        print(i, score)
+        print("----" * 10)
+        print(f"{i}: Score {score}")
+        print("----" * 10)
 
 
 if __name__ == "__main__":
-    train()
+    # train()
     test()
