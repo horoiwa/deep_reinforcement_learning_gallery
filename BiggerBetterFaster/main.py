@@ -371,5 +371,5 @@ def test(env_id="BreakoutDeterministic-v4"):
 
 
 if __name__ == "__main__":
-    # train()
+    train()
     test()
