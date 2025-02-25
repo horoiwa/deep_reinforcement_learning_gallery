@@ -9,23 +9,26 @@ import gym
 from gym import wrappers
 from PIL import Image
 
+import mcts
 from buffers import ReplayBuffer, Experience
-from networks import PVNetwork, TransitionModel, RewardModel
+from networks import PolicyValueNetwork, TransitionModel, RewardModel
 
 
 def process_frame(frame):
     image = Image.fromarray(frame)
-    image = image.resize((96, 96))
-    return image.astype(np.float32)
+    image = image.convert("L").resize((96, 96))
+    image = np.array(image).astype(np.float32)  #: (96, 96)
+    return image
 
 
 class EfficientZeroV2:
 
-    def __init__(self, env_id: str):
+    def __init__(self, env_id: str, log_dir: str):
         self.env_id = env_id
         self.n_frames = 4
+        self.action_space = gym.make(env_id).action_space.n
 
-        self.pv_network = PVNetwork()
+        self.pv_network = PolicyValueNetwork()
         self.transition_model = TransitionModel()
         self.reward_model = RewardModel()
 
@@ -33,6 +36,7 @@ class EfficientZeroV2:
 
         self.setup()
         self.total_steps = 0
+        self.summary_writer = tf.summary.create_file_writer(str(log_dir))
 
     def setup(self):
         pass
@@ -40,9 +44,9 @@ class EfficientZeroV2:
     def rollout(self):
         env = gym.make(self.env_id)
 
-        frames = collections.deque(maxlen=self.n_frames)
         frame, info = env.reset()
         lives = info["lives"]
+        frames = collections.deque(maxlen=self.n_frames)
         for _ in range(self.n_frames):
             frames.append(process_frame(frame))
 
@@ -52,7 +56,8 @@ class EfficientZeroV2:
         while not done:
 
             state = np.stack(frames, axis=2)[np.newaxis, ...]
-            action = self.network.sample_action(state, epsilon=self.epsilon)
+            # action = mcts.search(state, self.pv_network)
+            action = env.action_space.sample()
             next_frame, reward, done, info = env.step(action)
 
             ep_rewards += reward
@@ -78,17 +83,17 @@ class EfficientZeroV2:
             ep_steps += 1
             self.total_steps += 1
 
-        self.buffer.add(trajectory)
+        self.replay_buffer.add(trajectory)
         with self.summary_writer.as_default():
-            tf.summary.scalar("ep_rewards", ep_rewards, step=self.global_steps)
-            tf.summary.scalar("ep_steps", ep_steps, step=self.global_steps)
+            tf.summary.scalar("ep_rewards", ep_rewards, step=self.total_steps)
+            tf.summary.scalar("ep_steps", ep_steps, step=self.total_steps)
 
         info = {"rewards": ep_rewards, "steps": ep_steps}
         return info
 
 
-def main(max_steps=100_000, env_id="BreakoutNoFrameskip-v4"):
-    agent = EfficientZeroV2(env_id=env_id)
+def main(max_steps=100_000, env_id="BreakoutNoFrameskip-v4", log_dir="logs"):
+    agent = EfficientZeroV2(env_id=env_id, log_dir=log_dir)
 
     n = 0
     while max_steps >= agent.total_steps:
@@ -104,4 +109,4 @@ def test():
 
 
 if __name__ == "__main__":
-    train()
+    main()
