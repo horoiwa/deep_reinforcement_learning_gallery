@@ -11,7 +11,7 @@ from PIL import Image
 
 import mcts
 from buffers import ReplayBuffer, Experience
-from networks import PolicyValueNetwork, TransitionModel, RewardModel
+from networks import EFZeroNetwork
 
 
 def process_frame(frame):
@@ -27,21 +27,48 @@ class EfficientZeroV2:
         self.env_id = env_id
         self.n_frames = 4
         self.action_space = gym.make(env_id).action_space.n
+        self.n_supports = 51
+
+        self.network = EFZeroNetwork(
+            action_space=self.action_space, n_supports=self.n_supports
+        )
+
+        self.replay_buffer = ReplayBuffer(maxlen=1_000_000)
+        self.batch_size = 256
         self.gamma = 0.997
-        self.num_simulations = 8
+        self.replay_ratio = 1
+        self.unroll_steps = 5
+        self.td_steps = 5
+        self.num_simulations = 16
+        self.update_interval, self.target_update_interval = 100, 400
+        self.lambda_1, self.lambda_2, self.lambda_3, self.lambda_4 = 1.0, 1.0, 0.25, 2.0
 
-        self.pv_network = PolicyValueNetwork()
-        self.transition_model = TransitionModel()
-        self.reward_model = RewardModel()
-
-        self.replay_buffer = ReplayBuffer()
+        self.optimizer = tf.keras.optimizers.SGD(
+            learning_rate=0.2, weight_decay=0.0001, momentum=0.9
+        )
 
         self.setup()
-        self.total_steps = 0
         self.summary_writer = tf.summary.create_file_writer(str(log_dir))
+        self.total_steps = 0
 
     def setup(self):
-        pass
+        env = gym.make(self.env_id)
+
+        frame, info = env.reset()
+        frames = collections.deque(maxlen=self.n_frames)
+        for _ in range(self.n_frames):
+            frames.append(process_frame(frame))
+        states = np.stack(frames, axis=2)[np.newaxis, ...]
+        (
+            z,
+            policy_prob,
+            value_prob,
+            reward_prob,
+            z_next,
+            projection,
+            target_projection,
+        ) = self.network(states, actions=np.array([[2]]))
+        import pdb; pdb.set_trace()  # fmt: skip
 
     def init_tree(self) -> mcts.GumbelMCTS:
 
@@ -66,14 +93,16 @@ class EfficientZeroV2:
         ep_rewards, ep_steps = 0, 0
         trajectory = []
         while not done:
-
             state = np.stack(frames, axis=2)[np.newaxis, ...]
-            tree: mcts.GumbelMCTS = self.init_tree()
-            action, _, _ = tree.search_batch(root_states=[state])
-            next_frame, reward, done, info = env.step(action[0])
+            action = mcts.search(
+                root_state=state,
+                num_simulations=self.num_simulations,
+                network=self.network,
+            )
+            next_frame, raw_reward, done, info = env.step(action)
 
-            ep_rewards += reward
-            reward = np.clip(reward, -1, 1)
+            ep_rewards += raw_reward
+            reward = np.clip(raw_reward, -1, 1)
             frames.append(process_frame(next_frame))
 
             if done:
@@ -90,7 +119,11 @@ class EfficientZeroV2:
                 trajectory.append(exp)
 
             if self.total_steps > 1000:
-                self.update_network()
+                if self.total_steps % self.update_interval == 0:
+                    num_updates = int(self.update_interval * self.replay_ratio)
+                    self.update_network(num_updates=num_updates)
+                if self.total_steps % self.target_update_interval == 0:
+                    self.update_target_network()
 
             ep_steps += 1
             self.total_steps += 1
@@ -103,8 +136,27 @@ class EfficientZeroV2:
         info = {"rewards": ep_rewards, "steps": ep_steps}
         return info
 
+    def update_network(self, num_updates: int):
+        batchs = [
+            self.replay_buffer.sample_batch(
+                batch_size=self.batch_size,
+                unroll_steps=self.unroll_steps,
+                td_steps=self.td_steps,
+                gamma=self.gamma,
+            )
+            in _
+            for _ in range(num_updates)
+        ]
+        for batch in batchs:
+            # reanalyze
+            # update
+            pass
 
-def main(max_steps=100_000, env_id="BreakoutNoFrameskip-v4", log_dir="logs"):
+    def update_target_network(self):
+        pass
+
+
+def main(max_steps=100_000, env_id="BreakoutDeterministic-v4", log_dir="logs"):
     agent = EfficientZeroV2(env_id=env_id, log_dir=log_dir)
 
     n = 0
