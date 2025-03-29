@@ -65,20 +65,10 @@ class EfficientZeroV2:
             value_prob,
             reward_prob,
             z_next,
-            projection,
-            target_projection,
+            # projection,
+            # target_projection,
         ) = self.network(states, actions=np.array([[2]]))
         import pdb; pdb.set_trace()  # fmt: skip
-
-    def init_tree(self) -> mcts.GumbelMCTS:
-
-        tree = mcts.GumbelMCTS(
-            pv_network=self.pv_network,
-            action_space=self.action_space,
-            gamma=self.gamma,
-            num_simulations=self.num_simulations,
-        )
-        return tree
 
     def rollout(self):
         env = gym.make(self.env_id)
@@ -96,8 +86,10 @@ class EfficientZeroV2:
             state = np.stack(frames, axis=2)[np.newaxis, ...]
             action = mcts.search(
                 root_state=state,
-                num_simulations=self.num_simulations,
+                action_space=self.action_space,
                 network=self.network,
+                num_simulations=self.num_simulations,
+                gamma=self.gamma,
             )
             next_frame, raw_reward, done, info = env.step(action)
 
