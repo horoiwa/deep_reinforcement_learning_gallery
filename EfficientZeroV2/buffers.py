@@ -43,10 +43,9 @@ class ReplayBuffer:
         dones = []
 
         for trajectory in trajectories:
-            is_done = False
-            for i, transition in enumerate(trajectory):
-                if not is_done:
-                    is_done = bool(transition.done)
-                    pass
+            _dones = np.cumsum([ts.done for ts in trajectory]).clip(0, 1)
+
+            _states = np.array([ts.state for ts in trajectory]) * (1 - _dones)
+            _actions = np.array([ts.action for ts in trajectory]) * (1 - _dones)
 
         return states, actions, value_prefixes, dones

@@ -27,6 +27,8 @@ class EfficientZeroV2:
         self.env_id = env_id
         self.n_frames = 4
         self.action_space = gym.make(env_id).action_space.n
+        self.gamma = 0.997
+        self.num_simulations = 8
 
         self.pv_network = PolicyValueNetwork()
         self.transition_model = TransitionModel()
@@ -40,6 +42,16 @@ class EfficientZeroV2:
 
     def setup(self):
         pass
+
+    def init_tree(self) -> mcts.GumbelMCTS:
+
+        tree = mcts.GumbelMCTS(
+            pv_network=self.pv_network,
+            action_space=self.action_space,
+            gamma=self.gamma,
+            num_simulations=self.num_simulations,
+        )
+        return tree
 
     def rollout(self):
         env = gym.make(self.env_id)
@@ -56,9 +68,9 @@ class EfficientZeroV2:
         while not done:
 
             state = np.stack(frames, axis=2)[np.newaxis, ...]
-            # action = mcts.search(state, self.pv_network)
-            action = env.action_space.sample()
-            next_frame, reward, done, info = env.step(action)
+            tree: mcts.GumbelMCTS = self.init_tree()
+            action, _, _ = tree.search_batch(root_states=[state])
+            next_frame, reward, done, info = env.step(action[0])
 
             ep_rewards += reward
             reward = np.clip(reward, -1, 1)
