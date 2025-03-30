@@ -59,16 +59,17 @@ class EfficientZeroV2:
         for _ in range(self.n_frames):
             frames.append(process_frame(frame))
         states = np.stack(frames, axis=2)[np.newaxis, ...]
+
         (
             z,
             policy_prob,
             value_prob,
             reward_prob,
-            z_next,
-            # projection,
-            # target_projection,
-        ) = self.network(states, actions=np.array([[2]]))
-        import pdb; pdb.set_trace()  # fmt: skip
+        ) = self.network(states, training=False)
+
+        z_next = self.network.predict_transition(
+            z, actions=np.array([[2]]), training=False
+        )
 
     def rollout(self):
         env = gym.make(self.env_id)
@@ -85,7 +86,7 @@ class EfficientZeroV2:
         while not done:
             state = np.stack(frames, axis=2)[np.newaxis, ...]
             action = mcts.search(
-                root_state=state,
+                raw_state=state,
                 action_space=self.action_space,
                 network=self.network,
                 num_simulations=self.num_simulations,

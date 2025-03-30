@@ -3,38 +3,49 @@ import tensorflow.keras.layers as kl
 
 
 class EFZeroNetwork(tf.keras.Model):
-    def __init__(self, action_space: int, n_supports: int):
+    def __init__(
+        self,
+        action_space: int,
+        n_supports: int,
+        reward_range: tuple[float, float] = (-2.5, 2.5),
+        value_range: tuple[float, float] = (-25.0, 25.0),
+    ):
         super(EFZeroNetwork, self).__init__()
 
         self.representation_network = RepresentationNetwork()
         self.policy_value_network = PolicyValueNetwork(
-            action_space=action_space, n_supports=n_supports
+            action_space=action_space, n_supports=n_supports, value_range=value_range
         )
-        self.reward_network = RewardNetwork(n_supports=n_supports)
+        self.reward_network = RewardNetwork(
+            n_supports=n_supports, reward_range=reward_range
+        )
         self.transition_network = TransitionNetwork(action_space=action_space)
 
-        # self.projection_network = ProjectionNetwork()
-        # self.projection_head_network = ProjectionHeadNetwork()
+        self.p1_network = P1Network()
+        self.p2_network = P2Network()
 
-    def call(self, states, actions, training=False):
+    def call(self, states, training=False):
         z = self.representation_network(states, training=training)  # (6, 6, 64)
-
-        policy_prob, value_prob = self.policy_value_network(z, training=training)
+        policy_logits, value_logits = self.policy_value_network(z, training=training)
+        policy_prob = tf.nn.softmax(policy_logits, axis=-1)
+        value_prob = tf.nn.softmax(value_logits, axis=-1)
         reward_prob = self.reward_network(z, training=training)
-        z_next = self.transition_network(z, actions, training=training)
-
-        # projection = self.projection_network(z, training=training)
-        # target_projection = self.projection_network(z_next, training=training)
 
         return (
             z,
             policy_prob,
             value_prob,
             reward_prob,
-            z_next,
-            # projection,
-            # target_projection,
         )
+
+    def predict_transition(self, z, actions, training=False):
+        z_next = self.transition_network(z, actions, training=training)
+        return z_next
+
+    def compute_projection(self, z, training=False):
+        g = self.projection_network(z, training=training)
+        q = self.predictor_network(q, training=training)
+        return g, q
 
 
 class RepresentationNetwork(tf.keras.Model):
@@ -57,6 +68,7 @@ class RepresentationNetwork(tf.keras.Model):
         self.pooling2 = kl.AveragePooling2D(pool_size=3, strides=2, padding="same")
         self.resblock_4 = ResidualBlock(dims=64)
 
+    @tf.function
     def call(self, states, training=False):
         x = self.conv_1(states)  # (96, 96, 4) -> (48, 48, 32)
         x = self.bn_1(x, training=training)
@@ -74,34 +86,51 @@ class RepresentationNetwork(tf.keras.Model):
 
 
 class PolicyValueNetwork(tf.keras.Model):
-    def __init__(self, action_space: int, n_supports: int):
+    def __init__(
+        self, action_space: int, n_supports: int, value_range: tuple[float, float]
+    ):
         super(PolicyValueNetwork, self).__init__()
+        self.n_supports = n_supports
+        self.value_range = value_range
+        self.supports = tf.linspace(value_range[0], value_range[1], n_supports)
+
         self.resblock_1 = ResidualBlock(dims=64)
 
         self.v_conv_1 = kl.Conv2D(
-            16, kernel_size=1, strides=1, padding="valid", use_bias=True
+            16,
+            kernel_size=1,
+            strides=1,
+            padding="valid",
+            use_bias=True,
+            activation=None,
         )
         self.v_bn_1 = kl.BatchNormalization(axis=-1)
         self.v_fc_1 = kl.Dense(
-            32, use_bias=True, activation="elu", kernel_initializer="zeros"
+            32, use_bias=True, activation=None, kernel_initializer="zeros"
         )
         self.v_bn_2 = kl.BatchNormalization(axis=-1)
         self.v_fc_2 = kl.Dense(
-            n_supports, use_bias=True, activation="elu", kernel_initializer="zeros"
+            n_supports, use_bias=True, activation=None, kernel_initializer="zeros"
         )
 
         self.p_conv_1 = kl.Conv2D(
-            16, kernel_size=1, strides=1, padding="valid", use_bias=True
+            16,
+            kernel_size=1,
+            strides=1,
+            padding="valid",
+            use_bias=True,
+            activation=None,
         )
         self.p_bn_1 = kl.BatchNormalization(axis=-1)
         self.p_fc_1 = kl.Dense(
-            32, use_bias=True, activation="elu", kernel_initializer="zeros"
+            32, use_bias=True, activation=None, kernel_initializer="zeros"
         )
         self.p_bn_2 = kl.BatchNormalization(axis=-1)
         self.p_fc_2 = kl.Dense(
-            action_space, use_bias=True, activation="elu", kernel_initializer="zeros"
+            action_space, use_bias=True, activation=None, kernel_initializer="zeros"
         )
 
+    @tf.function
     def call(self, z, training=False):
         B = z.shape[0]
         z = self.resblock_1(z, training=training)
@@ -109,27 +138,41 @@ class PolicyValueNetwork(tf.keras.Model):
         _value = self.v_conv_1(z)  # (6, 6, 64) -> (6, 6, 16)
         _value = self.v_bn_1(_value, training=training)
         _value = tf.nn.relu(_value)
+
         _value = tf.reshape(_value, shape=(B, -1))
         _value = self.v_fc_1(_value)
         _value = self.v_bn_2(_value, training=training)
-        value = self.v_fc_2(_value)
-        value = tf.nn.softmax(value, axis=-1)
+        _value = tf.nn.elu(_value)
+        value_logits = self.v_fc_2(_value)
 
         _policy = self.p_conv_1(z)  # (6, 6, 64) -> (6, 6, 16)
         _policy = self.p_bn_1(_policy, training=training)
         _policy = tf.nn.relu(_policy)
+
         _policy = tf.reshape(_policy, shape=(B, -1))
         _policy = self.p_fc_1(_policy)
         _policy = self.p_bn_2(_policy, training=training)
-        policy = self.p_fc_2(_policy)
-        policy = tf.nn.softmax(policy, axis=-1)
+        _policy = tf.nn.elu(_policy)
+        policy_logits = self.p_fc_2(_policy)
 
-        return policy, value
+        return policy_logits, value_logits
+
+    def predict(self, z, training=False):
+        policy_logits, value_logits = self.call(z, training=training)
+        policy_prob = tf.nn.softmax(policy_logits, axis=-1)
+        value_prob = tf.nn.softmax(value_logits, axis=-1)
+        value = tf.reduce_sum(value_prob * self.supports, axis=-1, keepdims=True)
+
+        return policy_logits, policy_prob, value_logits, value_prob, value
 
 
 class RewardNetwork(tf.keras.Model):
-    def __init__(self, n_supports: int):
+    def __init__(self, n_supports: int, reward_range: tuple[float, float]):
         super(RewardNetwork, self).__init__()
+        self.n_supports = n_supports
+        self.reward_range = reward_range
+        self.supports = tf.linspace(reward_range[0], reward_range[1], n_supports)
+
         self.conv_1 = kl.Conv2D(
             16, kernel_size=1, strides=1, padding="valid", use_bias=True
         )
@@ -153,9 +196,14 @@ class RewardNetwork(tf.keras.Model):
         x = self.fc_1(x)
         x = self.bn_2(x, training=training)
         logits = self.fc_2(x)
-        reward = tf.nn.softmax(logits, axis=-1)
 
-        return reward
+        return logits
+
+    def predict(self, z, training=False):
+        reward_logits = self.call(z, training=training)
+        reward_probs = tf.nn.softmax(reward_logits, axis=-1)
+        reward = tf.reduce_sum(reward_probs * self.supports, axis=-1, keepdims=True)
+        return reward_probs, reward
 
 
 class TransitionNetwork(tf.keras.Model):
@@ -197,9 +245,9 @@ class TransitionNetwork(tf.keras.Model):
         return z_next
 
 
-class ProjectionNetwork(tf.keras.Model):
+class P1Network(tf.keras.Model):
     def __init__(self):
-        super(ProjectionNetwork, self).__init__()
+        super(P1Network, self).__init__()
 
         self.dense_1 = kl.Dense(1024, use_bias=True, activation=None)
         self.bn_1 = kl.BatchNormalization(axis=-1)
@@ -223,9 +271,9 @@ class ProjectionNetwork(tf.keras.Model):
         return projection
 
 
-class ProjectionHeadNetwork(tf.keras.Model):
+class P2Network(tf.keras.Model):
     def __init__(self):
-        super(ProjectionHeadNetwork, self).__init__()
+        super(P2Network, self).__init__()
 
         self.dense_1 = kl.Dense(256, use_bias=True, activation=None)
         self.bn_1 = kl.BatchNormalization(axis=-1)

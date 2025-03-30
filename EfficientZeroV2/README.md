@@ -4,6 +4,7 @@ This is **unofficial** **simplified** re-implementation of (EfficientZero V2: Ma
 
 
 - No Prioritized Experience Replay
+- No mixed value target, only use search based value target (SVE)
 - Use grayscale instead of RGB
 - No LSTM for reward prediction
 - No value-prefix for reward prediction
