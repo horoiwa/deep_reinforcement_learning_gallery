@@ -174,16 +174,21 @@ class RewardNetwork(tf.keras.Model):
         self.supports = tf.linspace(reward_range[0], reward_range[1], n_supports)
 
         self.conv_1 = kl.Conv2D(
-            16, kernel_size=1, strides=1, padding="valid", use_bias=True
+            16,
+            kernel_size=1,
+            strides=1,
+            padding="valid",
+            use_bias=True,
+            activation=None,
         )
         self.bn_1 = kl.BatchNormalization(axis=-1)
 
         self.fc_1 = kl.Dense(
-            32, use_bias=True, activation="elu", kernel_initializer="zeros"
+            32, use_bias=True, activation=None, kernel_initializer="zeros"
         )
         self.bn_2 = kl.BatchNormalization(axis=-1)
         self.fc_2 = kl.Dense(
-            n_supports, use_bias=True, activation="elu", kernel_initializer="zeros"
+            n_supports, use_bias=True, activation=None, kernel_initializer="zeros"
         )
 
     def call(self, z, training=False):
@@ -195,6 +200,7 @@ class RewardNetwork(tf.keras.Model):
         x = tf.reshape(x, shape=(B, -1))
         x = self.fc_1(x)
         x = self.bn_2(x, training=training)
+        x = tf.nn.elu(x)
         logits = self.fc_2(x)
 
         return logits
