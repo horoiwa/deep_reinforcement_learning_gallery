@@ -87,18 +87,16 @@ def search_batch(
                     rewards[i][0].numpy(),
                 )
             )
-    for tree in trees:
-        tree.get_result()
+
+    selected_actions, target_policies, target_values = zip(
+        *[tree.get_result() for tree in trees]
+    )
 
     import pdb; pdb.set_trace()  # fmt: skip
-    selected_actions, mcts_policies, search_based_values = [
-        tree.get_mcts_result() for tree in trees
-    ]
-
     return (
         selected_actions,
-        mcts_policies,
-        search_based_values,
+        target_policies,
+        target_values,
     )
 
 
