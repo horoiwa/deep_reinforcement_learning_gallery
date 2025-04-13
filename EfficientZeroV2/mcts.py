@@ -1,4 +1,4 @@
-from typing import List, Optional, Generator
+from typing import List, Optional, Generator, Callable
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -105,17 +105,13 @@ def search_batch(
 class ValueStats(list):
 
     def normalize(self, value: float) -> float:
-
         if len(self) == 0:
-            return value
+            return np.clip(value, 0.0, 1.0)
 
         _min, _max = min(self), max(self)
         if _max > _min:
-            if value >= _max:
-                value = _max
-            elif value <= _min:
-                value = _min
-            value = (value - _min) / (_max - _min)
+            value = np.clip(value, _min, _max)
+            value = (value - _min) / max(_max - _min, 0.01)
         value = np.clip(value, 0.0, 1.0)
         return value
 
@@ -146,76 +142,51 @@ class Node:
         return self.children is not None
 
     @property
-    def policy(self) -> np.ndarray:
-        return tf.math.softmax(self.priors).numpy()
-
-    @property
     def estimated_value(self) -> np.ndarray:
-        return np.mean(self.estimated_values)
-
-    def get_v_mix(self) -> float:
-        pi = self.policy
-        pi_sum, pi_qsa_sum = 0.0, 0.0
-        for i, child_node in enumerate(self.children):
-            if child_node.is_expanded:
-                pi_sum += pi[i]
-                pi_qsa_sum += pi[i] * (
-                    child_node.reward + self.gamma * child_node.value
-                )
-        if pi_sum < 1e-6:
-            v_mix = self.estimated_value
+        if self.estimated_values:
+            return np.mean(self.estimated_values)
         else:
-            visit_sum = sum(child_node.visit_count for child_node in self.children)
-            v_mix = (1.0 / (1.0 + visit_sum)) * (
-                self.estimated_value + visit_sum * pi_qsa_sum / pi_sum
+            return None
+
+    def get_transformed_qsa(
+        self,
+        scaler: Callable[[float], float],
+        c_visit: float = 50.0,
+        c_scale: float = 0.1,
+    ) -> float:
+        if self.estimated_value is None:
+            return 0.0
+        else:
+            scaled_qsa: float = scaler(self.estimated_value)
+            max_child_visit_count = max(child.visit_count for child in self.children)
+            transformed_qsa = (c_visit + max_child_visit_count) * c_scale * scaled_qsa
+            return transformed_qsa
+
+    def get_score(
+        self,
+        is_phase_zero: bool,
+        scaler: Callable[[float], float],
+        c_visit: float = 50.0,
+        c_scale: float = 0.1,
+    ) -> float:
+        if is_phase_zero:
+            return self.prior
+        else:
+            return self.prior + self.get_transformed_qsa(
+                scaler=scaler, c_visit=c_visit, c_scale=c_scale
             )
-        return v_mix
 
-    def get_completed_Qs(self) -> list[float]:
-        """
-        v_mix: https://openreview.net/pdf?id=bERaNdoegnO#page=16
-        """
-        v_mix: float = self.get_v_mix()
-
-        completed_Qs = []
-        for child_node in self.children:
-            if child_node.is_expanded:
-                # 子ノードが展開済みの場合は1step-TD
-                completed_Q = child_node.reward + self.gamma * child_node.value
-            else:
-                # 子ノードが展開済みでない場合は親nodeのv_mix
-                completed_Q = v_mix
-
-            completed_Qs.append(completed_Q)
-
-        return completed_Qs
-
-    def get_transformed_completed_Qs(
-        self, vstats: ValueStats, c_visit: float = 50.0, c_scale: float = 0.1
-    ) -> np.ndarray:
-        completed_Qs: list[float] = self.get_completed_Qs()
-        normalized_completed_Qs = np.array([vstats.normalize(q) for q in completed_Qs])
-
-        max_child_visit_count = max(child.visit_count for child in self.children)
-
-        transformed_completed_Qs = (
-            (c_visit + max_child_visit_count) * c_scale * normalized_completed_Qs
-        )
-        return transformed_completed_Qs
-
-    def search(self, action: int | None = None, vstats: ValueStats | None = None):
+    def search(self, action: int | None = None):
         self.visit_count += 1
         if action is None:
             """
             直感的には改善方策 π (a) が示唆する選択確率と、
             これまでの訪問回数 N(a) に基づく選択確率との差が最も大きい行動、
             つまり「まだ十分に訪問されていないが、改善方策上は有望な行動」を選択
+            Note:
+                No use of the improved policy (Gumbel MCTS) for simplification
             """
-            assert vstats is not None
-            policy = tf.math.softmax(
-                self.priors + self.get_transformed_completed_Qs(vstats=vstats)
-            ).numpy()
-
+            policy = tf.math.softmax(self.priors).numpy()
             visit_counts = [child.visit_count for child in self.children]
             scores = [
                 policy[i] - visit_counts[i] / (1 + sum(visit_counts))
@@ -225,7 +196,7 @@ class Node:
 
         selected_node: Node = self.children[action]
         if selected_node.is_expanded:
-            return selected_node.search(action=None, vstats=vstats)
+            return selected_node.search(action=None)
         else:
             prev_state = self.state
             prev_action = action
@@ -254,15 +225,16 @@ class Node:
         ]
         self.visit_count += 1
 
-    def backprop(self, value_stats: ValueStats) -> float:
+    def backprop(self, vstats: ValueStats) -> float:
         value = self.reward + self.gamma * self.value
         self.estimated_values.append(value)
+        vstats.append(value)
 
         node = self.parent
         while node.depth > 0:
             value = node.reward + self.gamma * value
             node.estimated_values.append(value)
-            value_stats.append(value)
+            vstats.append(value)
             node = node.parent
         return value
 
@@ -284,8 +256,10 @@ class GumbelMCTS:
         self.gamma = gamma
 
         self.simulation_count = 0
+        self.simulation_count_to_next_phase = self.num_simulations // 2
+        self.is_phase_zero = True
         self.estimated_values = []
-        self.value_stats: list = ValueStats()
+        self.vstats = ValueStats()
 
     def setup(
         self, root_state: np.ndarray, root_value: float, root_policy_logits: np.ndarray
@@ -323,8 +297,14 @@ class GumbelMCTS:
 
         # Select Action
         candidates: list[Node] = sorted(
-            [v for v in self.root_node.children if v.visible],
-            key=lambda x: x.prior,
+            [
+                child_node
+                for child_node in self.root_node.children
+                if child_node.visible
+            ],
+            key=lambda x: x.get_score(
+                is_phase_zero=self.is_phase_zero, scaler=self.vstats.normalize
+            ),
             reverse=True,
         )
         min_visit_candidate = min(candidates, key=lambda x: x.visit_count)
@@ -333,9 +313,7 @@ class GumbelMCTS:
         print(f"selected action: {action}")
 
         # Retrieve leaf node
-        leaf_node, prev_state, prev_action = self.root_node.search(
-            action=action, vstats=self.value_stats
-        )
+        leaf_node, prev_state, prev_action = self.root_node.search(action=action)
 
         # Expand leaf node
         received_values: tuple = yield (prev_state, prev_action)
@@ -346,14 +324,36 @@ class GumbelMCTS:
         )
 
         # backprop
-        estimated_value = leaf_node.backprop(value_stats=self.value_stats)
+        estimated_value = leaf_node.backprop(vstats=self.vstats)
         self.estimated_values.append(estimated_value)
         self.simulation_count += 1
 
-        if self.simulation_count in [8, 4, 2]:
-            import pdb; pdb.set_trace()  # fmt: skip
+        # Sequential Halving
+        if self.simulation_count == self.simulation_count_to_next_phase:
+            num_remaining_simulations = self.num_simulations - self.simulation_count
 
+            if num_remaining_simulations > 2:
+                self.is_phase_zero = False
+                self.simulation_count_to_next_phase += num_remaining_simulations // 2
+
+                child_nodes: list[Node] = sorted(
+                    [
+                        child_node
+                        for child_node in self.root_node.children
+                        if child_node.visible
+                    ],
+                    key=lambda x: x.get_score(
+                        is_phase_zero=self.is_phase_zero, scaler=self.vstats.normalize
+                    ),
+                    reverse=True,
+                )
+                n_child_nodes = len(child_nodes)
+                if n_child_nodes > 1:
+                    m = n_child_nodes // 2
+                    for child_node in child_nodes[-m:]:
+                        child_node.visible = False
         yield
 
     def get_result(self):
+        assert self.simulation_count == self.num_simulations
         import pdb; pdb.set_trace()  # fmt: skip
