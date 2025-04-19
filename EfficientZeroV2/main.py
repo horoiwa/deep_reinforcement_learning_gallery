@@ -41,7 +41,7 @@ class EfficientZeroV2:
         self.td_steps = 5
         self.num_simulations = 16
         self.update_interval, self.target_update_interval = 100, 400
-        self.lambda_1, self.lambda_2, self.lambda_3, self.lambda_4 = 1.0, 1.0, 0.25, 2.0
+        self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = 1.0, 1.0, 0.25, 2.0
 
         self.optimizer = tf.keras.optimizers.SGD(
             learning_rate=0.2, weight_decay=0.0001, momentum=0.9
@@ -135,20 +135,42 @@ class EfficientZeroV2:
         return info
 
     def update_network(self, num_updates: int):
-        batchs = [
-            self.replay_buffer.sample_batch(
+        for i in range(num_updates):
+            (states_ts, actions, rewards, dones) = self.replay_buffer.sample_batch(
                 batch_size=self.batch_size,
                 unroll_steps=self.unroll_steps,
                 td_steps=self.td_steps,
                 gamma=self.gamma,
             )
-            in _
-            for _ in range(num_updates)
-        ]
-        for batch in batchs:
-            # reanalyze
-            # update
-            pass
+            states = states_ts[:, 0, :, :, :]
+            _, target_policies, target_values = mcts.search_batch(
+                raw_states=states,
+                action_space=self.action_space,
+                network=self.network,
+                num_simulations=self.num_simulations,
+                gamma=self.gamma,
+            )
+            with tf.GradientTape() as tape:
+                z, policy_prob, value_prob, reward_prob = self.network(
+                    states, training=True
+                )
+                loss_r = 0
+                loss_p = 0
+                loss_v = 0
+
+                p1 = self.network.p1_network(z, training=True)
+                p2 = self.network.p2_network(z, training=True)
+                loss_g = tf.reduce_mean((p2 - tf.stop_gradient(p1)) ** 2)
+
+                loss = (
+                    self.lambda_r * loss_r
+                    + self.lambda_p * loss_p
+                    + self.lambda_v * loss_v
+                    + self.lambda_g * loss_g
+                )
+
+            grads = tape.gradient(loss, self.network.trainable_variables)
+            self.optimizer.apply_gradients(zip(grads, self.network.trainable_variables))
 
     def update_target_network(self):
         pass
