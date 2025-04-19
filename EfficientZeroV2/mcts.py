@@ -88,16 +88,10 @@ def search_batch(
                 )
             )
 
-    selected_actions, target_policies, target_values = zip(
-        *[tree.get_result() for tree in trees]
+    best_actions, policies, values = zip(
+        *[tree.get_simulation_result() for tree in trees]
     )
-
-    import pdb; pdb.set_trace()  # fmt: skip
-    return (
-        selected_actions,
-        target_policies,
-        target_values,
-    )
+    return (best_actions, policies, values)
 
 
 class ValueStats(list):
@@ -125,11 +119,10 @@ class Node:
     visit_count: int = 0
 
     state: np.ndarray | None = None
-    priors: np.ndarray | None = None
     value: float | None = None
     reward: float | None = None
     children: Optional[List["Node"]] = None
-    estimated_values: list[float] = field(default_factory=list)
+    search_based_values: list[float] = field(default_factory=list)
     visible: bool = True
 
     def __repr__(self):
@@ -140,25 +133,25 @@ class Node:
         return self.children is not None
 
     @property
-    def estimated_value(self) -> np.ndarray:
-        if self.estimated_values:
-            return np.mean(self.estimated_values)
+    def search_based_value(self) -> np.ndarray:
+        if self.search_based_values:
+            return np.mean(self.search_based_values)
         else:
             return None
 
-    def get_transformed_qsa(
+    def get_transformed_search_based_value(
         self,
         scaler: Callable[[float], float],
         c_visit: float = 50.0,
         c_scale: float = 0.1,
     ) -> float:
-        if self.estimated_value is None:
+        if self.search_based_value is None:
             return 0.0
         else:
-            scaled_qsa: float = scaler(self.estimated_value)
+            scaled_v: float = scaler(self.search_based_value)
             max_child_visit_count = max(child.visit_count for child in self.children)
-            transformed_qsa = (c_visit + max_child_visit_count) * c_scale * scaled_qsa
-            return transformed_qsa
+            transformed_value = (c_visit + max_child_visit_count) * c_scale * scaled_v
+            return transformed_value
 
     def get_score(
         self,
@@ -170,9 +163,10 @@ class Node:
         if is_phase_zero:
             return self.prior
         else:
-            return self.prior + self.get_transformed_qsa(
+            score = self.prior + self.get_transformed_search_based_value(
                 scaler=scaler, c_visit=c_visit, c_scale=c_scale
             )
+            return score
 
     def search(self, action: int | None = None):
         self.visit_count += 1
@@ -182,9 +176,9 @@ class Node:
             これまでの訪問回数 N(a) に基づく選択確率との差が最も大きい行動、
             つまり「まだ十分に訪問されていないが、改善方策上は有望な行動」を選択
             Note:
-                No use of the improved policy (Gumbel MCTS) for simplification
+                For simplification, No use of the improved policy (Gumbel MCTS) during non-root search.
             """
-            policy = tf.math.softmax(self.priors).numpy()
+            policy = tf.math.softmax([child_node.prior for child_node in self.children])
             visit_counts = [child.visit_count for child in self.children]
             scores = [
                 policy[i] - visit_counts[i] / (1 + sum(visit_counts))
@@ -208,7 +202,6 @@ class Node:
         reward: float = None,
     ):
         self.state = state
-        self.priors = priors
         self.value = value
         self.reward = reward
         self.children = [
@@ -225,13 +218,13 @@ class Node:
 
     def backprop(self, vstats: ValueStats) -> float:
         value = self.reward + self.gamma * self.value
-        self.estimated_values.append(value)
+        self.search_based_values.append(value)
         vstats.append(value)
 
         node = self.parent
         while node.depth > 0:
             value = node.reward + self.gamma * value
-            node.estimated_values.append(value)
+            node.search_based_values.append(value)
             vstats.append(value)
             node = node.parent
         return value
@@ -256,7 +249,7 @@ class GumbelMCTS:
         self.simulation_count = 0
         self.simulation_count_to_next_phase = self.num_simulations // 2
         self.is_phase_zero = True
-        self.estimated_values = []
+        self.search_based_values = []
         self.vstats = ValueStats()
 
     def setup(
@@ -323,7 +316,7 @@ class GumbelMCTS:
 
         # backprop
         estimated_value = leaf_node.backprop(vstats=self.vstats)
-        self.estimated_values.append(estimated_value)
+        self.search_based_values.append(estimated_value)
         self.simulation_count += 1
 
         # Sequential Halving
@@ -352,6 +345,17 @@ class GumbelMCTS:
                         child_node.visible = False
         yield
 
-    def get_result(self):
+    def get_simulation_result(self):
         assert self.simulation_count == self.num_simulations
-        import pdb; pdb.set_trace()  # fmt: skip
+        best_action = sorted(
+            self.root_node.children, key=lambda node: node.visit_count, reverse=True
+        )[0].prev_action
+        search_based_policy = tf.math.softmax(
+            [
+                child_node.get_score(is_phase_zero=False, scaler=self.vstats.normalize)
+                for child_node in self.root_node.children
+            ]
+        ).numpy()
+        search_based_value = np.mean(self.search_based_values)
+
+        return best_action, search_based_policy, search_based_value
