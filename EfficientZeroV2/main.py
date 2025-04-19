@@ -84,9 +84,9 @@ class EfficientZeroV2:
         ep_rewards, ep_steps = 0, 0
         trajectory = []
         while not done:
-            state = np.stack(frames, axis=2)[np.newaxis, ...]
-            action, _, _ = mcts.search(
-                raw_state=state,
+            obs = np.stack(frames, axis=2)[np.newaxis, ...]
+            action, _, _, _ = mcts.search(
+                observation=obs,
                 action_space=self.action_space,
                 network=self.network,
                 num_simulations=self.num_simulations,
@@ -104,16 +104,16 @@ class EfficientZeroV2:
             frames.append(process_frame(next_frame))
 
             if done:
-                exp = Experience(state=state, action=action, reward=reward, done=1)
+                exp = Experience(obs=obs, action=action, reward=reward, done=1)
                 trajectory.append(exp)
                 break
             else:
                 #: life loss as episode ends
                 if info["lives"] != lives:
                     lives = info["lives"]
-                    exp = Experience(state=state, action=action, reward=reward, done=1)
+                    exp = Experience(obs=obs, action=action, reward=reward, done=1)
                 else:
-                    exp = Experience(state=state, action=action, reward=reward, done=0)
+                    exp = Experience(obs=obs, action=action, reward=reward, done=0)
                 trajectory.append(exp)
 
             if self.total_steps > 1000:
@@ -136,38 +136,48 @@ class EfficientZeroV2:
 
     def update_network(self, num_updates: int):
         for i in range(num_updates):
-            (states_ts, actions, rewards, dones) = self.replay_buffer.sample_batch(
+            (observations, actions, rewards, dones) = self.replay_buffer.sample_batch(
                 batch_size=self.batch_size,
                 unroll_steps=self.unroll_steps,
-                td_steps=self.td_steps,
-                gamma=self.gamma,
             )
-            states = states_ts[:, 0, :, :, :]
-            _, target_policies, target_values = mcts.search_batch(
-                raw_states=states,
+
+            B, T, H, W, C = observations.shape
+            _, target_policies, target_values, target_states = mcts.search_batch(
+                raw_states=tf.reshape(observations, [B * T, H, W, C]),
                 action_space=self.action_space,
                 network=self.network,
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
             )
+            target_policy = tf.reshape(target_policies, [B, T, -1])
+            target_value = tf.reshape(target_values, [B, T, -1])
+
             with tf.GradientTape() as tape:
-                z, policy_prob, value_prob, reward_prob = self.network(
-                    states, training=True
-                )
-                loss_r = 0
-                loss_p = 0
-                loss_v = 0
+                loss = 0.0
+                for i in range(T):
+                    z_t, policy_t, value_t, reward_t = self.network(
+                        states[:, i, :, :, :], training=True
+                    )
+                    target_policy_t = target_policy[:, i, :]
+                    target_value_t = target_value[:, i, :]
 
-                p1 = self.network.p1_network(z, training=True)
-                p2 = self.network.p2_network(z, training=True)
-                loss_g = tf.reduce_mean((p2 - tf.stop_gradient(p1)) ** 2)
+                    loss_p = tf.reduce_sum(target_policy_t * policy_t, axis=-1)
+                    loss_v = tf.reduce_sum(target_value_t * value_t, axis=-1)
+                    loss_r = tf.reduce_sum(target_value_t * reward_t, axis=-1)
 
-                loss = (
-                    self.lambda_r * loss_r
-                    + self.lambda_p * loss_p
-                    + self.lambda_v * loss_v
-                    + self.lambda_g * loss_g
-                )
+                    p1 = self.network.p1_network(z_t, training=True)
+                    p2 = self.network.p2_network(p1, training=True)
+
+                    loss_g = tf.reduce_mean((p2 - tf.stop_gradient(p1)) ** 2)
+
+                    _loss_t = (
+                        self.lambda_r * loss_r
+                        + self.lambda_p * loss_p
+                        + self.lambda_v * loss_v
+                        + self.lambda_g * loss_g
+                    )
+                    loss_t = tf.reduce_mean(_loss_t) / self.unroll_steps
+                    loss += loss_t
 
             grads = tape.gradient(loss, self.network.trainable_variables)
             self.optimizer.apply_gradients(zip(grads, self.network.trainable_variables))
