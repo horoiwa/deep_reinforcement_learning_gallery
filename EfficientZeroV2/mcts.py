@@ -14,7 +14,7 @@ def search(
     temperature: float = 1.0,
 ) -> tuple[int, float, float]:
 
-    best_actions, _, _ = search_batch(
+    best_actions, policies, values = search_batch(
         raw_states=[raw_state],
         action_space=action_space,
         network=network,
@@ -22,7 +22,7 @@ def search(
         gamma=gamma,
         temperature=temperature,
     )
-    return best_actions[0]
+    return best_actions[0], policies[0], values[0]
 
 
 def search_batch(
@@ -300,8 +300,6 @@ class GumbelMCTS:
         )
         min_visit_candidate = min(candidates, key=lambda x: x.visit_count)
         action: int = min_visit_candidate.prev_action
-        print("--------------------------------")
-        print(f"selected action: {action}")
 
         # Retrieve leaf node
         leaf_node, prev_state, prev_action = self.root_node.search(action=action)

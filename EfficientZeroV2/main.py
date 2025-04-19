@@ -85,7 +85,7 @@ class EfficientZeroV2:
         trajectory = []
         while not done:
             state = np.stack(frames, axis=2)[np.newaxis, ...]
-            action = mcts.search(
+            action, _, _ = mcts.search(
                 raw_state=state,
                 action_space=self.action_space,
                 network=self.network,
@@ -93,6 +93,11 @@ class EfficientZeroV2:
                 gamma=self.gamma,
             )
             next_frame, raw_reward, done, info = env.step(action)
+
+            print("Step: ", ep_steps)
+            print(f"best_action: {action}")
+            print(f"raw_reward: {raw_reward}")
+            print(f"lives: {lives}")
 
             ep_rewards += raw_reward
             reward = np.clip(raw_reward, -1, 1)
@@ -155,9 +160,11 @@ def main(max_steps=100_000, env_id="BreakoutDeterministic-v4", log_dir="logs"):
     n = 0
     while max_steps >= agent.total_steps:
         info = agent.rollout()
-        print("-" * 20)
-        print(f"n: {n}, total_steps: {agent.total_steps}")
+        print("=" * 20)
+        print(f"Episode: {n}")
+        print(f"Total_steps: {agent.total_steps}")
         print("info: ", info)
+        print("=" * 20)
         n += 1
 
 
