@@ -143,6 +143,7 @@ class EfficientZeroV2:
         return info
 
     def update_network(self, num_updates: int):
+        stats = collections.defaultdict(list)
         for i in range(num_updates):
             (init_obs, init_action, observations, actions, rewards, masks) = (
                 self.replay_buffer.sample_batch(
@@ -159,23 +160,22 @@ class EfficientZeroV2:
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
             )
-            import pdb; pdb.set_trace()  # fmt: skip
+
             target_policies = tf.reshape(target_policies, [B, T, -1])
             target_values = tf.reshape(target_values, [B, T, -1])
             target_rewards = self.network.reward_network.scalar_to_dist(rewards)
 
             with tf.GradientTape() as tape:
-                loss = 0.0
-                states_init = self.network.representation_network(
-                    obs_init, training=True
+                init_state = self.network.representation_network(
+                    init_obs, training=True
                 )
-                next_states = self.network.predict_transition(
-                    states_init, actions=action_init, training=True
+                next_state = self.network.predict_transition(
+                    init_state, actions=init_action, training=True
                 )
                 for i in range(self.unroll_steps):
-                    states = next_states
+                    state = next_state
                     policy_t, value_t, reward_t = (
-                        self.network.predict_policy_value_reward(states, training=True)
+                        self.network.predict_policy_value_reward(state, training=True)
                     )
 
                     target_policy_t = target_policies[:, i, :]
@@ -186,15 +186,15 @@ class EfficientZeroV2:
                     loss_v = tf.reduce_sum(target_value_t * value_t, axis=-1)
                     loss_r = tf.reduce_sum(target_reward_t * reward_t, axis=-1)
 
-                    states_proj = self.network.p2_network(
-                        self.network.p1_network(states), training=True
+                    state_proj = self.network.p2_network(
+                        self.network.p1_network(state), training=True
                     )
-                    target_states_proj = self.network.p1_network(
+                    target_state_proj = self.network.p1_network(
                         target_states[:, i, :], training=True
                     )
 
                     loss_g = tf.reduce_mean(
-                        (states_proj - tf.stop_gradient(target_states_proj)) ** 2
+                        (state_proj - tf.stop_gradient(target_state_proj)) ** 2
                     )
 
                     _loss_t = (
@@ -206,13 +206,23 @@ class EfficientZeroV2:
                     loss_t = tf.reduce_mean(_loss_t) / self.unroll_steps
                     loss += loss_t
 
-                    next_states = self.network.predict_transition(
-                        states, actions=actions[:, i, :], training=True
+                    next_state = self.network.predict_transition(
+                        state, actions=actions[:, i], training=True
                     )
-                    next_states = 0.5 * next_states + 0.5 * tf.stop_gradient(next_states) # fmt: skip
+                    next_state = 0.5 * next_state + 0.5 * tf.stop_gradient(next_state) # fmt: skip
+
+                    stats[f"loss_r_{i}"].append(loss_r)
+                    stats[f"loss_p_{i}"].append(loss_p)
+                    stats[f"loss_v_{i}"].append(loss_v)
+                    stats[f"loss_g_{i}"].append(loss_g)
 
             grads = tape.gradient(loss, self.network.trainable_variables)
+            grads, global_norm = tf.clip_by_global_norm(grads, clip_norm=5)
             self.optimizer.apply_gradients(zip(grads, self.network.trainable_variables))
+
+        with self.summary_writer.as_default():
+            for key, value in stats.items():
+                tf.summary.scalar(key, tf.reduce_mean(value), step=self.total_steps)
 
     def update_target_network(self):
         pass
