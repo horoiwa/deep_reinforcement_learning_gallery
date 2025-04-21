@@ -6,7 +6,7 @@ import tensorflow as tf
 
 
 def search(
-    obsearvation: np.ndarray,
+    observation: np.ndarray,
     action_space: int,
     network,
     num_simulations: int,
@@ -15,7 +15,7 @@ def search(
 ) -> tuple[int, float, float]:
 
     best_actions, policies, values, states = search_batch(
-        observations=[obsearvation],
+        observations=[observation],
         action_space=action_space,
         network=network,
         num_simulations=num_simulations,
@@ -35,7 +35,7 @@ def search_batch(
 ) -> tuple[list[int], list[float], list[float]]:
 
     batch_size: int = len(observations)
-    raw_states = tf.concat(raw_states, axis=0)
+    observations = tf.concat(observations, axis=0)
     states = network.representation_network(observations, training=False)
     policy_logits, _, _, _, values = network.policy_value_network.predict(
         states, training=False

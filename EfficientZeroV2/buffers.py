@@ -7,7 +7,7 @@ import numpy as np
 
 @dataclass
 class Experience:
-    state: np.ndarray
+    observation: np.ndarray
     action: int
     reward: float
     done: int
@@ -26,26 +26,47 @@ class ReplayBuffer:
         if self.maxlen is not None and len(self.buffer) > self.maxlen:
             self.buffer = self.buffer[-self.maxlen :]
 
-    def sample_batch(
-        self, batch_size: int, unroll_steps: int, td_steps: int, gamma: float
-    ):
+    def sample_batch(self, batch_size: int, unroll_steps: int):
         indices = [
-            random.randint(0, len(self.buffer) - td_steps - unroll_steps - 1)
+            random.randint(0, len(self.buffer) - unroll_steps - 1)
             for _ in range(batch_size)
         ]
-        trajectories = [
-            self.buffer[idx : idx + td_steps + unroll_steps + 1] for idx in indices
-        ]
+        trajectories = [self.buffer[idx : idx + unroll_steps + 1] for idx in indices]
 
-        states = []
+        observations = []
         actions = []
-        value_prefixes = []
-        dones = []
+        rewards = []
+        masks = []
 
         for trajectory in trajectories:
-            _dones = np.cumsum([ts.done for ts in trajectory]).clip(0, 1)
+            _masks = 1 - np.cumsum([t.done for t in trajectory]).clip(0, 1)
+            _observations = np.concatenate(
+                [(1 - t.done) * t.observation for t in trajectory], axis=0
+            )
+            _actions = np.array([(1 - t.done) * t.action for t in trajectory]).reshape(
+                -1, 1
+            )
+            _rewards = np.array([(1 - t.done) * t.reward for t in trajectory]).reshape(
+                -1, 1
+            )
+            observations.append(_observations)
+            actions.append(_actions)
+            rewards.append(_rewards)
+            masks.append(_masks)
 
-            _states = np.array([ts.state for ts in trajectory]) * (1 - _dones)
-            _actions = np.array([ts.action for ts in trajectory]) * (1 - _dones)
+        observations = tf.stack(observations, axis=0)  # (B, unroll_steps+1, 96, 96, 1)
+        actions = tf.stack(actions, axis=0)  # (B, unroll_steps+1)
+        rewards = tf.stack(rewards, axis=0)  # (B, unroll_steps+1)
+        masks = tf.stack(masks, axis=0)  # (B, unroll_steps+1)
 
-        return states, actions, value_prefixes, dones
+        init_obs = observations[:, 0, ...]  # (B, 96, 96, 1)
+        init_action = actions[:, 0, ...]  # (B, 1)
+
+        return (
+            init_obs,
+            init_action,
+            observations[:, 1:, ...],
+            tf.squeeze(actions[:, 1:, ...], axis=-1),
+            tf.squeeze(rewards[:, 1:, ...], axis=-1),
+            masks[:, 1:],
+        )

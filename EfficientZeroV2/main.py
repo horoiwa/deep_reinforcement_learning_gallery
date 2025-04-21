@@ -34,7 +34,7 @@ class EfficientZeroV2:
         )
 
         self.replay_buffer = ReplayBuffer(maxlen=1_000_000)
-        self.batch_size = 256
+        self.batch_size = 64
         self.gamma = 0.997
         self.replay_ratio = 1
         self.unroll_steps = 5
@@ -58,17 +58,17 @@ class EfficientZeroV2:
         frames = collections.deque(maxlen=self.n_frames)
         for _ in range(self.n_frames):
             frames.append(process_frame(frame))
-        states = np.stack(frames, axis=2)[np.newaxis, ...]
+        observations = np.stack(frames, axis=2)[np.newaxis, ...]
 
         (
-            z,
+            states,
             policy_prob,
             value_prob,
             reward_prob,
-        ) = self.network(states, training=False)
+        ) = self.network(observations, training=False)
 
-        z_next = self.network.predict_transition(
-            z, actions=np.array([[2]]), training=False
+        next_states = self.network.predict_transition(
+            states, actions=np.array([[2]]), training=False
         )
 
     def rollout(self):
@@ -80,10 +80,10 @@ class EfficientZeroV2:
         for _ in range(self.n_frames):
             frames.append(process_frame(frame))
 
-        done = False
         ep_rewards, ep_steps = 0, 0
         trajectory = []
-        while not done:
+        done, reward, info = False, 0, info
+        while ep_steps < 2000:
             obs = np.stack(frames, axis=2)[np.newaxis, ...]
             action, _, _, _ = mcts.search(
                 observation=obs,
@@ -92,29 +92,35 @@ class EfficientZeroV2:
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
             )
-            next_frame, raw_reward, done, info = env.step(action)
+            next_frame, next_reward, next_done, next_info = env.step(action)
 
             print("Step: ", ep_steps)
             print(f"best_action: {action}")
-            print(f"raw_reward: {raw_reward}")
+            print(f"reward: {reward}")
             print(f"lives: {lives}")
 
-            ep_rewards += raw_reward
-            reward = np.clip(raw_reward, -1, 1)
+            ep_rewards += reward
+            reward = np.clip(reward, -1, 1)
             frames.append(process_frame(next_frame))
 
             if done:
-                exp = Experience(obs=obs, action=action, reward=reward, done=1)
+                exp = Experience(observation=obs, action=action, reward=reward, done=1)
                 trajectory.append(exp)
                 break
             else:
                 #: life loss as episode ends
                 if info["lives"] != lives:
                     lives = info["lives"]
-                    exp = Experience(obs=obs, action=action, reward=reward, done=1)
+                    exp = Experience(
+                        observation=obs, action=action, reward=reward, done=1
+                    )
                 else:
-                    exp = Experience(obs=obs, action=action, reward=reward, done=0)
+                    exp = Experience(
+                        observation=obs, action=action, reward=reward, done=0
+                    )
                 trajectory.append(exp)
+
+            done, reward, info = next_done, next_reward, next_info
 
             if self.total_steps > 1000:
                 if self.total_steps % self.update_interval == 0:
@@ -130,15 +136,19 @@ class EfficientZeroV2:
         with self.summary_writer.as_default():
             tf.summary.scalar("ep_rewards", ep_rewards, step=self.total_steps)
             tf.summary.scalar("ep_steps", ep_steps, step=self.total_steps)
+        if True:
+            self.update_network(num_updates=1)
 
         info = {"rewards": ep_rewards, "steps": ep_steps}
         return info
 
     def update_network(self, num_updates: int):
         for i in range(num_updates):
-            (observations, actions, rewards, dones) = self.replay_buffer.sample_batch(
-                batch_size=self.batch_size,
-                unroll_steps=self.unroll_steps,
+            (init_obs, init_action, observations, actions, rewards, masks) = (
+                self.replay_buffer.sample_batch(
+                    batch_size=self.batch_size,
+                    unroll_steps=self.unroll_steps,
+                )
             )
 
             B, T, H, W, C = observations.shape
@@ -149,26 +159,43 @@ class EfficientZeroV2:
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
             )
-            target_policy = tf.reshape(target_policies, [B, T, -1])
-            target_value = tf.reshape(target_values, [B, T, -1])
+            import pdb; pdb.set_trace()  # fmt: skip
+            target_policies = tf.reshape(target_policies, [B, T, -1])
+            target_values = tf.reshape(target_values, [B, T, -1])
+            target_rewards = self.network.reward_network.scalar_to_dist(rewards)
 
             with tf.GradientTape() as tape:
                 loss = 0.0
-                for i in range(T):
-                    z_t, policy_t, value_t, reward_t = self.network(
-                        states[:, i, :, :, :], training=True
+                states_init = self.network.representation_network(
+                    obs_init, training=True
+                )
+                next_states = self.network.predict_transition(
+                    states_init, actions=action_init, training=True
+                )
+                for i in range(self.unroll_steps):
+                    states = next_states
+                    policy_t, value_t, reward_t = (
+                        self.network.predict_policy_value_reward(states, training=True)
                     )
-                    target_policy_t = target_policy[:, i, :]
-                    target_value_t = target_value[:, i, :]
+
+                    target_policy_t = target_policies[:, i, :]
+                    target_value_t = target_values[:, i, :]
+                    target_reward_t = target_rewards[:, i, :]
 
                     loss_p = tf.reduce_sum(target_policy_t * policy_t, axis=-1)
                     loss_v = tf.reduce_sum(target_value_t * value_t, axis=-1)
-                    loss_r = tf.reduce_sum(target_value_t * reward_t, axis=-1)
+                    loss_r = tf.reduce_sum(target_reward_t * reward_t, axis=-1)
 
-                    p1 = self.network.p1_network(z_t, training=True)
-                    p2 = self.network.p2_network(p1, training=True)
+                    states_proj = self.network.p2_network(
+                        self.network.p1_network(states), training=True
+                    )
+                    target_states_proj = self.network.p1_network(
+                        target_states[:, i, :], training=True
+                    )
 
-                    loss_g = tf.reduce_mean((p2 - tf.stop_gradient(p1)) ** 2)
+                    loss_g = tf.reduce_mean(
+                        (states_proj - tf.stop_gradient(target_states_proj)) ** 2
+                    )
 
                     _loss_t = (
                         self.lambda_r * loss_r
@@ -178,6 +205,11 @@ class EfficientZeroV2:
                     )
                     loss_t = tf.reduce_mean(_loss_t) / self.unroll_steps
                     loss += loss_t
+
+                    next_states = self.network.predict_transition(
+                        states, actions=actions[:, i, :], training=True
+                    )
+                    next_states = 0.5 * next_states + 0.5 * tf.stop_gradient(next_states) # fmt: skip
 
             grads = tape.gradient(loss, self.network.trainable_variables)
             self.optimizer.apply_gradients(zip(grads, self.network.trainable_variables))
