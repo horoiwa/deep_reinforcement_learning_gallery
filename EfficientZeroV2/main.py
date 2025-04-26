@@ -2,16 +2,28 @@ from pathlib import Path
 import shutil
 import collections
 import functools
+import contextlib
 
 import tensorflow as tf
 import numpy as np
 import gym
 from gym import wrappers
 from PIL import Image
+import time
 
 import mcts
 from buffers import ReplayBuffer, Experience
 from networks import EFZeroNetwork
+
+
+@contextlib.contextmanager
+def timer(name):
+    start = time.time()
+    try:
+        yield
+    finally:
+        end = time.time()
+        print(f"{name}: {end - start:.2f}s")
 
 
 def process_frame(frame):
@@ -34,7 +46,7 @@ class EfficientZeroV2:
         )
 
         self.replay_buffer = ReplayBuffer(maxlen=1_000_000)
-        self.batch_size = 64
+        self.batch_size = 16
         self.gamma = 0.997
         self.replay_ratio = 1
         self.unroll_steps = 5
@@ -60,16 +72,13 @@ class EfficientZeroV2:
             frames.append(process_frame(frame))
         observations = np.stack(frames, axis=2)[np.newaxis, ...]
 
-        (
-            states,
-            policy_prob,
-            value_prob,
-            reward_prob,
-        ) = self.network(observations, training=False)
-
+        states = self.network.encode(observations, training=False)
+        p, v, r = self.network.predict_policy_value_reward(states, training=False)
         next_states = self.network.predict_transition(
             states, actions=np.array([[2]]), training=False
         )
+        proj = self.network.p1_network(states, training=False)
+        pred = self.network.p2_network(proj, training=False)
 
     def rollout(self):
         env = gym.make(self.env_id)
@@ -151,24 +160,35 @@ class EfficientZeroV2:
                     unroll_steps=self.unroll_steps,
                 )
             )
-
             B, T, H, W, C = observations.shape
-            _, target_policies, target_values, target_states = mcts.search_batch(
-                raw_states=tf.reshape(observations, [B * T, H, W, C]),
-                action_space=self.action_space,
-                network=self.network,
-                num_simulations=self.num_simulations,
-                gamma=self.gamma,
+
+            target_rewards = tf.reshape(
+                self.network.scalar_to_dist(
+                    tf.reshape(rewards, (B * T,)), mode="reward"
+                ),
+                [B, T, -1],
             )
 
+            with timer(f"reanalyze({self.batch_size})"):
+                _, target_policies, target_values, target_states = mcts.search_batch(
+                    observations=tf.reshape(observations, [B * T, H, W, C]),
+                    action_space=self.action_space,
+                    network=self.network,
+                    num_simulations=self.num_simulations,
+                    gamma=self.gamma,
+                )
+
+            target_states = tf.reshape(
+                target_states,
+                [B, T] + target_states.shape[1:],
+            )
             target_policies = tf.reshape(target_policies, [B, T, -1])
-            target_values = tf.reshape(target_values, [B, T, -1])
-            target_rewards = self.network.reward_network.scalar_to_dist(rewards)
+            target_values = tf.reshape(
+                self.network.scalar_to_dist(target_values, mode="value"), [B, T, -1]
+            )
 
             with tf.GradientTape() as tape:
-                init_state = self.network.representation_network(
-                    init_obs, training=True
-                )
+                init_state = self.network.encode(init_obs, training=True)
                 next_state = self.network.predict_transition(
                     init_state, actions=init_action, training=True
                 )
@@ -181,18 +201,19 @@ class EfficientZeroV2:
                     target_policy_t = target_policies[:, i, :]
                     target_value_t = target_values[:, i, :]
                     target_reward_t = target_rewards[:, i, :]
+                    target_state_t = target_states[:, i, :]
 
-                    loss_p = tf.reduce_sum(target_policy_t * policy_t, axis=-1)
-                    loss_v = tf.reduce_sum(target_value_t * value_t, axis=-1)
-                    loss_r = tf.reduce_sum(target_reward_t * reward_t, axis=-1)
+                    loss_p = -tf.reduce_sum(target_policy_t * policy_t, axis=-1)
+                    loss_v = -tf.reduce_sum(target_value_t * value_t, axis=-1)
+                    loss_r = -tf.reduce_sum(target_reward_t * reward_t, axis=-1)
 
-                    state_proj = self.network.p2_network(
+                    projection = self.network.p2_network(
                         self.network.p1_network(state), training=True
                     )
-                    target_state_proj = self.network.p1_network(
-                        target_states[:, i, :], training=True
+                    target_projection = self.network.p1_network(
+                        target_state_t, training=False
                     )
-
+                    import pdb; pdb.set_trace()  # fmt: skip
                     loss_g = tf.reduce_mean(
                         (state_proj - tf.stop_gradient(target_state_proj)) ** 2
                     )
@@ -223,9 +244,6 @@ class EfficientZeroV2:
         with self.summary_writer.as_default():
             for key, value in stats.items():
                 tf.summary.scalar(key, tf.reduce_mean(value), step=self.total_steps)
-
-    def update_target_network(self):
-        pass
 
 
 def main(max_steps=100_000, env_id="BreakoutDeterministic-v4", log_dir="logs"):

@@ -91,6 +91,9 @@ def search_batch(
     best_actions, mcts_policies, mcts_values = zip(
         *[tree.get_simulation_result() for tree in trees]
     )
+    mcts_policies = tf.cast(tf.stack(mcts_policies), tf.float32)
+    mcts_values = tf.cast(tf.stack(mcts_values), tf.float32)
+
     return (best_actions, mcts_policies, mcts_values, states)
 
 

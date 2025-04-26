@@ -12,4 +12,5 @@ This is **unofficial** **simplified** re-implementation of (EfficientZero V2: Ma
 - No LSTM for reward prediction
 - No mixed value target, only use search-based value estimation target (SVE target)
 - No mcts-improved-policy based on completed Q, instead, use simple loss
+- No value scaling of R2D2
 

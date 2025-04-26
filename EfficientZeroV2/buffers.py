@@ -40,15 +40,18 @@ class ReplayBuffer:
 
         for trajectory in trajectories:
             _masks = 1 - np.cumsum([t.done for t in trajectory]).clip(0, 1)
-            _observations = np.concatenate(
-                [(1 - t.done) * t.observation for t in trajectory], axis=0
+            _observations = (
+                np.concatenate([t.observation for t in trajectory], axis=0)
+                * _masks[..., np.newaxis, np.newaxis, np.newaxis]
             )
-            _actions = np.array([(1 - t.done) * t.action for t in trajectory]).reshape(
+            _actions = (np.array([t.action for t in trajectory])).reshape(
                 -1, 1
+            ) * _masks[..., np.newaxis]
+            _rewards = (
+                np.array([t.reward for t in trajectory]).reshape(-1, 1)
+                * _masks[..., np.newaxis]
             )
-            _rewards = np.array([(1 - t.done) * t.reward for t in trajectory]).reshape(
-                -1, 1
-            )
+
             observations.append(_observations)
             actions.append(_actions)
             rewards.append(_rewards)
@@ -57,7 +60,7 @@ class ReplayBuffer:
         observations = tf.stack(observations, axis=0)  # (B, unroll_steps+1, 96, 96, 1)
         actions = tf.stack(actions, axis=0)  # (B, unroll_steps+1)
         rewards = tf.stack(rewards, axis=0)  # (B, unroll_steps+1)
-        masks = tf.stack(masks, axis=0)  # (B, unroll_steps+1)
+        masks = tf.cast(tf.stack(masks, axis=0), tf.float32)  # (B, unroll_steps+1)
 
         init_obs = observations[:, 0, ...]  # (B, 96, 96, 1)
         init_action = actions[:, 0, ...]  # (B, 1)

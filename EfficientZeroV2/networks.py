@@ -1,3 +1,5 @@
+from typing import Literal
+
 import tensorflow as tf
 import tensorflow.keras.layers as kl
 
@@ -24,8 +26,9 @@ class EFZeroNetwork(tf.keras.Model):
         self.p1_network = P1Network()
         self.p2_network = P2Network()
 
-    def call(self, states, training=False):
-        z = self.representation_network(states, training=training)  # (6, 6, 64)
+    @tf.function
+    def call(self, observations, training=False):
+        z = self.representation_network(observations, training=training)  # (6, 6, 64)
         policy_logits, value_logits = self.policy_value_network(z, training=training)
         policy_prob = tf.nn.softmax(policy_logits, axis=-1)
         value_prob = tf.nn.softmax(value_logits, axis=-1)
@@ -38,14 +41,43 @@ class EFZeroNetwork(tf.keras.Model):
             reward_prob,
         )
 
+    @tf.function
+    def encode(self, observations, training=False):
+        z = self.representation_network(observations, training=training)
+        return z
+
+    @tf.function
+    def predict_policy_value_reward(self, z, training=False):
+        policy_logits, value_logits = self.policy_value_network(z, training=training)
+        policy_prob = tf.nn.softmax(policy_logits, axis=-1)
+        value_prob = tf.nn.softmax(value_logits, axis=-1)
+        reward_logits = self.reward_network(z, training=training)
+        reward_prob = tf.nn.softmax(reward_logits, axis=-1)
+
+        return policy_prob, value_prob, reward_prob
+
+    @tf.function
     def predict_transition(self, z, actions, training=False):
         z_next = self.transition_network(z, actions, training=training)
         return z_next
 
-    def compute_projection(self, z, training=False):
-        g = self.projection_network(z, training=training)
-        q = self.predictor_network(q, training=training)
-        return g, q
+    def scalar_to_dist(self, x, mode: Literal["value", "reward"]):
+        if mode == "value":
+            supports = self.policy_value_network.supports
+        elif mode == "reward":
+            supports = self.reward_network.supports
+
+        x = tf.reshape(tf.cast(x, dtype=tf.float32), shape=(-1, 1))
+        supports = tf.repeat(tf.expand_dims(supports, axis=0), x.shape[0], axis=0)
+        indices = tf.argmin(tf.abs(supports - x), axis=1)
+        dist = tf.one_hot(
+            indices,
+            depth=supports.shape[1],
+            on_value=1.0,
+            off_value=0.0,
+            dtype=tf.float32,
+        )
+        return dist
 
 
 class RepresentationNetwork(tf.keras.Model):
@@ -130,7 +162,6 @@ class PolicyValueNetwork(tf.keras.Model):
             action_space, use_bias=True, activation=None, kernel_initializer="zeros"
         )
 
-    @tf.function
     def call(self, z, training=False):
         B = z.shape[0]
         z = self.resblock_1(z, training=training)
@@ -157,6 +188,7 @@ class PolicyValueNetwork(tf.keras.Model):
 
         return policy_logits, value_logits
 
+    @tf.function
     def predict(self, z, training=False):
         policy_logits, value_logits = self.call(z, training=training)
         policy_prob = tf.nn.softmax(policy_logits, axis=-1)
