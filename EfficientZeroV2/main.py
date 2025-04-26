@@ -104,11 +104,6 @@ class EfficientZeroV2:
             )
             next_frame, next_reward, next_done, next_info = env.step(action)
 
-            print("Step: ", ep_steps)
-            print(f"best_action: {action}")
-            print(f"reward: {reward}")
-            print(f"lives: {lives}")
-
             ep_rewards += reward
             reward = np.clip(reward, -1, 1)
             frames.append(process_frame(next_frame))
@@ -146,8 +141,6 @@ class EfficientZeroV2:
         with self.summary_writer.as_default():
             tf.summary.scalar("ep_rewards", ep_rewards, step=self.total_steps)
             tf.summary.scalar("ep_steps", ep_steps, step=self.total_steps)
-        if True:
-            self.update_network(num_updates=1)
 
         info = {"rewards": ep_rewards, "steps": ep_steps}
         return info
