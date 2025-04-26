@@ -81,6 +81,14 @@ class EfficientZeroV2:
         proj = self.network.p1_network(states, training=False)
         pred = self.network.p2_network(proj, training=False)
 
+    def save(self, save_dir: str):
+        save_dir = Path(save_dir)
+        self.network.save_weights(str(save_dir / "network"))
+
+    def load(self, load_dir="checkpoints/"):
+        load_dir = Path(load_dir)
+        self.network.load_weights(str(load_dir / "network"))
+
     def rollout(self):
         env = gym.make(self.env_id)
 
@@ -132,8 +140,6 @@ class EfficientZeroV2:
                     num_updates = int(self.update_interval * self.replay_ratio)
                     with timer(f"Update network: {num_updates}"):
                         self.update_network(num_updates=num_updates)
-                if self.total_steps % self.target_update_interval == 0:
-                    self.update_target_network()
 
             ep_steps += 1
             self.total_steps += 1
@@ -253,17 +259,16 @@ class EfficientZeroV2:
             self.optimizer.apply_gradients(zip(grads, self.network.trainable_variables))
 
             self.gradient_steps += 1
-            if self.gradient_steps % 100 == 0:
-                with self.summary_writer.as_default():
-                    for key, value in stats.items():
-                        tf.summary.scalar(
-                            key, tf.reduce_mean(value), step=self.gradient_steps
-                        )
+            with self.summary_writer.as_default():
+                for key, value in stats.items():
                     tf.summary.scalar(
-                        "global_norm",
-                        tf.reduce_mean(stats["global_norm"]),
-                        step=self.total_steps,
+                        key, tf.reduce_mean(value), step=self.gradient_steps
                     )
+                tf.summary.scalar(
+                    "global_norm",
+                    tf.reduce_mean(stats["global_norm"]),
+                    step=self.total_steps,
+                )
 
 
 def main(max_steps=100_000, env_id="BreakoutDeterministic-v4", log_dir="log"):
@@ -282,10 +287,8 @@ def main(max_steps=100_000, env_id="BreakoutDeterministic-v4", log_dir="log"):
         print("info: ", info)
         print("=" * 20)
         n += 1
-
-
-def test():
-    pass
+        if n % 10 == 0:
+            agent.save(save_dir="checkpoints/")
 
 
 if __name__ == "__main__":
