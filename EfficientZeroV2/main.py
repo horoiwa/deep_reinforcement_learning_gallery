@@ -130,7 +130,8 @@ class EfficientZeroV2:
             if self.total_steps > 1000:
                 if self.total_steps % self.update_interval == 0:
                     num_updates = int(self.update_interval * self.replay_ratio)
-                    self.update_network(num_updates=num_updates)
+                    with timer(f"Update network: {num_updates}"):
+                        self.update_network(num_updates=num_updates)
                 if self.total_steps % self.target_update_interval == 0:
                     self.update_target_network()
 
@@ -265,7 +266,11 @@ class EfficientZeroV2:
                     )
 
 
-def main(max_steps=100_000, env_id="BreakoutDeterministic-v4", log_dir="logs"):
+def main(max_steps=100_000, env_id="BreakoutDeterministic-v4", log_dir="log"):
+
+    if Path(log_dir).exists():
+        shutil.rmtree(log_dir)
+
     agent = EfficientZeroV2(env_id=env_id, log_dir=log_dir)
 
     n = 0
