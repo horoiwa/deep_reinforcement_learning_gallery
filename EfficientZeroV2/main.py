@@ -135,7 +135,7 @@ class EfficientZeroV2:
 
             done, reward, info = next_done, next_reward, next_info
 
-            if self.total_steps > 1000:
+            if self.total_steps > 300:
                 if self.total_steps % self.update_interval == 0:
                     num_updates = int(self.update_interval * self.replay_ratio)
                     with timer(f"Update network: {num_updates}"):
@@ -271,12 +271,22 @@ class EfficientZeroV2:
                 )
 
 
-def main(max_steps=100_000, env_id="BreakoutDeterministic-v4", log_dir="log"):
+def main(
+    resume_step: int | None = None,
+    max_steps=100_000,
+    env_id="BreakoutDeterministic-v4",
+    log_dir="log",
+):
 
-    if Path(log_dir).exists():
+    if resume_step is None and Path(log_dir).exists():
         shutil.rmtree(log_dir)
 
     agent = EfficientZeroV2(env_id=env_id, log_dir=log_dir)
+
+    if resume_step:
+        agent.total_steps += resume_step
+        agent.gradient_steps += resume_step
+        agent.load(load_dir="checkpoints/")
 
     n = 0
     while max_steps >= agent.total_steps:
@@ -292,4 +302,4 @@ def main(max_steps=100_000, env_id="BreakoutDeterministic-v4", log_dir="log"):
 
 
 if __name__ == "__main__":
-    main()
+    main(resume=None)
