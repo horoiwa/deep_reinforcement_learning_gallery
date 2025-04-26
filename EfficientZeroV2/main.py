@@ -62,6 +62,7 @@ class EfficientZeroV2:
         self.setup()
         self.summary_writer = tf.summary.create_file_writer(str(log_dir))
         self.total_steps = 0
+        self.gradient_steps = 0
 
     def setup(self):
         env = gym.make(self.env_id)
@@ -152,8 +153,8 @@ class EfficientZeroV2:
         return info
 
     def update_network(self, num_updates: int):
-        stats = collections.defaultdict(list)
         for i in range(num_updates):
+            stats = collections.defaultdict(list)
             (init_obs, init_action, observations, actions, rewards, masks) = (
                 self.replay_buffer.sample_batch(
                     batch_size=self.batch_size,
@@ -188,6 +189,7 @@ class EfficientZeroV2:
             )
 
             with tf.GradientTape() as tape:
+                loss = 0.0
                 init_state = self.network.encode(init_obs, training=True)
                 next_state = self.network.predict_transition(
                     init_state, actions=init_action, training=True
@@ -203,35 +205,49 @@ class EfficientZeroV2:
                     target_reward_t = target_rewards[:, i, :]
                     target_state_t = target_states[:, i, :]
 
-                    loss_p = -tf.reduce_sum(target_policy_t * policy_t, axis=-1)
-                    loss_v = -tf.reduce_sum(target_value_t * value_t, axis=-1)
-                    loss_r = -tf.reduce_sum(target_reward_t * reward_t, axis=-1)
+                    loss_p = -tf.reduce_mean(
+                        tf.reduce_sum(target_policy_t * policy_t, axis=-1)
+                    )
+                    loss_v = -tf.reduce_mean(
+                        tf.reduce_sum(target_value_t * value_t, axis=-1)
+                    )
+                    loss_r = -tf.reduce_mean(
+                        tf.reduce_sum(target_reward_t * reward_t, axis=-1)
+                    )
 
-                    projection = self.network.p2_network(
+                    proj = self.network.p2_network(
                         self.network.p1_network(state), training=True
                     )
-                    target_projection = self.network.p1_network(
-                        target_state_t, training=False
-                    )
-                    import pdb; pdb.set_trace()  # fmt: skip
-                    loss_g = tf.reduce_mean(
-                        (state_proj - tf.stop_gradient(target_state_proj)) ** 2
+                    proj_normed = proj / (
+                        tf.norm(proj, ord=2, axis=-1, keepdims=True) + 1e-12
                     )
 
-                    _loss_t = (
+                    target_proj = self.network.p1_network(target_state_t, training=True)
+                    target_proj_normed = target_proj / (
+                        tf.norm(target_proj, ord=2, axis=-1, keepdims=True) + 1e-12
+                    )
+
+                    loss_g = -tf.reduce_mean(
+                        tf.reduce_sum(
+                            proj_normed * tf.stop_gradient(target_proj_normed), axis=-1
+                        )
+                    )
+
+                    loss_t = (
                         self.lambda_r * loss_r
                         + self.lambda_p * loss_p
                         + self.lambda_v * loss_v
                         + self.lambda_g * loss_g
                     )
-                    loss_t = tf.reduce_mean(_loss_t) / self.unroll_steps
-                    loss += loss_t
+
+                    loss += loss_t / self.unroll_steps
 
                     next_state = self.network.predict_transition(
                         state, actions=actions[:, i], training=True
                     )
                     next_state = 0.5 * next_state + 0.5 * tf.stop_gradient(next_state) # fmt: skip
 
+                    stats[f"loss_{i}"].append(loss_t)
                     stats[f"loss_r_{i}"].append(loss_r)
                     stats[f"loss_p_{i}"].append(loss_p)
                     stats[f"loss_v_{i}"].append(loss_v)
@@ -239,11 +255,21 @@ class EfficientZeroV2:
 
             grads = tape.gradient(loss, self.network.trainable_variables)
             grads, global_norm = tf.clip_by_global_norm(grads, clip_norm=5)
+            stats["global_norm"].append(global_norm)
             self.optimizer.apply_gradients(zip(grads, self.network.trainable_variables))
 
-        with self.summary_writer.as_default():
-            for key, value in stats.items():
-                tf.summary.scalar(key, tf.reduce_mean(value), step=self.total_steps)
+            self.gradient_steps += 1
+            if self.gradient_steps % 100 == 0:
+                with self.summary_writer.as_default():
+                    for key, value in stats.items():
+                        tf.summary.scalar(
+                            key, tf.reduce_mean(value), step=self.gradient_steps
+                        )
+                    tf.summary.scalar(
+                        "global_norm",
+                        tf.reduce_mean(stats["global_norm"]),
+                        step=self.total_steps,
+                    )
 
 
 def main(max_steps=100_000, env_id="BreakoutDeterministic-v4", log_dir="logs"):

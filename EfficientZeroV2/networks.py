@@ -295,7 +295,8 @@ class P1Network(tf.keras.Model):
         self.bn_3 = kl.BatchNormalization(axis=-1)
 
     def call(self, z, training=False):
-        x = self.dense_1(z)
+        x = tf.reshape(z, shape=(z.shape[0], -1))
+        x = self.dense_1(x)
         x = self.bn_1(x, training=training)
         x = tf.nn.relu(x)
 
@@ -317,14 +318,14 @@ class P2Network(tf.keras.Model):
         self.bn_1 = kl.BatchNormalization(axis=-1)
         self.dense_2 = kl.Dense(1024, use_bias=True, activation=None)
 
-    def call(self, z, training=False):
-        x = self.dense_1(z)
+    def call(self, x, training=False):
+        x = self.dense_1(x)
         x = self.bn_1(x, training=training)
         x = tf.nn.relu(x)
 
-        target_projection = self.dense_2(x)
+        prediction = self.dense_2(x)
 
-        return target_projection
+        return prediction
 
 
 class ResidualBlock(tf.keras.layers.Layer):
