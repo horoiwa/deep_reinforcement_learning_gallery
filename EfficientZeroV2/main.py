@@ -133,8 +133,8 @@ class EfficientZeroV2:
 
             done, reward, info = next_done, next_reward, next_info
 
-            # if self.total_steps > 1000 and self.total_steps % 4 == 0:
-            if self.total_steps > 300 and self.total_steps % 4 == 0:
+            # if self.total_steps > 300 and self.total_steps % 4 == 0:
+            if self.total_steps > 1000 and self.total_steps % 4 == 0:
                 with timer(f"Update network"):
                     self.update_network()
 
@@ -149,7 +149,11 @@ class EfficientZeroV2:
         info = {"rewards": ep_rewards, "steps": ep_steps}
         return info
 
-    def update_network(self):
+    def update_network(self, num_updates: int = 1):
+        for _ in range(num_updates):
+            self._update_network()
+
+    def _update_network(self):
 
         stats = collections.defaultdict(list)
         with timer(f"reanalyze({self.batch_size})"):
@@ -242,7 +246,6 @@ class EfficientZeroV2:
                 #     tf.reduce_sum(policy_t * tf.math.log(policy_t + 1e-8), axis=-1)
                 #     * mask_t
                 # )
-                import pdb; pdb.set_trace()  # fmt: skip
 
                 loss_t = (
                     self.lambda_r * loss_r
