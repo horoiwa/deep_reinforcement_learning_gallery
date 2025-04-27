@@ -46,10 +46,10 @@ class EfficientZeroV2:
         )
 
         self.replay_buffer = ReplayBuffer(maxlen=1_000_000)
-        self.batch_size = 16
+        self.batch_size = 8
         self.gamma = 0.997
         self.unroll_steps = 3
-        self.num_simulations = 8
+        self.num_simulations = 16
         self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = 1.0, 1.0, 0.25, 2.0
 
         self.optimizer = tf.keras.optimizers.SGD(
@@ -57,7 +57,9 @@ class EfficientZeroV2:
         )
 
         self.setup()
-        self.summary_writer = tf.summary.create_file_writer(str(log_dir))
+        self.summary_writer = (
+            tf.summary.create_file_writer(str(log_dir)) if log_dir else None
+        )
         self.total_steps = 0
 
     def setup(self):
@@ -131,7 +133,8 @@ class EfficientZeroV2:
 
             done, reward, info = next_done, next_reward, next_info
 
-            if self.total_steps > 1000 and self.total_steps % 4 == 0:
+            # if self.total_steps > 1000 and self.total_steps % 4 == 0:
+            if self.total_steps > 300 and self.total_steps % 4 == 0:
                 with timer(f"Update network"):
                     self.update_network()
 
@@ -147,20 +150,23 @@ class EfficientZeroV2:
         return info
 
     def update_network(self):
-        stats = collections.defaultdict(list)
-        (init_obs, init_action, observations, actions, rewards, masks) = (
-            self.replay_buffer.sample_batch(
-                batch_size=self.batch_size,
-                unroll_steps=self.unroll_steps,
-            )
-        )
-        B, T, H, W, C = observations.shape
 
-        target_rewards = tf.reshape(
-            self.network.scalar_to_dist(tf.reshape(rewards, (B * T,)), mode="reward"),
-            [B, T, -1],
-        )
+        stats = collections.defaultdict(list)
         with timer(f"reanalyze({self.batch_size})"):
+            (init_obs, init_action, observations, actions, rewards, masks) = (
+                self.replay_buffer.sample_batch(
+                    batch_size=self.batch_size,
+                    unroll_steps=self.unroll_steps,
+                )
+            )
+            B, T, H, W, C = observations.shape
+
+            target_rewards = tf.reshape(
+                self.network.scalar_to_dist(
+                    tf.reshape(rewards, (B * T,)), mode="reward"
+                ),
+                [B, T, -1],
+            )
             _, target_policies, target_values, target_states = mcts.search_batch(
                 observations=tf.reshape(observations, [B * T, H, W, C]),
                 action_space=self.action_space,
@@ -194,15 +200,23 @@ class EfficientZeroV2:
                 target_value_t = target_values[:, i, :]
                 target_reward_t = target_rewards[:, i, :]
                 target_state_t = target_states[:, i, :]
+                mask_t = masks[:, i : i + 1]
 
                 loss_p = -tf.reduce_mean(
-                    tf.reduce_sum(target_policy_t * policy_t, axis=-1)
+                    tf.reduce_sum(
+                        target_policy_t * tf.math.log(policy_t + 1e-8), axis=-1
+                    )
+                    * mask_t
                 )
                 loss_v = -tf.reduce_mean(
-                    tf.reduce_sum(target_value_t * value_t, axis=-1)
+                    tf.reduce_sum(target_value_t * tf.math.log(value_t + 1e-8), axis=-1)
+                    * mask_t
                 )
                 loss_r = -tf.reduce_mean(
-                    tf.reduce_sum(target_reward_t * reward_t, axis=-1)
+                    tf.reduce_sum(
+                        target_reward_t * tf.math.log(reward_t + 1e-8), axis=-1
+                    )
+                    * mask_t
                 )
 
                 proj = self.network.p2_network(
@@ -221,7 +235,14 @@ class EfficientZeroV2:
                     tf.reduce_sum(
                         proj_normed * tf.stop_gradient(target_proj_normed), axis=-1
                     )
+                    * mask_t
                 )
+
+                # entropy = tf.reduce_mean(
+                #     tf.reduce_sum(policy_t * tf.math.log(policy_t + 1e-8), axis=-1)
+                #     * mask_t
+                # )
+                import pdb; pdb.set_trace()  # fmt: skip
 
                 loss_t = (
                     self.lambda_r * loss_r
@@ -257,8 +278,45 @@ class EfficientZeroV2:
                 step=self.total_steps,
             )
 
+    def test_play(self, tag: int | None = None, monitor_dir: Path | None = None):
+        if monitor_dir:
+            env = wrappers.RecordVideo(
+                gym.make(self.env_id, render_mode="rgb_array"),
+                video_folder=monitor_dir,
+                step_trigger=lambda i: True,
+                name_prefix=tag,
+            )
+        else:
+            env = gym.make(self.env_id)
 
-def main(
+        frames = collections.deque(maxlen=4)
+        frame, _ = env.reset()
+        for _ in range(4):
+            frames.append(process_frame(frame))
+
+        ep_rewards = 0
+        steps = 0
+        done = False
+        while not done:
+            obs = np.stack(frames, axis=2)[np.newaxis, ...]
+            action, _, _, _ = mcts.search(
+                observation=obs,
+                action_space=self.action_space,
+                network=self.network,
+                num_simulations=self.num_simulations,
+                gamma=self.gamma,
+            )
+            next_frame, reward, done, info = env.step(action)
+            ep_rewards += reward
+            print(f"step: {steps}, action: {action}")
+            frames.append(process_frame(next_frame))
+            steps += 1
+
+        print(f"Test score: {ep_rewards}")
+        return ep_rewards
+
+
+def train(
     resume_step: int | None = None,
     max_steps=100_000,
     env_id="BreakoutDeterministic-v4",
@@ -288,5 +346,22 @@ def main(
             agent.save(save_dir="checkpoints/")
 
 
+def test(
+    env_id="BreakoutDeterministic-v4",
+):
+    MONITOR_DIR = Path(__file__).parent / "mp4"
+    if MONITOR_DIR.exists():
+        shutil.rmtree(MONITOR_DIR)
+
+    agent = EfficientZeroV2(env_id=env_id, log_dir=None)
+    agent.load(load_dir="checkpoints")
+    for i in range(1, 3):
+        score = agent.test_play(tag=f"{i}", monitor_dir=MONITOR_DIR)
+        print("----" * 10)
+        print(f"{i}: Score {score}")
+        print("----" * 10)
+
+
 if __name__ == "__main__":
-    main(resume_step=None)
+    train(resume_step=None)
+    # test()

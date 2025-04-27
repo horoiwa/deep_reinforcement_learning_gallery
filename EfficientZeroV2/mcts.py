@@ -271,7 +271,6 @@ class GumbelMCTS:
             [score + noise for score, noise in zip(root_policy_logits, gumble_noises)],
             dtype=np.float32,
         )
-
         # ルートノードを作成
         self.root_node = Node(
             prior=1.0,

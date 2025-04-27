@@ -38,7 +38,6 @@ class ReplayBuffer:
         rewards = []
         masks = []
 
-        print("<--START-->")
         for trajectory in trajectories:
             _masks = 1 - np.cumsum([t.done for t in trajectory]).clip(0, 1)
             _observations = (
