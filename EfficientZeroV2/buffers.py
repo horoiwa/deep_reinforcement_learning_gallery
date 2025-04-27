@@ -38,6 +38,7 @@ class ReplayBuffer:
         rewards = []
         masks = []
 
+        print("<--START-->")
         for trajectory in trajectories:
             _masks = 1 - np.cumsum([t.done for t in trajectory]).clip(0, 1)
             _observations = (
@@ -57,7 +58,10 @@ class ReplayBuffer:
             rewards.append(_rewards)
             masks.append(_masks)
 
-        observations = tf.stack(observations, axis=0)  # (B, unroll_steps+1, 96, 96, 1)
+        # ここでsegmentation fault
+        observations = tf.convert_to_tensor(
+            np.array(observations), dtype=tf.float32
+        )  # (B, unroll_steps+1, 96, 96, 1)
         actions = tf.stack(actions, axis=0)  # (B, unroll_steps+1)
         rewards = tf.stack(rewards, axis=0)  # (B, unroll_steps+1)
         masks = tf.cast(tf.stack(masks, axis=0), tf.float32)  # (B, unroll_steps+1)

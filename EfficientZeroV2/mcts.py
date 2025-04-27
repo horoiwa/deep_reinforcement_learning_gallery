@@ -69,7 +69,7 @@ def search_batch(
             prev_actions.append([prev_action])
 
         prev_states = tf.concat(prev_states, axis=0)
-        prev_actions = tf.convert_to_tensor(prev_actions, dtype=tf.float32)
+        prev_actions = tf.convert_to_tensor(np.array(prev_actions), dtype=tf.float32)
         next_states = network.transition_network(
             prev_states, prev_actions, training=False
         )
