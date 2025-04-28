@@ -264,6 +264,8 @@ class EfficientZeroV2:
                     stats[f"loss_p_{i}"].append(loss_p)
                     stats[f"loss_v_{i}"].append(loss_v)
                     stats[f"loss_g_{i}"].append(loss_g)
+                    stats["state_init_mu"].append(tf.reduce_mean(init_state))
+                    stats["state_mu"].append(tf.reduce_mean(state))
 
         grads = tape.gradient(loss, self.network.trainable_variables)
         grads, _ = tf.clip_by_global_norm(grads, clip_norm=5)
@@ -313,21 +315,11 @@ class EfficientZeroV2:
 
 
 def train(
-    resume_step: int | None = None,
     max_steps=100_000,
     env_id="BreakoutDeterministic-v4",
     log_dir="log",
 ):
-
-    if resume_step is None and Path(log_dir).exists():
-        shutil.rmtree(log_dir)
-
     agent = EfficientZeroV2(env_id=env_id, log_dir=log_dir)
-
-    if resume_step:
-        agent.total_steps += resume_step
-        agent.gradient_steps += resume_step
-        agent.load(load_dir="checkpoints/")
 
     n = 0
     while max_steps >= agent.total_steps:
@@ -360,5 +352,5 @@ def test(
 
 
 if __name__ == "__main__":
-    # train(resume_step=None)
-    test(load_dir="checkpoints_bkup")
+    train()
+    # test(load_dir="checkpoints_bkup")
