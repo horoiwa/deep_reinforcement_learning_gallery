@@ -226,13 +226,13 @@ class EfficientZeroV2:
                 )
 
                 proj = self.network.p2_network(
-                    self.network.p1_network(state), training=True
+                    self.network.p1_network(state, training=True), training=True
                 )
                 proj_normed = proj / (
                     tf.norm(proj, ord=2, axis=-1, keepdims=True) + 1e-12
                 )
 
-                target_proj = self.network.p1_network(target_state_t, training=True)
+                target_proj = self.network.p1_network(target_state_t)
                 target_proj_normed = target_proj / (
                     tf.norm(target_proj, ord=2, axis=-1, keepdims=True) + 1e-12
                 )
