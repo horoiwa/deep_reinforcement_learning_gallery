@@ -101,8 +101,8 @@ class RepresentationNetwork(tf.keras.Model):
         self.resblock_4 = ResidualBlock(dims=64)
 
     @tf.function
-    def call(self, states, training=False):
-        x = self.conv_1(states)  # (96, 96, 4) -> (48, 48, 32)
+    def call(self, observations, training=False):
+        x = self.conv_1(observations)  # (96, 96, 4) -> (48, 48, 32)
         x = self.bn_1(x, training=training)
         x = tf.nn.relu(x)
 
@@ -112,9 +112,9 @@ class RepresentationNetwork(tf.keras.Model):
         x = self.pooling1(x)  # (12, 12, 64)
         x = self.resblock_3(x, training=training)  # (12, 12, 64)
         x = self.pooling2(x)  # (6, 6, 64)
-        z = self.resblock_4(x, training=training)  # (6, 6, 64)
+        states = self.resblock_4(x, training=training)  # (6, 6, 64)
 
-        return z
+        return states
 
 
 class PolicyValueNetwork(tf.keras.Model):

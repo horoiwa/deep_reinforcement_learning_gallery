@@ -29,7 +29,7 @@ def timer(name):
 def process_frame(frame):
     image = Image.fromarray(frame)
     image = image.convert("L").resize((96, 96))
-    image = np.array(image).astype(np.float32)  #: (96, 96)
+    image = np.array(image).astype(np.float32) / 255.0  #: (96, 96)
     return image
 
 
@@ -46,7 +46,7 @@ class EfficientZeroV2:
         )
 
         self.replay_buffer = ReplayBuffer(maxlen=1_000_000)
-        self.batch_size = 8
+        self.batch_size = 16
         self.gamma = 0.997
         self.unroll_steps = 3
         self.num_simulations = 16
@@ -61,6 +61,7 @@ class EfficientZeroV2:
             tf.summary.create_file_writer(str(log_dir)) if log_dir else None
         )
         self.total_steps = 0
+        self.gradient_steps = 0
 
     def setup(self):
         env = gym.make(self.env_id)
@@ -216,6 +217,7 @@ class EfficientZeroV2:
                     tf.reduce_sum(target_value_t * tf.math.log(value_t + 1e-8), axis=-1)
                     * mask_t
                 )
+
                 loss_r = -tf.reduce_mean(
                     tf.reduce_sum(
                         target_reward_t * tf.math.log(reward_t + 1e-8), axis=-1
@@ -242,11 +244,6 @@ class EfficientZeroV2:
                     * mask_t
                 )
 
-                # entropy = tf.reduce_mean(
-                #     tf.reduce_sum(policy_t * tf.math.log(policy_t + 1e-8), axis=-1)
-                #     * mask_t
-                # )
-
                 loss_t = (
                     self.lambda_r * loss_r
                     + self.lambda_p * loss_p
@@ -261,25 +258,21 @@ class EfficientZeroV2:
                 )
                 next_state = 0.5 * next_state + 0.5 * tf.stop_gradient(next_state) # fmt: skip
 
-                stats[f"loss_{i}"].append(loss_t)
-                stats[f"loss_r_{i}"].append(loss_r)
-                stats[f"loss_p_{i}"].append(loss_p)
-                stats[f"loss_v_{i}"].append(loss_v)
-                stats[f"loss_g_{i}"].append(loss_g)
+                if i == 0:
+                    stats[f"loss_{i}"].append(loss_t)
+                    stats[f"loss_r_{i}"].append(loss_r)
+                    stats[f"loss_p_{i}"].append(loss_p)
+                    stats[f"loss_v_{i}"].append(loss_v)
+                    stats[f"loss_g_{i}"].append(loss_g)
 
         grads = tape.gradient(loss, self.network.trainable_variables)
-        grads, global_norm = tf.clip_by_global_norm(grads, clip_norm=5)
-        stats["global_norm"].append(global_norm)
+        grads, _ = tf.clip_by_global_norm(grads, clip_norm=5)
         self.optimizer.apply_gradients(zip(grads, self.network.trainable_variables))
+        self.gradient_steps += 1
 
         with self.summary_writer.as_default():
             for key, value in stats.items():
                 tf.summary.scalar(key, tf.reduce_mean(value), step=self.total_steps)
-            tf.summary.scalar(
-                "global_norm",
-                tf.reduce_mean(stats["global_norm"]),
-                step=self.total_steps,
-            )
 
     def test_play(self, tag: int | None = None, monitor_dir: Path | None = None):
         if monitor_dir:
@@ -302,7 +295,7 @@ class EfficientZeroV2:
         done = False
         while not done:
             obs = np.stack(frames, axis=2)[np.newaxis, ...]
-            action, _, _, _ = mcts.search(
+            action, policy, value, state = mcts.search(
                 observation=obs,
                 action_space=self.action_space,
                 network=self.network,
@@ -350,6 +343,7 @@ def train(
 
 
 def test(
+    load_dir: str = "checkpoints",
     env_id="BreakoutDeterministic-v4",
 ):
     MONITOR_DIR = Path(__file__).parent / "mp4"
@@ -357,7 +351,7 @@ def test(
         shutil.rmtree(MONITOR_DIR)
 
     agent = EfficientZeroV2(env_id=env_id, log_dir=None)
-    agent.load(load_dir="checkpoints")
+    agent.load(load_dir=load_dir)
     for i in range(1, 3):
         score = agent.test_play(tag=f"{i}", monitor_dir=MONITOR_DIR)
         print("----" * 10)
@@ -366,5 +360,5 @@ def test(
 
 
 if __name__ == "__main__":
-    train(resume_step=None)
-    # test()
+    # train(resume_step=None)
+    test(load_dir="checkpoints_bkup")
