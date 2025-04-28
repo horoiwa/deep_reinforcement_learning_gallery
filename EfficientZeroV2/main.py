@@ -319,6 +319,8 @@ def train(
     env_id="BreakoutDeterministic-v4",
     log_dir="log",
 ):
+    if Path(log_dir).exists():
+        shutil.rmtree(log_dir)
     agent = EfficientZeroV2(env_id=env_id, log_dir=log_dir)
 
     n = 0
