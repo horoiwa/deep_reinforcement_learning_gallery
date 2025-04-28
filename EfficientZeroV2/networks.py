@@ -359,7 +359,7 @@ class ResidualBlock(tf.keras.layers.Layer):
         x = tf.nn.relu(x)
 
         x = self.conv_2(x)
-        x = self.bn_2(x)
+        x = self.bn_2(x, training=training)
 
         out = x + _x
         out = tf.nn.relu(out)
@@ -409,7 +409,7 @@ class DownSampleResidualBlock(tf.keras.layers.Layer):
         x = tf.nn.relu(x)
 
         x = self.conv_2(x)
-        x = self.bn_2(x)
+        x = self.bn_2(x, training=training)
         x = tf.nn.relu(x)
 
         out = x + _x
