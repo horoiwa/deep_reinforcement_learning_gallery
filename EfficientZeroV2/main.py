@@ -135,7 +135,7 @@ class EfficientZeroV2:
             done, reward, info = next_done, next_reward, next_info
 
             # if self.total_steps > 300 and self.total_steps % 4 == 0:
-            if len(self.buffer) > 1000 and self.total_steps % 4 == 0:
+            if len(self.replay_buffer) > 1000 and self.total_steps % 4 == 0:
                 with timer(f"Update network"):
                     self.update_network()
 
@@ -360,5 +360,5 @@ def test(
 
 
 if __name__ == "__main__":
-    train(resume=27_370)
+    train(resume_step=27_370)
     # test(load_dir="checkpoints_bkup")
