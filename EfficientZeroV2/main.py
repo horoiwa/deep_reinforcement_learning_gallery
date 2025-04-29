@@ -315,7 +315,7 @@ class EfficientZeroV2:
 
 
 def train(
-    resume_ste=None,
+    resume_step=None,
     max_steps=100_000,
     env_id="BreakoutDeterministic-v4",
     log_dir="log",
