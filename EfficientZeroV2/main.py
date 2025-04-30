@@ -45,7 +45,7 @@ class EfficientZeroV2:
             action_space=self.action_space, n_supports=self.n_supports
         )
 
-        self.replay_buffer = ReplayBuffer(maxlen=1_000_000)
+        self.replay_buffer = ReplayBuffer(maxlen=20_000)
         self.batch_size = 16
         self.gamma = 0.997
         self.unroll_steps = 3
@@ -360,5 +360,5 @@ def test(
 
 
 if __name__ == "__main__":
-    train(resume_step=27_370)
+    train(resume_step=None)
     # test(load_dir="checkpoints_bkup")
