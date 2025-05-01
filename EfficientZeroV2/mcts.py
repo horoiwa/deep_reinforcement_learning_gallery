@@ -12,17 +12,19 @@ def search(
     num_simulations: int,
     gamma: float,
     temperature: float = 1.0,
+    debug: bool = False,
 ) -> tuple[int, float, float]:
 
-    best_actions, policies, values, states = search_batch(
+    best_actions, policies, values, states, log = search_batch(
         observations=[observation],
         action_space=action_space,
         network=network,
         num_simulations=num_simulations,
         gamma=gamma,
         temperature=temperature,
+        debug=debug,
     )
-    return best_actions[0], policies[0], values[0], states[0]
+    return best_actions[0], policies[0], values[0], states[0], log
 
 
 def search_batch(
@@ -32,6 +34,7 @@ def search_batch(
     num_simulations: int,
     gamma: float,
     temperature: float = 1.0,
+    debug: bool = False,
 ) -> tuple[list[int], list[float], list[float]]:
 
     batch_size: int = len(observations)
@@ -94,7 +97,8 @@ def search_batch(
     mcts_policies = tf.cast(tf.stack(mcts_policies), tf.float32)
     mcts_values = tf.cast(tf.stack(mcts_values), tf.float32)
 
-    return (best_actions, mcts_policies, mcts_values, states)
+    log = {}
+    return (best_actions, mcts_policies, mcts_values, states, log)
 
 
 class ValueStats(list):
@@ -264,11 +268,15 @@ class GumbelMCTS:
             len(root_policy_logits.shape) == 1
             and root_policy_logits.shape[0] == self.action_space
         )
-        gumble_noises = (
+        self.gumble_noises = (
             np.random.gumbel(0, 1, size=self.action_space) * self.temperature
         )
+
         scores = np.array(
-            [score + noise for score, noise in zip(root_policy_logits, gumble_noises)],
+            [
+                score + noise
+                for score, noise in zip(root_policy_logits, self.gumble_noises)
+            ],
             dtype=np.float32,
         )
         # ルートノードを作成

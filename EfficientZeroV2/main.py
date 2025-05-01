@@ -102,7 +102,7 @@ class EfficientZeroV2:
         done, reward, info = False, 0, info
         while ep_steps < 2000:
             obs = np.stack(frames, axis=2)[np.newaxis, ...]
-            action, _, _, _ = mcts.search(
+            action, _, _, _, _ = mcts.search(
                 observation=obs,
                 action_space=self.action_space,
                 network=self.network,
@@ -172,7 +172,7 @@ class EfficientZeroV2:
                 ),
                 [B, T, -1],
             )
-            _, target_policies, target_values, target_states = mcts.search_batch(
+            _, target_policies, target_values, target_states, _ = mcts.search_batch(
                 observations=tf.reshape(observations, [B * T, H, W, C]),
                 action_space=self.action_space,
                 network=self.network,
@@ -297,16 +297,17 @@ class EfficientZeroV2:
         done = False
         while not done:
             obs = np.stack(frames, axis=2)[np.newaxis, ...]
-            action, policy, value, state = mcts.search(
+            action, policy, value, state, log = mcts.search(
                 observation=obs,
                 action_space=self.action_space,
                 network=self.network,
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
+                debug=True,
             )
             next_frame, reward, done, info = env.step(action)
             ep_rewards += reward
-            print(f"step: {steps}, action: {action}")
+            print(f"step: {steps}, action: {action}, policy: {policy}")
             frames.append(process_frame(next_frame))
             steps += 1
 
@@ -361,4 +362,4 @@ def test(
 
 if __name__ == "__main__":
     # train(resume_step=None)
-    test(load_dir="checkpoints_bkup")
+    test(load_dir="checkpoints")

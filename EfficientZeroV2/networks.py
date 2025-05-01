@@ -138,11 +138,8 @@ class PolicyValueNetwork(tf.keras.Model):
         )
         self.v_bn_1 = kl.BatchNormalization(axis=-1)
         self.v_fc_1 = kl.Dense(
-            256, use_bias=True, activation=None, kernel_initializer="he_normal"
+            32, use_bias=True, activation=None, kernel_initializer="he_normal"
         )
-        # self.v_fc_1 = kl.Dense(
-        #     32, use_bias=True, activation=None, kernel_initializer="he_normal"
-        # )
         self.v_bn_2 = kl.BatchNormalization(axis=-1)
         self.v_fc_2 = kl.Dense(
             n_supports, use_bias=True, activation=None, kernel_initializer="zeros"
@@ -158,11 +155,8 @@ class PolicyValueNetwork(tf.keras.Model):
         )
         self.p_bn_1 = kl.BatchNormalization(axis=-1)
         self.p_fc_1 = kl.Dense(
-            256, use_bias=True, activation=None, kernel_initializer="he_normal"
+            32, use_bias=True, activation=None, kernel_initializer="he_normal"
         )
-        # self.p_fc_1 = kl.Dense(
-        #     32, use_bias=True, activation=None, kernel_initializer="he_normal"
-        # )
         self.p_bn_2 = kl.BatchNormalization(axis=-1)
         self.p_fc_2 = kl.Dense(
             action_space, use_bias=True, activation=None, kernel_initializer="zeros"
@@ -221,11 +215,8 @@ class RewardNetwork(tf.keras.Model):
         )
         self.bn_1 = kl.BatchNormalization(axis=-1)
 
-        # self.fc_1 = kl.Dense(
-        #     32, use_bias=True, activation=None, kernel_initializer="zeros"
-        # )
         self.fc_1 = kl.Dense(
-            256, use_bias=True, activation=None, kernel_initializer="zeros"
+            32, use_bias=True, activation=None, kernel_initializer="zeros"
         )
         self.bn_2 = kl.BatchNormalization(axis=-1)
         self.fc_2 = kl.Dense(
