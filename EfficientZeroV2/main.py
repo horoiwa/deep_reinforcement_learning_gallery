@@ -360,5 +360,5 @@ def test(
 
 
 if __name__ == "__main__":
-    train(resume_step=None)
-    # test(load_dir="checkpoints_bkup")
+    # train(resume_step=None)
+    test(load_dir="checkpoints_bkup")

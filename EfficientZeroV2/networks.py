@@ -221,8 +221,11 @@ class RewardNetwork(tf.keras.Model):
         )
         self.bn_1 = kl.BatchNormalization(axis=-1)
 
+        # self.fc_1 = kl.Dense(
+        #     32, use_bias=True, activation=None, kernel_initializer="zeros"
+        # )
         self.fc_1 = kl.Dense(
-            32, use_bias=True, activation=None, kernel_initializer="zeros"
+            256, use_bias=True, activation=None, kernel_initializer="zeros"
         )
         self.bn_2 = kl.BatchNormalization(axis=-1)
         self.fc_2 = kl.Dense(
