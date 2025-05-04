@@ -11,7 +11,7 @@ class EFZeroNetwork(tf.keras.Model):
         action_space: int,
         n_supports: int,
         reward_range: tuple[float, float] = (-2.0, 2.0),
-        value_range: tuple[float, float] = (-20.0, 20.0),  # original (-300, 300)
+        value_range: tuple[float, float] = (-20.0, 20.0),  # original (-299, 299)
     ):
         super(EFZeroNetwork, self).__init__()
 

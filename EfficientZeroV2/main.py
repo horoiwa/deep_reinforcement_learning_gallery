@@ -46,7 +46,7 @@ class EfficientZeroV2:
         )
 
         self.replay_buffer = ReplayBuffer(maxlen=100_000)
-        self.batch_size = 64  # original 256
+        self.batch_size = 32  # original 256
         self.gamma = 0.997
         self.unroll_steps = 1  # original 5
         self.num_simulations = 16
