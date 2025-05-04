@@ -61,7 +61,6 @@ class EfficientZeroV2:
             tf.summary.create_file_writer(str(log_dir)) if log_dir else None
         )
         self.total_steps = 0
-        self.gradient_steps = 0
 
     def setup(self):
         env = gym.make(self.env_id)
@@ -256,9 +255,9 @@ class EfficientZeroV2:
                     + self.lambda_v * loss_v
                     + self.lambda_g * loss_g
                     + 5 * 1e-3 * loss_entropy
-                )
+                ) / self.unroll_steps
 
-                loss += loss_t / self.unroll_steps
+                loss += loss_t
 
                 next_state = self.network.predict_transition(
                     state, actions=actions[:, i], training=True
@@ -277,7 +276,6 @@ class EfficientZeroV2:
         grads = tape.gradient(loss, self.network.trainable_variables)
         grads, _ = tf.clip_by_global_norm(grads, clip_norm=5)
         self.optimizer.apply_gradients(zip(grads, self.network.trainable_variables))
-        self.gradient_steps += 1
 
         with self.summary_writer.as_default():
             for key, value in stats.items():
