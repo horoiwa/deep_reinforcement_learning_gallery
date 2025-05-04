@@ -111,7 +111,7 @@ class EfficientZeroV2:
             )
             next_frame, next_reward, next_done, next_info = env.step(action)
             print(
-                f"{ep_steps}, r: {reward}, r_pred:{root_reward[0]:.1f}, a:{action}, policy:{[round(p, 1) for p in policy.numpy()]}, v:{value:.1f}"
+                f"{ep_steps}, r: {reward}, r_pred:{root_reward[0]:.3f}, a:{action}, policy:{[round(p, 1) for p in policy.numpy()]}, v:{value:.1f}"
             )
 
             ep_rewards += reward
@@ -251,10 +251,11 @@ class EfficientZeroV2:
                 )
 
                 loss_t = (
-                    self.lambda_r * loss_r
+                    self.lambda_r
+                    * loss_r
                     # + self.lambda_p * loss_p
                     # + self.lambda_v * loss_v
-                    + self.lambda_g * loss_g
+                    # + self.lambda_g * loss_g
                     # + 5 * 1e-3 * loss_entropy
                 )
 
@@ -264,7 +265,6 @@ class EfficientZeroV2:
                     state, actions=actions[:, i], training=True
                 )
                 next_state = 0.5 * next_state + 0.5 * tf.stop_gradient(next_state) # fmt: skip
-
                 if i == 0:
                     stats[f"loss_{i}"].append(loss_t)
                     stats[f"loss_r_{i}"].append(loss_r)
@@ -273,7 +273,7 @@ class EfficientZeroV2:
                     stats[f"loss_g_{i}"].append(loss_g)
                     stats[f"loss_entropy"].append(loss_entropy)
                     stats["state_init_mu"].append(tf.reduce_mean(init_state))
-                    stats["rewardsum_gt"].append(tf.reduce_sum(rewards))
+                    stats["rewardsum_gt"].append(tf.reduce_sum(rewards[:, 0]))
 
         grads = tape.gradient(loss, self.network.trainable_variables)
         grads, _ = tf.clip_by_global_norm(grads, clip_norm=5)

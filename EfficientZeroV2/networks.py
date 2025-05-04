@@ -2,6 +2,7 @@ from typing import Literal
 
 import tensorflow as tf
 import tensorflow.keras.layers as kl
+from tensorflow.keras.regularizers import l2
 
 
 class EFZeroNetwork(tf.keras.Model):
@@ -10,7 +11,7 @@ class EFZeroNetwork(tf.keras.Model):
         action_space: int,
         n_supports: int,
         reward_range: tuple[float, float] = (-2.0, 2.0),
-        value_range: tuple[float, float] = (-10.0, 10.0),
+        value_range: tuple[float, float] = (-20.0, 20.0),
     ):
         super(EFZeroNetwork, self).__init__()
 
@@ -25,20 +26,6 @@ class EFZeroNetwork(tf.keras.Model):
 
         self.p1_network = P1Network()
         self.p2_network = P2Network()
-
-    def call(self, observations, training=False):
-        z = self.representation_network(observations, training=training)  # (6, 6, 64)
-        policy_logits, value_logits = self.policy_value_network(z, training=training)
-        policy_prob = tf.nn.softmax(policy_logits, axis=-1)
-        value_prob = tf.nn.softmax(value_logits, axis=-1)
-        reward_prob = self.reward_network(z, training=training)
-
-        return (
-            z,
-            policy_prob,
-            value_prob,
-            reward_prob,
-        )
 
     @tf.function
     def encode(self, observations, training=False):
@@ -155,11 +142,19 @@ class PolicyValueNetwork(tf.keras.Model):
         )
         self.v_bn_1 = kl.BatchNormalization(axis=-1)
         self.v_fc_1 = kl.Dense(
-            32, use_bias=True, activation=None, kernel_initializer="he_normal"
+            32,
+            use_bias=True,
+            activation=None,
+            kernel_initializer="he_normal",
+            kernel_regularizer=l2(0.0005),
         )
         self.v_bn_2 = kl.BatchNormalization(axis=-1)
         self.v_fc_2 = kl.Dense(
-            n_supports, use_bias=True, activation=None, kernel_initializer="zeros"
+            n_supports,
+            use_bias=True,
+            activation=None,
+            kernel_initializer="he_normal",
+            kernel_regularizer=l2(0.0005),
         )
 
         self.p_conv_1 = kl.Conv2D(
@@ -172,11 +167,19 @@ class PolicyValueNetwork(tf.keras.Model):
         )
         self.p_bn_1 = kl.BatchNormalization(axis=-1)
         self.p_fc_1 = kl.Dense(
-            32, use_bias=True, activation=None, kernel_initializer="he_normal"
+            32,
+            use_bias=True,
+            activation=None,
+            kernel_initializer="he_normal",
+            kernel_regularizer=l2(0.0005),
         )
         self.p_bn_2 = kl.BatchNormalization(axis=-1)
         self.p_fc_2 = kl.Dense(
-            action_space, use_bias=True, activation=None, kernel_initializer="zeros"
+            action_space,
+            use_bias=True,
+            activation=None,
+            kernel_initializer="he_normal",
+            kernel_regularizer=l2(0.0005),
         )
 
     def call(self, z, training=False):
@@ -205,14 +208,6 @@ class PolicyValueNetwork(tf.keras.Model):
 
         return policy_logits, value_logits
 
-    # @tf.function
-    # def predict(self, z, training=False):
-    #     policy_logits, value_logits = self.call(z, training=training)
-    #     policy_prob = tf.nn.softmax(policy_logits, axis=-1)
-    #     value_prob = tf.nn.softmax(value_logits, axis=-1)
-    #     value = tf.reduce_sum(value_prob * self.supports, axis=-1, keepdims=True)
-    #     return policy_logits, policy_prob, value_logits, value_prob, value
-
 
 class RewardNetwork(tf.keras.Model):
     def __init__(self, n_supports: int, reward_range: tuple[float, float]):
@@ -232,11 +227,19 @@ class RewardNetwork(tf.keras.Model):
         self.bn_1 = kl.BatchNormalization(axis=-1)
 
         self.fc_1 = kl.Dense(
-            32, use_bias=True, activation=None, kernel_initializer="zeros"
+            32,
+            use_bias=True,
+            activation=None,
+            kernel_initializer="he_normal",
+            kernel_regularizer=l2(0.0005),
         )
         self.bn_2 = kl.BatchNormalization(axis=-1)
         self.fc_2 = kl.Dense(
-            n_supports, use_bias=True, activation=None, kernel_initializer="zeros"
+            n_supports,
+            use_bias=True,
+            activation=None,
+            kernel_initializer="he_normal",
+            kernel_regularizer=l2(0.0005),
         )
 
     def call(self, z, training=False):
@@ -252,12 +255,6 @@ class RewardNetwork(tf.keras.Model):
         logits = self.fc_2(x)
 
         return logits
-
-    # def predict(self, z, training=False):
-    #     reward_logits = self.call(z, training=training)
-    #     reward_probs = tf.nn.softmax(reward_logits, axis=-1)
-    #     reward = tf.reduce_sum(reward_probs * self.supports, axis=-1, keepdims=True)
-    #     return reward_probs, reward
 
 
 class TransitionNetwork(tf.keras.Model):
