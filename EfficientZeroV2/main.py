@@ -73,7 +73,7 @@ class EfficientZeroV2:
         observations = np.stack(frames, axis=2)[np.newaxis, ...]
 
         states = self.network.encode(observations, training=False)
-        p, v, r = self.network.predict_policy_value_reward(states, training=False)
+        _ = self.network.predict_policy_value_reward(states, training=False)
         next_states = self.network.predict_transition(
             states, actions=np.array([[2]]), training=False
         )
@@ -102,15 +102,17 @@ class EfficientZeroV2:
         done, reward, info = False, 0, info
         while ep_steps < 2000:
             obs = np.stack(frames, axis=2)[np.newaxis, ...]
-            action, prob, _, _, _ = mcts.search(
+            action, policy, value, root_state, root_reward = mcts.search(
                 observation=obs,
                 action_space=self.action_space,
                 network=self.network,
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
             )
-            print(action, [f"{p:.2f}" for p in prob.numpy()])
             next_frame, next_reward, next_done, next_info = env.step(action)
+            print(
+                f"{ep_steps}, r: {reward}, r_pred:{root_reward[0]:.1f}, a:{action}, policy:{[round(p, 1) for p in policy.numpy()]}, v:{value:.1f}"
+            )
 
             ep_rewards += reward
             reward = np.clip(reward, -1, 1)
@@ -135,8 +137,7 @@ class EfficientZeroV2:
 
             done, reward, info = next_done, next_reward, next_info
 
-            # if self.total_steps > 300 and self.total_steps % 4 == 0:
-            if len(self.replay_buffer) > 1000 and self.total_steps % 4 == 0:
+            if len(self.replay_buffer) > 300 and self.total_steps % 4 == 0:
                 with timer(f"Update network"):
                     self.update_network()
 
@@ -198,8 +199,8 @@ class EfficientZeroV2:
             )
             for i in range(self.unroll_steps):
                 state = next_state
-                policy_t, value_t, reward_t = self.network.predict_policy_value_reward(
-                    state, training=True
+                _, _, _, policy_t, value_t, reward_t, _, _ = (
+                    self.network.predict_policy_value_reward(state, training=True)
                 )
 
                 target_policy_t = target_policies[:, i, :]
@@ -245,15 +246,16 @@ class EfficientZeroV2:
                     * mask_t
                 )
 
-                entropy = -tf.reduce_mean(
+                loss_entropy = -1.0 * -tf.reduce_mean(
                     tf.reduce_sum(policy_t * tf.math.log(policy_t + 1e-8), axis=-1)
                 )
 
                 loss_t = (
                     self.lambda_r * loss_r
-                    + self.lambda_p * loss_p
-                    + self.lambda_v * loss_v
+                    # + self.lambda_p * loss_p
+                    # + self.lambda_v * loss_v
                     + self.lambda_g * loss_g
+                    # + 5 * 1e-3 * loss_entropy
                 )
 
                 loss += loss_t / self.unroll_steps
@@ -269,8 +271,9 @@ class EfficientZeroV2:
                     stats[f"loss_p_{i}"].append(loss_p)
                     stats[f"loss_v_{i}"].append(loss_v)
                     stats[f"loss_g_{i}"].append(loss_g)
-                    stats[f"entropy"].append(entropy)
+                    stats[f"loss_entropy"].append(loss_entropy)
                     stats["state_init_mu"].append(tf.reduce_mean(init_state))
+                    stats["rewardsum_gt"].append(tf.reduce_sum(rewards))
 
         grads = tape.gradient(loss, self.network.trainable_variables)
         grads, _ = tf.clip_by_global_norm(grads, clip_norm=5)
@@ -302,17 +305,18 @@ class EfficientZeroV2:
         done = False
         while not done:
             obs = np.stack(frames, axis=2)[np.newaxis, ...]
-            action, policy, value, state, log = mcts.search(
+            action, policy, value, root_state, root_reward = mcts.search(
                 observation=obs,
                 action_space=self.action_space,
                 network=self.network,
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
-                debug=True,
             )
             next_frame, reward, done, info = env.step(action)
             ep_rewards += reward
-            print(f"step: {steps}, action: {action}, policy: {policy}")
+            print(
+                f"{steps}, r: {reward}, r_pred:{root_reward[0]:.1f}, a:{action}, policy:{[round(p, 1) for p in policy.numpy()]}, v:{value:.1f}"
+            )
             frames.append(process_frame(next_frame))
             steps += 1
 
@@ -367,4 +371,4 @@ def test(
 
 if __name__ == "__main__":
     train(resume_step=None)
-    # test(load_dir="checkpoints")
+    # test(load_dir="checkpoints_bkup3")

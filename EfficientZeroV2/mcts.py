@@ -12,19 +12,17 @@ def search(
     num_simulations: int,
     gamma: float,
     temperature: float = 1.0,
-    debug: bool = False,
 ) -> tuple[int, float, float]:
 
-    best_actions, policies, values, states, log = search_batch(
+    best_actions, policies, values, root_states, root_rewards = search_batch(
         observations=[observation],
         action_space=action_space,
         network=network,
         num_simulations=num_simulations,
         gamma=gamma,
         temperature=temperature,
-        debug=debug,
     )
-    return best_actions[0], policies[0], values[0], states[0], log
+    return best_actions[0], policies[0], values[0], root_states[0], root_rewards[0]
 
 
 def search_batch(
@@ -34,17 +32,16 @@ def search_batch(
     num_simulations: int,
     gamma: float,
     temperature: float = 1.0,
-    debug: bool = False,
 ) -> tuple[list[int], list[float], list[float]]:
 
     batch_size: int = len(observations)
     observations = tf.concat(observations, axis=0)
-    states = network.representation_network(observations, training=False)
-    policy_logits, _, _, _, values = network.policy_value_network.predict(
-        states, training=False
+    root_states = network.encode(observations, training=False)
+    root_policy_logits, _, _, _, _, _, root_values, root_rewards = (
+        network.predict_policy_value_reward(root_states, training=False)
     )
-    """GPU効率のため複数のMCTSを疑似並列実行"""
 
+    """GPU効率のため複数のMCTSを疑似並列実行"""
     trees = []
     for i in range(batch_size):
         tree = GumbelMCTS(
@@ -53,12 +50,14 @@ def search_batch(
             gamma=gamma,
             temperature=temperature,
         )
-        root_state, root_value = states[i : i + 1], float(values[i][0].numpy())
-        root_policy_logits = policy_logits[i].numpy().flatten()
+        root_state, root_value = root_states[i : i + 1], float(
+            root_values[i][0].numpy()
+        )
+        root_policy_logit = root_policy_logits[i].numpy().flatten()
         tree.setup(
             root_state=root_state,
             root_value=root_value,
-            root_policy_logits=root_policy_logits,
+            root_policy_logits=root_policy_logit,
         )
         trees.append(tree)
 
@@ -76,10 +75,9 @@ def search_batch(
         next_states = network.transition_network(
             prev_states, prev_actions, training=False
         )
-        policy_logits, _, _, _, values = network.policy_value_network.predict(
-            next_states, training=False
+        policy_logits, _, _, _, _, _, values, rewards = (
+            network.predict_policy_value_reward(next_states, training=False)
         )
-        _, rewards = network.reward_network.predict(next_states, training=False)
 
         for i, simulation in enumerate(simulations):
             simulation.send(
@@ -97,22 +95,24 @@ def search_batch(
     mcts_policies = tf.cast(tf.stack(mcts_policies), tf.float32)
     mcts_values = tf.cast(tf.stack(mcts_values), tf.float32)
 
-    log = {}
-    return (best_actions, mcts_policies, mcts_values, states, log)
+    return (best_actions, mcts_policies, mcts_values, root_states, root_rewards)
 
 
 class ValueStats(list):
 
     def normalize(self, value: float) -> float:
-        if len(self) == 0:
-            return np.clip(value, 0.0, 1.0)
-
-        _min, _max = min(self), max(self)
-        if _max > _min:
-            value = np.clip(value, _min, _max)
-            value = (value - _min) / max(_max - _min, 0.01)
-        value = np.clip(value, 0.0, 1.0)
         return value
+
+    # def normalize(self, value: float) -> float:
+    #     if len(self) == 0:
+    #         return np.clip(value, 0.0, 1.0)
+
+    #     _min, _max = min(self), max(self)
+    #     if _max > _min:
+    #         value = np.clip(value, _min, _max)
+    #         value = (value - _min) / max(_max - _min, 0.01)
+    #     value = np.clip(value, 0.0, 1.0)
+    #     return value
 
 
 @dataclass

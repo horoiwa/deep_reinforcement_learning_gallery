@@ -26,7 +26,6 @@ class EFZeroNetwork(tf.keras.Model):
         self.p1_network = P1Network()
         self.p2_network = P2Network()
 
-    @tf.function
     def call(self, observations, training=False):
         z = self.representation_network(observations, training=training)  # (6, 6, 64)
         policy_logits, value_logits = self.policy_value_network(z, training=training)
@@ -48,13 +47,30 @@ class EFZeroNetwork(tf.keras.Model):
 
     @tf.function
     def predict_policy_value_reward(self, z, training=False):
-        policy_logits, value_logits = self.policy_value_network(z, training=training)
-        policy_prob = tf.nn.softmax(policy_logits, axis=-1)
-        value_prob = tf.nn.softmax(value_logits, axis=-1)
-        reward_logits = self.reward_network(z, training=training)
-        reward_prob = tf.nn.softmax(reward_logits, axis=-1)
+        policy_logit, value_logits = self.policy_value_network(z, training=training)
+        policy_dist = tf.nn.softmax(policy_logit, axis=-1)
+        value_dist = tf.nn.softmax(value_logits, axis=-1)
 
-        return policy_prob, value_prob, reward_prob
+        reward_logit = self.reward_network(z, training=training)
+        reward_dist = tf.nn.softmax(reward_logit, axis=-1)
+
+        value_scalar = tf.reduce_sum(
+            value_dist * self.policy_value_network.supports, axis=-1, keepdims=True
+        )
+        reward_scalar = tf.reduce_sum(
+            reward_dist * self.reward_network.supports, axis=-1, keepdims=True
+        )
+
+        return (
+            policy_logit,
+            value_logits,
+            reward_logit,
+            policy_dist,
+            value_dist,
+            reward_dist,
+            value_scalar,
+            reward_scalar,
+        )
 
     @tf.function
     def predict_transition(self, z, actions, training=False):
@@ -64,8 +80,10 @@ class EFZeroNetwork(tf.keras.Model):
     def scalar_to_dist(self, x, mode: Literal["value", "reward"]):
         if mode == "value":
             supports = self.policy_value_network.supports
+            vmin, vmax = self.policy_value_network.value_range
         elif mode == "reward":
             supports = self.reward_network.supports
+            vmin, vmax = self.reward_network.reward_range
 
         x = tf.reshape(tf.cast(x, dtype=tf.float32), shape=(-1, 1))
         supports = tf.repeat(tf.expand_dims(supports, axis=0), x.shape[0], axis=0)
@@ -100,7 +118,6 @@ class RepresentationNetwork(tf.keras.Model):
         self.pooling2 = kl.AveragePooling2D(pool_size=3, strides=2, padding="same")
         self.resblock_4 = ResidualBlock(dims=64)
 
-    @tf.function
     def call(self, observations, training=False):
         x = self.conv_1(observations)  # (96, 96, 4) -> (48, 48, 32)
         x = self.bn_1(x, training=training)
@@ -188,14 +205,13 @@ class PolicyValueNetwork(tf.keras.Model):
 
         return policy_logits, value_logits
 
-    @tf.function
-    def predict(self, z, training=False):
-        policy_logits, value_logits = self.call(z, training=training)
-        policy_prob = tf.nn.softmax(policy_logits, axis=-1)
-        value_prob = tf.nn.softmax(value_logits, axis=-1)
-        value = tf.reduce_sum(value_prob * self.supports, axis=-1, keepdims=True)
-
-        return policy_logits, policy_prob, value_logits, value_prob, value
+    # @tf.function
+    # def predict(self, z, training=False):
+    #     policy_logits, value_logits = self.call(z, training=training)
+    #     policy_prob = tf.nn.softmax(policy_logits, axis=-1)
+    #     value_prob = tf.nn.softmax(value_logits, axis=-1)
+    #     value = tf.reduce_sum(value_prob * self.supports, axis=-1, keepdims=True)
+    #     return policy_logits, policy_prob, value_logits, value_prob, value
 
 
 class RewardNetwork(tf.keras.Model):
@@ -237,11 +253,11 @@ class RewardNetwork(tf.keras.Model):
 
         return logits
 
-    def predict(self, z, training=False):
-        reward_logits = self.call(z, training=training)
-        reward_probs = tf.nn.softmax(reward_logits, axis=-1)
-        reward = tf.reduce_sum(reward_probs * self.supports, axis=-1, keepdims=True)
-        return reward_probs, reward
+    # def predict(self, z, training=False):
+    #     reward_logits = self.call(z, training=training)
+    #     reward_probs = tf.nn.softmax(reward_logits, axis=-1)
+    #     reward = tf.reduce_sum(reward_probs * self.supports, axis=-1, keepdims=True)
+    #     return reward_probs, reward
 
 
 class TransitionNetwork(tf.keras.Model):
