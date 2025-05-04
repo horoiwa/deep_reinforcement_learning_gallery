@@ -37,13 +37,12 @@ class EFZeroNetwork(tf.keras.Model):
         policy_logit, value_logits = self.policy_value_network(z, training=training)
         policy_dist = tf.nn.softmax(policy_logit, axis=-1)
         value_dist = tf.nn.softmax(value_logits, axis=-1)
-
-        reward_logit = self.reward_network(z, training=training)
-        reward_dist = tf.nn.softmax(reward_logit, axis=-1)
-
         value_scalar = tf.reduce_sum(
             value_dist * self.policy_value_network.supports, axis=-1, keepdims=True
         )
+
+        reward_logit = self.reward_network(z, training=training)
+        reward_dist = tf.nn.softmax(reward_logit, axis=-1)
         reward_scalar = tf.reduce_sum(
             reward_dist * self.reward_network.supports, axis=-1, keepdims=True
         )
@@ -193,7 +192,7 @@ class PolicyValueNetwork(tf.keras.Model):
         _value = tf.reshape(_value, shape=(B, -1))
         _value = self.v_fc_1(_value)
         _value = self.v_bn_2(_value, training=training)
-        _value = tf.nn.elu(_value)
+        _value = tf.nn.relu(_value)
         value_logits = self.v_fc_2(_value)
 
         _policy = self.p_conv_1(z)  # (6, 6, 64) -> (6, 6, 16)
@@ -203,7 +202,7 @@ class PolicyValueNetwork(tf.keras.Model):
         _policy = tf.reshape(_policy, shape=(B, -1))
         _policy = self.p_fc_1(_policy)
         _policy = self.p_bn_2(_policy, training=training)
-        _policy = tf.nn.elu(_policy)
+        _policy = tf.nn.relu(_policy)
         policy_logits = self.p_fc_2(_policy)
 
         return policy_logits, value_logits
@@ -251,7 +250,7 @@ class RewardNetwork(tf.keras.Model):
         x = tf.reshape(x, shape=(B, -1))
         x = self.fc_1(x)
         x = self.bn_2(x, training=training)
-        x = tf.nn.elu(x)
+        x = tf.nn.relu(x)
         logits = self.fc_2(x)
 
         return logits

@@ -46,9 +46,9 @@ class EfficientZeroV2:
         )
 
         self.replay_buffer = ReplayBuffer(maxlen=100_000)
-        self.batch_size = 16
+        self.batch_size = 16  # original 256
         self.gamma = 0.997
-        self.unroll_steps = 3
+        self.unroll_steps = 1  # original 5
         self.num_simulations = 16
         self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = 1.0, 1.0, 0.25, 2.0
 
@@ -251,12 +251,11 @@ class EfficientZeroV2:
                 )
 
                 loss_t = (
-                    self.lambda_r
-                    * loss_r
-                    # + self.lambda_p * loss_p
-                    # + self.lambda_v * loss_v
-                    # + self.lambda_g * loss_g
-                    # + 5 * 1e-3 * loss_entropy
+                    self.lambda_r * loss_r
+                    + self.lambda_p * loss_p
+                    + self.lambda_v * loss_v
+                    + self.lambda_g * loss_g
+                    + 5 * 1e-3 * loss_entropy
                 )
 
                 loss += loss_t / self.unroll_steps
