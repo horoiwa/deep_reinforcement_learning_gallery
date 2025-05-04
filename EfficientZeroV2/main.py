@@ -45,7 +45,7 @@ class EfficientZeroV2:
             action_space=self.action_space, n_supports=self.n_supports
         )
 
-        self.replay_buffer = ReplayBuffer(maxlen=20_000)
+        self.replay_buffer = ReplayBuffer(maxlen=100_000)
         self.batch_size = 16
         self.gamma = 0.997
         self.unroll_steps = 3
@@ -102,13 +102,14 @@ class EfficientZeroV2:
         done, reward, info = False, 0, info
         while ep_steps < 2000:
             obs = np.stack(frames, axis=2)[np.newaxis, ...]
-            action, _, _, _, _ = mcts.search(
+            action, prob, _, _, _ = mcts.search(
                 observation=obs,
                 action_space=self.action_space,
                 network=self.network,
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
             )
+            print(action, [f"{p:.2f}" for p in prob.numpy()])
             next_frame, next_reward, next_done, next_info = env.step(action)
 
             ep_rewards += reward
@@ -232,7 +233,7 @@ class EfficientZeroV2:
                     tf.norm(proj, ord=2, axis=-1, keepdims=True) + 1e-12
                 )
 
-                target_proj = self.network.p1_network(target_state_t)
+                target_proj = self.network.p1_network(target_state_t, training=False)
                 target_proj_normed = target_proj / (
                     tf.norm(target_proj, ord=2, axis=-1, keepdims=True) + 1e-12
                 )
@@ -242,6 +243,10 @@ class EfficientZeroV2:
                         proj_normed * tf.stop_gradient(target_proj_normed), axis=-1
                     )
                     * mask_t
+                )
+
+                entropy = -tf.reduce_mean(
+                    tf.reduce_sum(policy_t * tf.math.log(policy_t + 1e-8), axis=-1)
                 )
 
                 loss_t = (
@@ -264,8 +269,8 @@ class EfficientZeroV2:
                     stats[f"loss_p_{i}"].append(loss_p)
                     stats[f"loss_v_{i}"].append(loss_v)
                     stats[f"loss_g_{i}"].append(loss_g)
+                    stats[f"entropy"].append(entropy)
                     stats["state_init_mu"].append(tf.reduce_mean(init_state))
-                    stats["state_mu"].append(tf.reduce_mean(state))
 
         grads = tape.gradient(loss, self.network.trainable_variables)
         grads, _ = tf.clip_by_global_norm(grads, clip_norm=5)
@@ -361,5 +366,5 @@ def test(
 
 
 if __name__ == "__main__":
-    # train(resume_step=None)
-    test(load_dir="checkpoints")
+    train(resume_step=None)
+    # test(load_dir="checkpoints")
