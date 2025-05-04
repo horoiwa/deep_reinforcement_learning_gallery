@@ -46,15 +46,16 @@ class EfficientZeroV2:
         )
 
         self.replay_buffer = ReplayBuffer(maxlen=100_000)
-        self.batch_size = 16  # original 256
+        self.batch_size = 64  # original 256
         self.gamma = 0.997
         self.unroll_steps = 1  # original 5
         self.num_simulations = 16
         self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = 1.0, 1.0, 0.25, 2.0
 
-        self.optimizer = tf.keras.optimizers.SGD(
-            learning_rate=0.2, weight_decay=0.0001, momentum=0.9
-        )
+        # self.optimizer = tf.keras.optimizers.SGD(
+        #     learning_rate=0.2, weight_decay=0.0001, momentum=0.9
+        # )
+        self.optimizer = tf.keras.optimizers.Adam(lr=0.0003)
 
         self.setup()
         self.summary_writer = (
@@ -216,14 +217,14 @@ class EfficientZeroV2:
                 )
                 loss_v = -tf.reduce_mean(
                     tf.reduce_sum(target_value_t * tf.math.log(value_t + 1e-8), axis=-1)
-                    * mask_t
+                    # * mask_t
                 )
 
                 loss_r = -tf.reduce_mean(
                     tf.reduce_sum(
                         target_reward_t * tf.math.log(reward_t + 1e-8), axis=-1
                     )
-                    * mask_t
+                    # * mask_t
                 )
 
                 proj = self.network.p2_network(
@@ -242,7 +243,7 @@ class EfficientZeroV2:
                     tf.reduce_sum(
                         proj_normed * tf.stop_gradient(target_proj_normed), axis=-1
                     )
-                    * mask_t
+                    # * mask_t
                 )
 
                 loss_entropy = -1.0 * -tf.reduce_mean(

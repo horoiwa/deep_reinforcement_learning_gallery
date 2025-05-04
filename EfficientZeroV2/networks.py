@@ -136,6 +136,7 @@ class PolicyValueNetwork(tf.keras.Model):
             padding="valid",
             use_bias=True,
             activation=None,
+            kernel_regularizer=l2(0.0005),
         )
         self.v_bn_1 = kl.BatchNormalization(axis=-1)
         self.v_fc_1 = kl.Dense(
@@ -161,6 +162,7 @@ class PolicyValueNetwork(tf.keras.Model):
             padding="valid",
             use_bias=True,
             activation=None,
+            kernel_regularizer=l2(0.0005),
         )
         self.p_bn_1 = kl.BatchNormalization(axis=-1)
         self.p_fc_1 = kl.Dense(
@@ -220,6 +222,7 @@ class RewardNetwork(tf.keras.Model):
             padding="valid",
             use_bias=True,
             activation=None,
+            kernel_regularizer=l2(0.0005),
         )
         self.bn_1 = kl.BatchNormalization(axis=-1)
 
@@ -260,11 +263,21 @@ class TransitionNetwork(tf.keras.Model):
         self.action_space = float(action_space)
 
         self.conv_action = kl.Conv2D(
-            16, kernel_size=1, strides=1, padding="valid", use_bias=True
+            16,
+            kernel_size=1,
+            strides=1,
+            padding="valid",
+            use_bias=True,
+            kernel_regularizer=l2(0.0005),
         )
         self.action_ln = kl.LayerNormalization(axis=-1)
         self.conv_1 = kl.Conv2D(
-            64, kernel_size=3, strides=1, padding="same", use_bias=False
+            64,
+            kernel_size=3,
+            strides=1,
+            padding="same",
+            use_bias=False,
+            kernel_regularizer=l2(0.0005),
         )
         self.bn_1 = kl.BatchNormalization(axis=-1)
         self.resblock_1 = ResidualBlock(dims=64)
@@ -297,11 +310,26 @@ class P1Network(tf.keras.Model):
     def __init__(self):
         super(P1Network, self).__init__()
 
-        self.dense_1 = kl.Dense(1024, use_bias=True, activation=None)
+        self.dense_1 = kl.Dense(
+            1024,
+            use_bias=True,
+            activation=None,
+            kernel_regularizer=l2(0.0005),
+        )
         self.bn_1 = kl.BatchNormalization(axis=-1)
-        self.dense_2 = kl.Dense(1024, use_bias=True, activation=None)
+        self.dense_2 = kl.Dense(
+            1024,
+            use_bias=True,
+            activation=None,
+            kernel_regularizer=l2(0.0005),
+        )
         self.bn_2 = kl.BatchNormalization(axis=-1)
-        self.dense_3 = kl.Dense(1024, use_bias=True, activation=None)
+        self.dense_3 = kl.Dense(
+            1024,
+            use_bias=True,
+            activation=None,
+            kernel_regularizer=l2(0.0005),
+        )
         self.bn_3 = kl.BatchNormalization(axis=-1)
 
     def call(self, z, training=False):
@@ -324,9 +352,19 @@ class P2Network(tf.keras.Model):
     def __init__(self):
         super(P2Network, self).__init__()
 
-        self.dense_1 = kl.Dense(256, use_bias=True, activation=None)
+        self.dense_1 = kl.Dense(
+            256,
+            use_bias=True,
+            activation=None,
+            kernel_regularizer=l2(0.0005),
+        )
         self.bn_1 = kl.BatchNormalization(axis=-1)
-        self.dense_2 = kl.Dense(1024, use_bias=True, activation=None)
+        self.dense_2 = kl.Dense(
+            1024,
+            use_bias=True,
+            activation=None,
+            kernel_regularizer=l2(0.0005),
+        )
 
     def call(self, x, training=False):
         x = self.dense_1(x)
@@ -349,6 +387,7 @@ class ResidualBlock(tf.keras.layers.Layer):
             padding="same",
             use_bias=False,
             activation=None,
+            kernel_regularizer=l2(0.0005),
         )
         self.bn_1 = kl.BatchNormalization(axis=-1)
 
@@ -359,6 +398,7 @@ class ResidualBlock(tf.keras.layers.Layer):
             padding="same",
             use_bias=False,
             activation=None,
+            kernel_regularizer=l2(0.0005),
         )
         self.bn_2 = kl.BatchNormalization(axis=-1)
 
@@ -388,6 +428,7 @@ class DownSampleResidualBlock(tf.keras.layers.Layer):
             padding="same",
             use_bias=False,
             activation=None,
+            kernel_regularizer=l2(0.0005),
         )
         self.bn_1 = kl.BatchNormalization(axis=-1)
 
@@ -398,6 +439,7 @@ class DownSampleResidualBlock(tf.keras.layers.Layer):
             padding="same",
             use_bias=False,
             activation=None,
+            kernel_regularizer=l2(0.0005),
         )
         self.bn_2 = kl.BatchNormalization(axis=-1)
 
@@ -408,6 +450,7 @@ class DownSampleResidualBlock(tf.keras.layers.Layer):
             padding="same",
             use_bias=False,
             activation=None,
+            kernel_regularizer=l2(0.0005),
         )
 
     def call(self, inputs, training=False):
