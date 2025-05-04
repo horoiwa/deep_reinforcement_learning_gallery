@@ -137,7 +137,7 @@ class EfficientZeroV2:
 
             done, reward, info = next_done, next_reward, next_info
 
-            if len(self.replay_buffer) > 300 and self.total_steps % 4 == 0:
+            if len(self.replay_buffer) > 1000 and self.total_steps % 4 == 0:
                 with timer(f"Update network"):
                     self.update_network()
 
