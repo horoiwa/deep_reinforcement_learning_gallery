@@ -11,7 +11,7 @@ class EFZeroNetwork(tf.keras.Model):
         action_space: int,
         n_supports: int,
         reward_range: tuple[float, float] = (-2.0, 2.0),
-        value_range: tuple[float, float] = (-20.0, 20.0),
+        value_range: tuple[float, float] = (-20.0, 20.0),  # original (-300, 300)
     ):
         super(EFZeroNetwork, self).__init__()
 
@@ -66,10 +66,8 @@ class EFZeroNetwork(tf.keras.Model):
     def scalar_to_dist(self, x, mode: Literal["value", "reward"]):
         if mode == "value":
             supports = self.policy_value_network.supports
-            vmin, vmax = self.policy_value_network.value_range
         elif mode == "reward":
             supports = self.reward_network.supports
-            vmin, vmax = self.reward_network.reward_range
 
         x = tf.reshape(tf.cast(x, dtype=tf.float32), shape=(-1, 1))
         supports = tf.repeat(tf.expand_dims(supports, axis=0), x.shape[0], axis=0)
