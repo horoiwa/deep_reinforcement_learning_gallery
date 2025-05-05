@@ -14,3 +14,6 @@ This is **unofficial** **simplified** re-implementation of (EfficientZero V2: Ma
 - No mcts-improved-policy based on completed Q, instead, use simple loss
 - No value scaling of R2D2
 
+
+## Requirements
+`pip install tensorflow==2.17.0 "gymnasium[atari, accept-rom-license]"`

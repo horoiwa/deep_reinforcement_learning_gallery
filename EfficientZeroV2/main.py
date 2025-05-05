@@ -1,13 +1,13 @@
 from pathlib import Path
 import shutil
 import collections
-import functools
 import contextlib
+import random
 
 import tensorflow as tf
 import numpy as np
-import gym
-from gym import wrappers
+import ale_py
+import gymnasium as gym
 from PIL import Image
 import time
 
@@ -55,7 +55,7 @@ class EfficientZeroV2:
         # self.optimizer = tf.keras.optimizers.SGD(
         #     learning_rate=0.2, weight_decay=0.0001, momentum=0.9
         # )
-        self.optimizer = tf.keras.optimizers.Adam(lr=3e-3)
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-3)
 
         self.setup()
         self.summary_writer = (
@@ -65,7 +65,6 @@ class EfficientZeroV2:
 
     def setup(self):
         env = gym.make(self.env_id)
-
         frame, info = env.reset()
         frames = collections.deque(maxlen=self.n_frames)
         for _ in range(self.n_frames):
@@ -109,8 +108,7 @@ class EfficientZeroV2:
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
             )
-            next_frame, next_reward, next_done, next_info = env.step(action)
-
+            next_frame, next_reward, next_done, _, next_info = env.step(action)
             color = "\033[32m" if reward > 0 else ""
             print(
                 f"{color}{ep_steps}, r: {reward}, r_pred:{root_reward[0]:.3f}, a:{action}, policy:{[round(p, 1) for p in policy.numpy()]}, v:{value:.1f}"
@@ -323,7 +321,7 @@ class EfficientZeroV2:
 def train(
     resume_step=None,
     max_steps=100_000,
-    env_id="BreakoutDeterministic-v4",
+    env_id='BreakoutDeterministic-v4',
     log_dir="log",
 ):
     if resume_step is None:
@@ -350,7 +348,7 @@ def train(
 
 def test(
     load_dir: str = "checkpoints",
-    env_id="BreakoutDeterministic-v4",
+    env_id="Breakout-v4",
 ):
     MONITOR_DIR = Path(__file__).parent / "mp4"
     if MONITOR_DIR.exists():
