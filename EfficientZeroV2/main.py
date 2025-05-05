@@ -46,7 +46,7 @@ class EfficientZeroV2:
         )
 
         self.replay_buffer = ReplayBuffer(maxlen=100_000)
-        self.batch_size = 48  # original 256
+        self.batch_size = 32 # original 256
         self.gamma = 0.997
         self.unroll_steps = 3  # original 5
         self.num_simulations = 16
@@ -82,11 +82,11 @@ class EfficientZeroV2:
 
     def save(self, save_dir: str):
         save_dir = Path(save_dir)
-        self.network.save_weights(str(save_dir / "network"))
+        self.network.save_weights(str(save_dir / "network.weights.h5"))
 
     def load(self, load_dir="checkpoints/"):
         load_dir = Path(load_dir)
-        self.network.load_weights(str(load_dir / "network"))
+        self.network.load_weights(str(load_dir / "network.weights.h5"))
 
     def rollout(self):
         env = gym.make(self.env_id, render_mode="rgb_array")
