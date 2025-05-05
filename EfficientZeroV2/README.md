@@ -16,4 +16,5 @@ This is **unofficial** **simplified** re-implementation of (EfficientZero V2: Ma
 
 
 ## Requirements
-`pip install tensorflow==2.17.0 "gymnasium[atari, accept-rom-license]"`
+`pip install tensorflow==2.17.0 numpy==1.24.4 "gymnasium[atari, accept-rom-license]"`
+

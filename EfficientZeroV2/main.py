@@ -48,14 +48,14 @@ class EfficientZeroV2:
         self.replay_buffer = ReplayBuffer(maxlen=100_000)
         self.batch_size = 48  # original 256
         self.gamma = 0.997
-        self.unroll_steps = 1  # original 5
+        self.unroll_steps = 3  # original 5
         self.num_simulations = 16
         self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = 1.0, 0.5, 0.25, 2.0
 
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-3)
         # self.optimizer = tf.keras.optimizers.SGD(
         #     learning_rate=0.2, weight_decay=0.0001, momentum=0.9
         # )
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-3)
 
         self.setup()
         self.summary_writer = (
@@ -78,6 +78,7 @@ class EfficientZeroV2:
         )
         proj = self.network.p1_network(states, training=False)
         pred = self.network.p2_network(proj, training=False)
+        env.close()
 
     def save(self, save_dir: str):
         save_dir = Path(save_dir)
@@ -88,7 +89,7 @@ class EfficientZeroV2:
         self.network.load_weights(str(load_dir / "network"))
 
     def rollout(self):
-        env = gym.make(self.env_id)
+        env = gym.make(self.env_id, render_mode="rgb_array")
 
         frame, info = env.reset()
         lives = info["lives"]
@@ -109,9 +110,9 @@ class EfficientZeroV2:
                 gamma=self.gamma,
             )
             next_frame, next_reward, next_done, _, next_info = env.step(action)
-            color = "\033[32m" if reward > 0 else ""
+            scolor, ecolor = ("\033[32m", "\033[0m") if reward > 0 else ("", "")
             print(
-                f"{color}{ep_steps}, r: {reward}, r_pred:{root_reward[0]:.3f}, a:{action}, policy:{[round(p, 1) for p in policy.numpy()]}, v:{value:.1f}"
+                f"{scolor}{ep_steps}, r: {reward}, r_pred:{root_reward[0]:.3f}, a:{action}, policy:{[round(p, 1) for p in policy.numpy()]}, v:{value:.1f}{ecolor}"
             )
 
             ep_rewards += reward
@@ -145,10 +146,12 @@ class EfficientZeroV2:
             self.total_steps += 1
 
         self.replay_buffer.add(trajectory)
+
         with self.summary_writer.as_default():
             tf.summary.scalar("ep_rewards", ep_rewards, step=self.total_steps)
             tf.summary.scalar("ep_steps", ep_steps, step=self.total_steps)
 
+        env.close()
         info = {"rewards": ep_rewards, "steps": ep_steps}
         return info
 
@@ -280,10 +283,9 @@ class EfficientZeroV2:
 
     def test_play(self, tag: int | None = None, monitor_dir: Path | None = None):
         if monitor_dir:
-            env = wrappers.RecordVideo(
+            env = gym.wrappers.RecordVideo(
                 gym.make(self.env_id, render_mode="rgb_array"),
                 video_folder=monitor_dir,
-                step_trigger=lambda i: True,
                 name_prefix=tag,
             )
         else:
@@ -306,7 +308,7 @@ class EfficientZeroV2:
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
             )
-            next_frame, reward, done, info = env.step(action)
+            next_frame, reward, done, _, info = env.step(action)
             ep_rewards += reward
             print(
                 f"{steps}, r: {reward}, r_pred:{root_reward[0]:.1f}, a:{action}, policy:{[round(p, 1) for p in policy.numpy()]}, v:{value:.1f}"
@@ -315,6 +317,7 @@ class EfficientZeroV2:
             steps += 1
 
         print(f"Test score: {ep_rewards}")
+        env.close()
         return ep_rewards
 
 
@@ -365,4 +368,4 @@ def test(
 
 if __name__ == "__main__":
     train(resume_step=None)
-    # test(load_dir="checkpoints_bkup3")
+    #test(load_dir="checkpoints")
