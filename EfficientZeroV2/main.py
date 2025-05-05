@@ -50,7 +50,7 @@ class EfficientZeroV2:
         self.gamma = 0.997
         self.unroll_steps = 3  # original 5
         self.num_simulations = 16
-        self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = 1.0, 0.5, 0.25, 2.0
+        self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = 1.0, 0.25, 0.25, 2.0
 
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-3)
         # self.optimizer = tf.keras.optimizers.SGD(
