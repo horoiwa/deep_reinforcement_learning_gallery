@@ -46,16 +46,16 @@ class EfficientZeroV2:
         )
 
         self.replay_buffer = ReplayBuffer(maxlen=100_000)
-        self.batch_size = 32  # original 256
+        self.batch_size = 48  # original 256
         self.gamma = 0.997
         self.unroll_steps = 1  # original 5
         self.num_simulations = 16
-        self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = 1.0, 1.0, 0.25, 2.0
+        self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = 1.0, 0.5, 1.0, 5.0
 
         # self.optimizer = tf.keras.optimizers.SGD(
         #     learning_rate=0.2, weight_decay=0.0001, momentum=0.9
         # )
-        self.optimizer = tf.keras.optimizers.Adam(lr=0.0003)
+        self.optimizer = tf.keras.optimizers.Adam(lr=3e-3)
 
         self.setup()
         self.summary_writer = (
@@ -255,7 +255,7 @@ class EfficientZeroV2:
                     + self.lambda_p * loss_p
                     + self.lambda_v * loss_v
                     + self.lambda_g * loss_g
-                    + 5 * 1e-3 * loss_entropy
+                    + 5e-2 * loss_entropy
                 ) / self.unroll_steps
 
                 loss += loss_t

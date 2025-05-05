@@ -151,7 +151,7 @@ class PolicyValueNetwork(tf.keras.Model):
             n_supports,
             use_bias=True,
             activation=None,
-            kernel_initializer="he_normal",
+            kernel_initializer="zeros",
             kernel_regularizer=l2(0.0005),
         )
 
@@ -177,7 +177,7 @@ class PolicyValueNetwork(tf.keras.Model):
             action_space,
             use_bias=True,
             activation=None,
-            kernel_initializer="he_normal",
+            kernel_initializer="zeros",
             kernel_regularizer=l2(0.0005),
         )
 
@@ -238,7 +238,7 @@ class RewardNetwork(tf.keras.Model):
             n_supports,
             use_bias=True,
             activation=None,
-            kernel_initializer="he_normal",
+            kernel_initializer="zeros",
             kernel_regularizer=l2(0.0005),
         )
 
@@ -282,8 +282,8 @@ class TransitionNetwork(tf.keras.Model):
         self.bn_1 = kl.BatchNormalization(axis=-1)
         self.resblock_1 = ResidualBlock(dims=64)
 
-    def call(self, z, actions, training=False):
-        B, H, W, C = z.shape
+    def call(self, states, actions, training=False):
+        B, H, W, C = states.shape
         action_plane = tf.ones((B, H, W, 1), dtype=tf.float32)  # (B, 6, 6, 1)
         actions = tf.reshape(
             tf.cast(actions, dtype=tf.float32), shape=(B, 1, 1, 1)
@@ -294,16 +294,16 @@ class TransitionNetwork(tf.keras.Model):
         action_plane = self.action_ln(action_plane)
         action_plane = tf.nn.relu(action_plane)
 
-        x = tf.concat([z, action_plane], axis=-1)  # (B, 6, 6, 64+16)
+        x = tf.concat([states, action_plane], axis=-1)  # (B, 6, 6, 64+16)
 
         x = self.conv_1(x)  # (B, 6, 6, 64+16) -> (B, 6, 6, 64)
         x = self.bn_1(x, training=training)
-        x += z
+        x += states
         x = tf.nn.relu(x)
 
-        z_next = self.resblock_1(x, training=training)  # (B, 6, 6, 64)
+        next_states = self.resblock_1(x, training=training)  # (B, 6, 6, 64)
 
-        return z_next
+        return next_states
 
 
 class P1Network(tf.keras.Model):
