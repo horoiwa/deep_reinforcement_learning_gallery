@@ -50,7 +50,7 @@ class EfficientZeroV2:
         self.gamma = 0.997
         self.unroll_steps = 1  # original 5
         self.num_simulations = 16
-        self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = 1.0, 0.5, 1.0, 5.0
+        self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = 1.0, 0.5, 0.25, 2.0
 
         # self.optimizer = tf.keras.optimizers.SGD(
         #     learning_rate=0.2, weight_decay=0.0001, momentum=0.9
@@ -110,8 +110,10 @@ class EfficientZeroV2:
                 gamma=self.gamma,
             )
             next_frame, next_reward, next_done, next_info = env.step(action)
+
+            color = "\033[32m" if reward > 0 else ""
             print(
-                f"{ep_steps}, r: {reward}, r_pred:{root_reward[0]:.3f}, a:{action}, policy:{[round(p, 1) for p in policy.numpy()]}, v:{value:.1f}"
+                f"{color}{ep_steps}, r: {reward}, r_pred:{root_reward[0]:.3f}, a:{action}, policy:{[round(p, 1) for p in policy.numpy()]}, v:{value:.1f}"
             )
 
             ep_rewards += reward
@@ -152,11 +154,7 @@ class EfficientZeroV2:
         info = {"rewards": ep_rewards, "steps": ep_steps}
         return info
 
-    def update_network(self, num_updates: int = 1):
-        for _ in range(num_updates):
-            self._update_network()
-
-    def _update_network(self):
+    def update_network(self):
 
         stats = collections.defaultdict(list)
         with timer(f"reanalyze({self.batch_size})"):
