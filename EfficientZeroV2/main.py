@@ -82,6 +82,7 @@ class EfficientZeroV2:
 
     def save(self, save_dir: str):
         save_dir = Path(save_dir)
+        save_dir.mkdir(parents=True, exist_ok=True)
         self.network.save_weights(str(save_dir / "network.weights.h5"))
 
     def load(self, load_dir="checkpoints/"):
@@ -358,6 +359,8 @@ def test(
         shutil.rmtree(MONITOR_DIR)
 
     agent = EfficientZeroV2(env_id=env_id, log_dir=None)
+
+    agent.save(save_dir=load_dir)
     agent.load(load_dir=load_dir)
     for i in range(1, 3):
         score = agent.test_play(tag=f"{i}", monitor_dir=MONITOR_DIR)
