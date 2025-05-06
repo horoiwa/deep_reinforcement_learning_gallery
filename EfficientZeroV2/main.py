@@ -57,10 +57,10 @@ class EfficientZeroV2:
             2.0,
         )
 
-        # self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-3)
-        self.optimizer = tf.keras.optimizers.SGD(
-            learning_rate=0.2, weight_decay=0.0001, momentum=0.9
-        )
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
+        # self.optimizer = tf.keras.optimizers.SGD(
+        #     learning_rate=0.2, weight_decay=0.0001, momentum=0.9
+        # )
 
         self.setup()
         self.summary_writer = (
