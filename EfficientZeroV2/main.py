@@ -277,6 +277,8 @@ class EfficientZeroV2:
                     stats[f"loss_g_{i}"].append(loss_g)
                     stats[f"loss_entropy"].append(loss_entropy)
                     stats["state_init_mu"].append(tf.reduce_mean(init_state))
+                    stats["state_init_var"].append(tf.math.reduce_std(init_state))
+                    stats["state_init_max"].append(tf.reduce_max(init_state))
                     stats["rewardsum_gt"].append(tf.reduce_sum(rewards[:, 0]))
 
         grads = tape.gradient(loss, self.network.trainable_variables)
@@ -375,5 +377,5 @@ def test(
 
 
 if __name__ == "__main__":
-    # train(resume_step=None)
-    test(load_dir="checkpoints_bkup1")
+    train(resume_step=None)
+    # test(load_dir="checkpoints")
