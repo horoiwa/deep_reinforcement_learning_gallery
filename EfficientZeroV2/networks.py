@@ -137,7 +137,7 @@ class RepresentationNetwork(tf.keras.Model):
         x = tf.nn.relu(x)
         x = self.resblock_3(x, training=training)  # (12, 12, 64)
         x = self.pooling2(x)  # (6, 6, 64)
-        x = self.bn_pool2(x)
+        x = self.bn_pool2(x, training=training)
         x = tf.nn.relu(x)
         states = self.resblock_4(x, training=training)  # (6, 6, 64)
 
@@ -337,14 +337,14 @@ class P1Network(tf.keras.Model):
         super(P1Network, self).__init__()
 
         self.dense_1 = kl.Dense(
-            1024,
+            512,
             use_bias=True,
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
         self.bn_1 = kl.BatchNormalization(axis=-1)
         self.dense_2 = kl.Dense(
-            1024,
+            512,
             use_bias=True,
             activation=None,
             kernel_regularizer=l2(0.0005),
@@ -356,7 +356,7 @@ class P1Network(tf.keras.Model):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        self.bn_3 = kl.BatchNormalization(axis=-1)
+        # self.bn_3 = kl.BatchNormalization(axis=-1)
 
     def call(self, z, training=False):
         x = tf.reshape(z, shape=(z.shape[0], -1))
@@ -368,8 +368,8 @@ class P1Network(tf.keras.Model):
         x = self.bn_2(x, training=training)
         x = tf.nn.relu(x)
 
-        x = self.dense_3(x)
-        projection = self.bn_3(x, training=training)
+        projection = self.dense_3(x)
+        # projection = self.bn_3(projection, training=training)
 
         return projection
 
@@ -379,7 +379,7 @@ class P2Network(tf.keras.Model):
         super(P2Network, self).__init__()
 
         self.dense_1 = kl.Dense(
-            256,
+            512,
             use_bias=True,
             activation=None,
             kernel_regularizer=l2(0.0005),
@@ -483,7 +483,7 @@ class DownSampleResidualBlock(tf.keras.layers.Layer):
     def call(self, inputs, training=False):
 
         _x = self.downsample(inputs)
-        _x = self.bn_down(_x)
+        _x = self.bn_down(_x, training=training)
 
         x = self.conv_1(inputs)
         x = self.bn_1(x, training=training)
