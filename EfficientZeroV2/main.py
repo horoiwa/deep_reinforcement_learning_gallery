@@ -46,16 +46,21 @@ class EfficientZeroV2:
         )
 
         self.replay_buffer = ReplayBuffer(maxlen=100_000)
-        self.batch_size = 32 # original 256
+        self.batch_size = 48  # original 256
         self.gamma = 0.997
         self.unroll_steps = 3  # original 5
-        self.num_simulations = 8 # original 16
-        self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = 1.0, 0.25, 0.25, 2.0
+        self.num_simulations = 8  # original 16
+        self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = (
+            1.0,
+            1.0,
+            0.25,
+            2.0,
+        )
 
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-3)
-        # self.optimizer = tf.keras.optimizers.SGD(
-        #     learning_rate=0.2, weight_decay=0.0001, momentum=0.9
-        # )
+        # self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-3)
+        self.optimizer = tf.keras.optimizers.SGD(
+            learning_rate=0.2, weight_decay=0.0001, momentum=0.9
+        )
 
         self.setup()
         self.summary_writer = (
@@ -255,7 +260,7 @@ class EfficientZeroV2:
                     + self.lambda_p * loss_p
                     + self.lambda_v * loss_v
                     + self.lambda_g * loss_g
-                    + 5e-2 * loss_entropy
+                    # + 5e-2 * loss_entropy
                 ) / self.unroll_steps
 
                 loss += loss_t
@@ -275,12 +280,13 @@ class EfficientZeroV2:
                     stats["rewardsum_gt"].append(tf.reduce_sum(rewards[:, 0]))
 
         grads = tape.gradient(loss, self.network.trainable_variables)
-        grads, _ = tf.clip_by_global_norm(grads, clip_norm=5)
+        grads, grad_norm = tf.clip_by_global_norm(grads, clip_norm=5)
         self.optimizer.apply_gradients(zip(grads, self.network.trainable_variables))
 
         with self.summary_writer.as_default():
             for key, value in stats.items():
                 tf.summary.scalar(key, tf.reduce_mean(value), step=self.total_steps)
+            tf.summary.scalar("grad_norm", grad_norm, step=self.total_steps)
 
     def test_play(self, tag: int | None = None, monitor_dir: Path | None = None):
         if monitor_dir:
@@ -325,7 +331,7 @@ class EfficientZeroV2:
 def train(
     resume_step=None,
     max_steps=100_000,
-    env_id='BreakoutDeterministic-v4',
+    env_id="BreakoutDeterministic-v4",
     log_dir="log",
 ):
     if resume_step is None:
@@ -351,8 +357,8 @@ def train(
 
 
 def test(
-    load_dir: str = "checkpoints",
-    env_id='BreakoutDeterministic-v4',
+    load_dir: str,
+    env_id="BreakoutDeterministic-v4",
 ):
     MONITOR_DIR = Path(__file__).parent / "mp4"
     if MONITOR_DIR.exists():
@@ -360,7 +366,6 @@ def test(
 
     agent = EfficientZeroV2(env_id=env_id, log_dir=None)
 
-    agent.save(save_dir=load_dir)
     agent.load(load_dir=load_dir)
     for i in range(1, 3):
         score = agent.test_play(tag=f"{i}", monitor_dir=MONITOR_DIR)
@@ -370,5 +375,5 @@ def test(
 
 
 if __name__ == "__main__":
-    train(resume_step=None)
-    #test(load_dir="checkpoints")
+    # train(resume_step=None)
+    test(load_dir="checkpoints_bkup1")

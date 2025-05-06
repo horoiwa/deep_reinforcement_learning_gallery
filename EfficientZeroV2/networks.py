@@ -16,13 +16,13 @@ class EFZeroNetwork(tf.keras.Model):
         super(EFZeroNetwork, self).__init__()
 
         self.representation_network = RepresentationNetwork()
-        self.policy_value_network = PolicyValueNetwork(
+        self.pv_network = PolicyValueNetwork(
             action_space=action_space, n_supports=n_supports, value_range=value_range
         )
         self.reward_network = RewardNetwork(
             n_supports=n_supports, reward_range=reward_range
         )
-        self.transition_network = TransitionNetwork(action_space=action_space)
+        self.transition_network = DynamicsNetwork(action_space=action_space)
 
         self.p1_network = P1Network()
         self.p2_network = P2Network()
@@ -30,15 +30,35 @@ class EFZeroNetwork(tf.keras.Model):
     @tf.function
     def encode(self, observations, training=False):
         z = self.representation_network(observations, training=training)
+
+        # =========== DEBUG ================
+        # print("========================")
+        # for layer in self.representation_network._flatten_layers():
+        #     if isinstance(layer, tf.keras.layers.BatchNormalization):
+        #         g = layer.gamma.numpy()
+        #         b = layer.beta.numpy()
+        #         print(f"{layer.name} γ max={g.max():.2f}  β max={b.max():.2f}")
+        #
+        # print("---------------------------")
+        # x = observations
+        # print(
+        #     f"input: std={tf.math.reduce_std(x).numpy():.2f}  max={tf.reduce_max(x):.2f}"
+        # )
+        # for l in self.representation_network.layers:
+        #     x = l(x, training=True)
+        #     print(
+        #         f"{l.name:24s} std={tf.math.reduce_std(x).numpy():.2f}  max={tf.reduce_max(x):.2f}"
+        #     )
+        # print("========================")
         return z
 
     @tf.function
     def predict_policy_value_reward(self, z, training=False):
-        policy_logit, value_logits = self.policy_value_network(z, training=training)
+        policy_logit, value_logits = self.pv_network(z, training=training)
         policy_dist = tf.nn.softmax(policy_logit, axis=-1)
         value_dist = tf.nn.softmax(value_logits, axis=-1)
         value_scalar = tf.reduce_sum(
-            value_dist * self.policy_value_network.supports, axis=-1, keepdims=True
+            value_dist * self.pv_network.supports, axis=-1, keepdims=True
         )
 
         reward_logit = self.reward_network(z, training=training)
@@ -65,7 +85,7 @@ class EFZeroNetwork(tf.keras.Model):
 
     def scalar_to_dist(self, x, mode: Literal["value", "reward"]):
         if mode == "value":
-            supports = self.policy_value_network.supports
+            supports = self.pv_network.supports
         elif mode == "reward":
             supports = self.reward_network.supports
 
@@ -98,8 +118,10 @@ class RepresentationNetwork(tf.keras.Model):
         self.resblock_downsample = DownSampleResidualBlock(32, 64, strides=2)
         self.resblock_2 = ResidualBlock(dims=64)
         self.pooling1 = kl.AveragePooling2D(pool_size=3, strides=2, padding="same")
+        self.bn_pool1 = kl.BatchNormalization(axis=-1)
         self.resblock_3 = ResidualBlock(dims=64)
         self.pooling2 = kl.AveragePooling2D(pool_size=3, strides=2, padding="same")
+        self.bn_pool2 = kl.BatchNormalization(axis=-1)
         self.resblock_4 = ResidualBlock(dims=64)
 
     def call(self, observations, training=False):
@@ -111,8 +133,12 @@ class RepresentationNetwork(tf.keras.Model):
         x = self.resblock_downsample(x, training=training)  # (24, 24, 64)
         x = self.resblock_2(x, training=training)  # (24, 24, 64)
         x = self.pooling1(x)  # (12, 12, 64)
+        x = self.bn_pool1(x, training=training)
+        x = tf.nn.relu(x)
         x = self.resblock_3(x, training=training)  # (12, 12, 64)
         x = self.pooling2(x)  # (6, 6, 64)
+        x = self.bn_pool2(x)
+        x = tf.nn.relu(x)
         states = self.resblock_4(x, training=training)  # (6, 6, 64)
 
         return states
@@ -257,9 +283,9 @@ class RewardNetwork(tf.keras.Model):
         return logits
 
 
-class TransitionNetwork(tf.keras.Model):
+class DynamicsNetwork(tf.keras.Model):
     def __init__(self, action_space: int):
-        super(TransitionNetwork, self).__init__()
+        super(DynamicsNetwork, self).__init__()
         self.action_space = float(action_space)
 
         self.conv_action = kl.Conv2D(
@@ -452,10 +478,12 @@ class DownSampleResidualBlock(tf.keras.layers.Layer):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
+        self.bn_down = kl.BatchNormalization(axis=-1)
 
     def call(self, inputs, training=False):
 
         _x = self.downsample(inputs)
+        _x = self.bn_down(_x)
 
         x = self.conv_1(inputs)
         x = self.bn_1(x, training=training)
