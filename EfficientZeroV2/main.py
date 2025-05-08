@@ -133,7 +133,7 @@ class EfficientZeroV2:
             )
 
             ep_rewards += reward
-            reward = np.clip(reward, -1, 1) + 0.1
+            reward = np.clip(reward, -1, 1) + 0.5
             frames.append(process_frame(next_frame))
 
             if done:
@@ -265,7 +265,6 @@ class EfficientZeroV2:
                     )
                     * mask_t
                 )
-                import pdb; pdb.set_trace()  # fmt: skip
 
                 entropy = -tf.reduce_mean(
                     tf.reduce_sum(policy_t * tf.math.log(policy_t + 1e-8), axis=-1)
@@ -287,11 +286,12 @@ class EfficientZeroV2:
                     stats[f"loss_v_{i}"].append(loss_v)
                     stats[f"loss_g_{i}"].append(loss_g)
                     stats[f"entropy"].append(entropy)
+                    stats["reward_gt_mu"].append(tf.reduce_mean(rewards[:, 0]))
+                    stats["reward_pred_mu"].append(tf.reduce_mean(_reward_t_scalar))
+                    stats["value_pred_mu"].append(tf.reduce_mean(_value_t_scalar))
                     stats["state_init_mu"].append(tf.reduce_mean(state))
                     stats["state_init_var"].append(tf.math.reduce_std(state))
                     stats["state_init_max"].append(tf.reduce_max(state))
-                    stats["reward_gt_mu"].append(tf.reduce_mean(rewards[:, 0]))
-                    stats["reward_pred_mu"].append(tf.reduce_mean(_reward_t_scalar))
 
                 state = 0.5 * next_state + 0.5 * tf.stop_gradient(next_state) # fmt: skip
 
