@@ -32,13 +32,14 @@ def search_batch(
     num_simulations: int,
     gamma: float,
     temperature: float = 1.0,
+    training: bool = False,
 ) -> tuple[list[int], list[float], list[float]]:
 
     batch_size: int = len(observations)
     observations = tf.concat(observations, axis=0)
-    root_states = network.encode(observations, training=False)
+    root_states = network.encode(observations, training=training)
     root_policy_logits, _, _, _, _, _, root_values, root_rewards = (
-        network.predict_policy_value_reward(root_states, training=False)
+        network.predict_policy_value_reward(root_states, training=training)
     )
 
     """GPU効率のため複数のMCTSを疑似並列実行"""
@@ -72,11 +73,11 @@ def search_batch(
 
         prev_states = tf.concat(prev_states, axis=0)
         prev_actions = tf.convert_to_tensor(np.array(prev_actions), dtype=tf.float32)
-        next_states = network.transition_network(
+        next_states = network.dynamics_network(
             prev_states, prev_actions, training=False
         )
         policy_logits, _, _, _, _, _, values, rewards = (
-            network.predict_policy_value_reward(next_states, training=False)
+            network.predict_policy_value_reward(next_states, training=training)
         )
 
         for i, simulation in enumerate(simulations):

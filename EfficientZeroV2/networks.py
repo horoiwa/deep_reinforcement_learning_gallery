@@ -22,7 +22,7 @@ class EFZeroNetwork(tf.keras.Model):
         self.reward_network = RewardNetwork(
             n_supports=n_supports, reward_range=reward_range
         )
-        self.transition_network = DynamicsNetwork(action_space=action_space)
+        self.dynamics_network = DynamicsNetwork(action_space=action_space)
 
         self.p1_network = P1Network()
         self.p2_network = P2Network()
@@ -80,7 +80,7 @@ class EFZeroNetwork(tf.keras.Model):
 
     @tf.function
     def predict_transition(self, z, actions, training=False):
-        z_next = self.transition_network(z, actions, training=training)
+        z_next = self.dynamics_network(z, actions, training=training)
         return z_next
 
     def scalar_to_dist(self, x, mode: Literal["value", "reward"]):

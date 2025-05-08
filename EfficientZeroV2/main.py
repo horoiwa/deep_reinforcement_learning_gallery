@@ -35,7 +35,9 @@ def process_frame(frame):
 
 class EfficientZeroV2:
 
-    def __init__(self, env_id: str, log_dir: str):
+    def __init__(self, env_id: str, log_dir: str, max_steps=100_000):
+        self.max_steps = max_steps
+
         self.env_id = env_id
         self.n_frames = 4
         self.action_space = gym.make(env_id).action_space.n
@@ -46,9 +48,9 @@ class EfficientZeroV2:
         )
 
         self.replay_buffer = ReplayBuffer(maxlen=100_000)
-        self.batch_size = 48  # original 256
+        self.batch_size = 32  # original 256
         self.gamma = 0.997
-        self.unroll_steps = 3  # original 5
+        self.unroll_steps = 5  # original 5
         self.num_simulations = 8  # original 16
         self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = (
             1.0,
@@ -57,10 +59,10 @@ class EfficientZeroV2:
             2.0,
         )
 
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
-        # self.optimizer = tf.keras.optimizers.SGD(
-        #     learning_rate=0.2, weight_decay=0.0001, momentum=0.9
-        # )
+        # self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
+        self.optimizer = tf.keras.optimizers.SGD(
+            learning_rate=0.02, weight_decay=0.0001, momentum=0.9
+        )
 
         self.setup()
         self.summary_writer = (
@@ -94,6 +96,14 @@ class EfficientZeroV2:
         load_dir = Path(load_dir)
         self.network.load_weights(str(load_dir / "network.weights.h5"))
 
+    def get_temperature(self) -> float:
+        if self.total_steps < self.max_steps * 0.5:
+            return 1.0
+        elif self.total_steps < self.max_steps * 0.75:
+            return 0.5
+        else:
+            return 0.25
+
     def rollout(self):
         env = gym.make(self.env_id, render_mode="rgb_array")
 
@@ -114,6 +124,7 @@ class EfficientZeroV2:
                 network=self.network,
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
+                temperature=self.get_temperature(),
             )
             next_frame, next_reward, next_done, _, next_info = env.step(action)
             scolor, ecolor = ("\033[32m", "\033[0m") if reward > 0 else ("", "")
@@ -122,7 +133,7 @@ class EfficientZeroV2:
             )
 
             ep_rewards += reward
-            reward = np.clip(reward, -1, 1)
+            reward = np.clip(reward, -1, 1) + 1.0
             frames.append(process_frame(next_frame))
 
             if done:
@@ -179,12 +190,15 @@ class EfficientZeroV2:
                 ),
                 [B, T, -1],
             )
-            _, target_policies, target_values, target_states, _ = mcts.search_batch(
-                observations=tf.reshape(observations, [B * T, H, W, C]),
-                action_space=self.action_space,
-                network=self.network,
-                num_simulations=self.num_simulations,
-                gamma=self.gamma,
+            _, target_policies, target_values, target_states, tmp_target_rewards = (
+                mcts.search_batch(
+                    observations=tf.reshape(observations, [B * T, H, W, C]),
+                    action_space=self.action_space,
+                    network=self.network,
+                    num_simulations=self.num_simulations,
+                    gamma=self.gamma,
+                    temperature=self.get_temperature(),
+                )
             )
 
         target_states = tf.reshape(
@@ -204,7 +218,7 @@ class EfficientZeroV2:
             )
             for i in range(self.unroll_steps):
                 state = next_state
-                _, _, _, policy_t, value_t, reward_t, _, _ = (
+                _, _, _, policy_t, value_t, reward_t, _, tmp_reward_t = (
                     self.network.predict_policy_value_reward(state, training=True)
                 )
 
@@ -222,14 +236,14 @@ class EfficientZeroV2:
                 )
                 loss_v = -tf.reduce_mean(
                     tf.reduce_sum(target_value_t * tf.math.log(value_t + 1e-8), axis=-1)
-                    # * mask_t
+                    * mask_t
                 )
 
                 loss_r = -tf.reduce_mean(
                     tf.reduce_sum(
                         target_reward_t * tf.math.log(reward_t + 1e-8), axis=-1
                     )
-                    # * mask_t
+                    * mask_t
                 )
 
                 proj = self.network.p2_network(
@@ -248,7 +262,7 @@ class EfficientZeroV2:
                     tf.reduce_sum(
                         proj_normed * tf.stop_gradient(target_proj_normed), axis=-1
                     )
-                    # * mask_t
+                    * mask_t
                 )
 
                 loss_entropy = -1.0 * -tf.reduce_mean(
@@ -259,8 +273,7 @@ class EfficientZeroV2:
                     self.lambda_r * loss_r
                     + self.lambda_p * loss_p
                     + self.lambda_v * loss_v
-                    + self.lambda_g * loss_g
-                    # + 5e-2 * loss_entropy
+                    # + self.lambda_g * loss_g
                 ) / self.unroll_steps
 
                 loss += loss_t
@@ -279,7 +292,39 @@ class EfficientZeroV2:
                     stats["state_init_mu"].append(tf.reduce_mean(init_state))
                     stats["state_init_var"].append(tf.math.reduce_std(init_state))
                     stats["state_init_max"].append(tf.reduce_max(init_state))
-                    stats["rewardsum_gt"].append(tf.reduce_sum(rewards[:, 0]))
+                    stats["reward_gt_mu"].append(tf.reduce_mean(rewards[:, 0]))
+                    stats["reward_pred_mu"].append(tf.reduce_mean(tmp_reward_t))
+                    stats["reward_mcts_mu"].append(
+                        tf.reduce_mean(tmp_target_rewards[:B])
+                    )
+
+                if False and self.total_steps > 1400:
+                    tmp_state = self.network.encode(init_obs, training=True)
+                    res1 = self.network.predict_policy_value_reward(
+                        tmp_state, training=True
+                    )
+                    r1 = res1[-1]
+
+                    res2 = mcts.search_batch(
+                        observations=init_obs,
+                        action_space=self.action_space,
+                        network=self.network,
+                        num_simulations=self.num_simulations,
+                        gamma=self.gamma,
+                        training=False,
+                    )
+                    r2 = res2[-1]
+
+                    res3 = mcts.search_batch(
+                        observations=init_obs,
+                        action_space=self.action_space,
+                        network=self.network,
+                        num_simulations=self.num_simulations,
+                        gamma=self.gamma,
+                        training=True,
+                    )
+                    r3 = res3[-1]
+                    import pdb; pdb.set_trace()  # fmt: skip
 
         grads = tape.gradient(loss, self.network.trainable_variables)
         grads, grad_norm = tf.clip_by_global_norm(grads, clip_norm=5)
@@ -316,6 +361,7 @@ class EfficientZeroV2:
                 network=self.network,
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
+                temperature=0.25,
             )
             next_frame, reward, done, _, info = env.step(action)
             ep_rewards += reward
@@ -354,7 +400,7 @@ def train(
         print("info: ", info)
         print("=" * 20)
         n += 1
-        if n % 10 == 0:
+        if n % 5 == 0:
             agent.save(save_dir="checkpoints/")
 
 
