@@ -198,6 +198,7 @@ class EfficientZeroV2:
                     num_simulations=self.num_simulations,
                     gamma=self.gamma,
                     temperature=self.get_temperature(),
+                    training=True,
                 )
             )
 
@@ -212,14 +213,14 @@ class EfficientZeroV2:
 
         with tf.GradientTape() as tape:
             loss = 0.0
-            init_state = self.network.encode(init_obs, training=True)
+            init_state = self.network.encode(init_obs, training=False)
             next_state = self.network.predict_transition(
-                init_state, actions=init_action, training=True
+                init_state, actions=init_action, training=False
             )
             for i in range(self.unroll_steps):
                 state = next_state
                 _, _, _, policy_t, value_t, reward_t, _, tmp_reward_t = (
-                    self.network.predict_policy_value_reward(state, training=True)
+                    self.network.predict_policy_value_reward(state, training=False)
                 )
 
                 target_policy_t = target_policies[:, i, :]
@@ -273,7 +274,7 @@ class EfficientZeroV2:
                     self.lambda_r * loss_r
                     + self.lambda_p * loss_p
                     + self.lambda_v * loss_v
-                    # + self.lambda_g * loss_g
+                    + self.lambda_g * loss_g
                 ) / self.unroll_steps
 
                 loss += loss_t
