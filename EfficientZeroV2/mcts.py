@@ -14,7 +14,7 @@ def search(
     temperature: float = 1.0,
 ) -> tuple[int, float, float]:
 
-    best_actions, policies, values, root_states, root_rewards = search_batch(
+    best_actions, policies, values = search_batch(
         observations=[observation],
         action_space=action_space,
         network=network,
@@ -22,7 +22,7 @@ def search(
         gamma=gamma,
         temperature=temperature,
     )
-    return best_actions[0], policies[0], values[0], root_states[0], root_rewards[0]
+    return best_actions[0], policies[0], values[0]
 
 
 def search_batch(
@@ -38,8 +38,8 @@ def search_batch(
     batch_size: int = len(observations)
     observations = tf.concat(observations, axis=0)
     root_states = network.encode(observations, training=training)
-    root_policy_logits, _, _, _, _, _, root_values, root_rewards = (
-        network.predict_policy_value_reward(root_states, training=training)
+    root_policy_logits, _, _, root_values = network.predict_pv(
+        root_states, training=training
     )
 
     """GPU効率のため複数のMCTSを疑似並列実行"""
@@ -73,12 +73,10 @@ def search_batch(
 
         prev_states = tf.concat(prev_states, axis=0)
         prev_actions = tf.convert_to_tensor(np.array(prev_actions), dtype=tf.float32)
-        next_states = network.dynamics_network(
+        next_states, _, rewards = network.unroll(
             prev_states, prev_actions, training=False
         )
-        policy_logits, _, _, _, _, _, values, rewards = (
-            network.predict_policy_value_reward(next_states, training=training)
-        )
+        policy_logits, _, _, values = network.predict_pv(next_states, training=training)
 
         for i, simulation in enumerate(simulations):
             simulation.send(
@@ -96,7 +94,7 @@ def search_batch(
     mcts_policies = tf.cast(tf.stack(mcts_policies), tf.float32)
     mcts_values = tf.cast(tf.stack(mcts_values), tf.float32)
 
-    return (best_actions, mcts_policies, mcts_values, root_states, root_rewards)
+    return (best_actions, mcts_policies, mcts_values)
 
 
 class ValueStats(list):

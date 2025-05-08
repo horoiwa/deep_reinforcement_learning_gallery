@@ -17,7 +17,7 @@ from networks import EFZeroNetwork
 
 
 @contextlib.contextmanager
-def timer(name):
+def timer(name: str):
     start = time.time()
     try:
         yield
@@ -79,8 +79,8 @@ class EfficientZeroV2:
         observations = np.stack(frames, axis=2)[np.newaxis, ...]
 
         states = self.network.encode(observations, training=False)
-        _ = self.network.predict_policy_value_reward(states, training=False)
-        next_states = self.network.predict_transition(
+        _ = self.network.predict_pv(states, training=False)
+        next_states, _, _ = self.network.unroll(
             states, actions=np.array([[2]]), training=False
         )
         proj = self.network.p1_network(states, training=False)
@@ -113,12 +113,12 @@ class EfficientZeroV2:
         for _ in range(self.n_frames):
             frames.append(process_frame(frame))
 
-        ep_rewards, ep_steps = 0, 0
         trajectory = []
-        done, reward, info = False, 0, info
+        ep_rewards, ep_steps = 0, 0
+        done = False
         while ep_steps < 2000:
             obs = np.stack(frames, axis=2)[np.newaxis, ...]
-            action, policy, value, root_state, root_reward = mcts.search(
+            action, _policy, _value = mcts.search(
                 observation=obs,
                 action_space=self.action_space,
                 network=self.network,
@@ -126,14 +126,14 @@ class EfficientZeroV2:
                 gamma=self.gamma,
                 temperature=self.get_temperature(),
             )
-            next_frame, next_reward, next_done, _, next_info = env.step(action)
+            next_frame, reward, done, _, info = env.step(action)
             scolor, ecolor = ("\033[32m", "\033[0m") if reward > 0 else ("", "")
             print(
-                f"{scolor}{ep_steps}, r: {reward}, r_pred:{root_reward[0]:.3f}, a:{action}, policy:{[round(p, 1) for p in policy.numpy()]}, v:{value:.1f}{ecolor}"
+                f"{scolor}{ep_steps}, r: {reward}, a:{action}, policy:{[round(p, 1) for p in _policy.numpy()]}, v:{_value:.1f}{ecolor}"
             )
 
             ep_rewards += reward
-            reward = np.clip(reward, -1, 1) + 1.0
+            reward = np.clip(reward, -1, 1) + 0.1
             frames.append(process_frame(next_frame))
 
             if done:
@@ -153,9 +153,8 @@ class EfficientZeroV2:
                     )
                 trajectory.append(exp)
 
-            done, reward, info = next_done, next_reward, next_info
-
-            if len(self.replay_buffer) > 1000 and self.total_steps % 4 == 0:
+            if len(self.replay_buffer) > 300 and self.total_steps % 4 == 0:
+                # if len(self.replay_buffer) > 1000 and self.total_steps % 4 == 0:
                 with timer(f"Update network"):
                     self.update_network()
 
@@ -174,15 +173,14 @@ class EfficientZeroV2:
 
     def update_network(self):
 
-        stats = collections.defaultdict(list)
-        with timer(f"reanalyze({self.batch_size})"):
-            (init_obs, init_action, observations, actions, rewards, masks) = (
-                self.replay_buffer.sample_batch(
-                    batch_size=self.batch_size,
-                    unroll_steps=self.unroll_steps,
-                )
+        (obs, next_obs, actions, rewards, dones, masks) = (
+            self.replay_buffer.sample_batch(
+                batch_size=self.batch_size,
+                unroll_steps=self.unroll_steps,
             )
-            B, T, H, W, C = observations.shape
+        )
+        with timer(f"reanalyze({self.batch_size})"):
+            B, T, H, W, C = obs.shape
 
             target_rewards = tf.reshape(
                 self.network.scalar_to_dist(
@@ -190,44 +188,44 @@ class EfficientZeroV2:
                 ),
                 [B, T, -1],
             )
-            _, target_policies, target_values, target_states, tmp_target_rewards = (
-                mcts.search_batch(
-                    observations=tf.reshape(observations, [B * T, H, W, C]),
-                    action_space=self.action_space,
-                    network=self.network,
-                    num_simulations=self.num_simulations,
-                    gamma=self.gamma,
-                    temperature=self.get_temperature(),
-                    training=True,
-                )
+            _, target_policies, target_values = mcts.search_batch(
+                observations=tf.reshape(obs, [B * T, H, W, C]),
+                action_space=self.action_space,
+                network=self.network,
+                num_simulations=self.num_simulations,
+                gamma=self.gamma,
+                temperature=self.get_temperature(),
+                training=False,
             )
 
-        target_states = tf.reshape(
-            target_states,
-            [B, T] + target_states.shape[1:],
-        )
         target_policies = tf.reshape(target_policies, [B, T, -1])
         target_values = tf.reshape(
             self.network.scalar_to_dist(target_values, mode="value"), [B, T, -1]
         )
+        _target_next_states = self.network.encode(
+            tf.reshape(next_obs, [B * T, H, W, C]), training=False
+        )
+        target_next_states = tf.reshape(
+            _target_next_states, [B, T] + _target_next_states.shape[1:]
+        )
 
+        stats = collections.defaultdict(list)
         with tf.GradientTape() as tape:
             loss = 0.0
-            init_state = self.network.encode(init_obs, training=False)
-            next_state = self.network.predict_transition(
-                init_state, actions=init_action, training=False
-            )
+            state = self.network.encode(obs[:, 0, ...], training=True)
             for i in range(self.unroll_steps):
-                state = next_state
-                _, _, _, policy_t, value_t, reward_t, _, tmp_reward_t = (
-                    self.network.predict_policy_value_reward(state, training=False)
-                )
-
                 target_policy_t = target_policies[:, i, :]
                 target_value_t = target_values[:, i, :]
                 target_reward_t = target_rewards[:, i, :]
-                target_state_t = target_states[:, i, :]
-                mask_t = masks[:, i : i + 1]
+                target_next_state_t = target_next_states[:, i, ...]
+                mask_t = masks[:, i]
+
+                _, policy_t, value_t, _value_t_scalar = self.network.predict_pv(
+                    state, training=True
+                )
+                next_state, reward_t, _reward_t_scalar = self.network.unroll(
+                    state, actions=actions[:, i], training=True
+                )
 
                 loss_p = -tf.reduce_mean(
                     tf.reduce_sum(
@@ -248,13 +246,15 @@ class EfficientZeroV2:
                 )
 
                 proj = self.network.p2_network(
-                    self.network.p1_network(state, training=True), training=True
+                    self.network.p1_network(next_state, training=True), training=True
                 )
                 proj_normed = proj / (
                     tf.norm(proj, ord=2, axis=-1, keepdims=True) + 1e-12
                 )
 
-                target_proj = self.network.p1_network(target_state_t, training=False)
+                target_proj = self.network.p1_network(
+                    target_next_state_t, training=False
+                )
                 target_proj_normed = target_proj / (
                     tf.norm(target_proj, ord=2, axis=-1, keepdims=True) + 1e-12
                 )
@@ -265,8 +265,9 @@ class EfficientZeroV2:
                     )
                     * mask_t
                 )
+                import pdb; pdb.set_trace()  # fmt: skip
 
-                loss_entropy = -1.0 * -tf.reduce_mean(
+                entropy = -tf.reduce_mean(
                     tf.reduce_sum(policy_t * tf.math.log(policy_t + 1e-8), axis=-1)
                 )
 
@@ -279,53 +280,20 @@ class EfficientZeroV2:
 
                 loss += loss_t
 
-                next_state = self.network.predict_transition(
-                    state, actions=actions[:, i], training=True
-                )
-                next_state = 0.5 * next_state + 0.5 * tf.stop_gradient(next_state) # fmt: skip
                 if i == 0:
                     stats[f"loss_{i}"].append(loss_t)
                     stats[f"loss_r_{i}"].append(loss_r)
                     stats[f"loss_p_{i}"].append(loss_p)
                     stats[f"loss_v_{i}"].append(loss_v)
                     stats[f"loss_g_{i}"].append(loss_g)
-                    stats[f"loss_entropy"].append(loss_entropy)
-                    stats["state_init_mu"].append(tf.reduce_mean(init_state))
-                    stats["state_init_var"].append(tf.math.reduce_std(init_state))
-                    stats["state_init_max"].append(tf.reduce_max(init_state))
+                    stats[f"entropy"].append(entropy)
+                    stats["state_init_mu"].append(tf.reduce_mean(state))
+                    stats["state_init_var"].append(tf.math.reduce_std(state))
+                    stats["state_init_max"].append(tf.reduce_max(state))
                     stats["reward_gt_mu"].append(tf.reduce_mean(rewards[:, 0]))
-                    stats["reward_pred_mu"].append(tf.reduce_mean(tmp_reward_t))
-                    stats["reward_mcts_mu"].append(
-                        tf.reduce_mean(tmp_target_rewards[:B])
-                    )
+                    stats["reward_pred_mu"].append(tf.reduce_mean(_reward_t_scalar))
 
-                if False and self.total_steps > 1400:
-                    tmp_state = self.network.encode(init_obs, training=True)
-                    res1 = self.network.predict_policy_value_reward(
-                        tmp_state, training=True
-                    )
-                    r1 = res1[-1]
-
-                    res2 = mcts.search_batch(
-                        observations=init_obs,
-                        action_space=self.action_space,
-                        network=self.network,
-                        num_simulations=self.num_simulations,
-                        gamma=self.gamma,
-                        training=False,
-                    )
-                    r2 = res2[-1]
-
-                    res3 = mcts.search_batch(
-                        observations=init_obs,
-                        action_space=self.action_space,
-                        network=self.network,
-                        num_simulations=self.num_simulations,
-                        gamma=self.gamma,
-                        training=True,
-                    )
-                    r3 = res3[-1]
-                    import pdb; pdb.set_trace()  # fmt: skip
+                state = 0.5 * next_state + 0.5 * tf.stop_gradient(next_state) # fmt: skip
 
         grads = tape.gradient(loss, self.network.trainable_variables)
         grads, grad_norm = tf.clip_by_global_norm(grads, clip_norm=5)
@@ -356,7 +324,7 @@ class EfficientZeroV2:
         done = False
         while not done:
             obs = np.stack(frames, axis=2)[np.newaxis, ...]
-            action, policy, value, root_state, root_reward = mcts.search(
+            action, _policy, _value = mcts.search(
                 observation=obs,
                 action_space=self.action_space,
                 network=self.network,
@@ -366,8 +334,9 @@ class EfficientZeroV2:
             )
             next_frame, reward, done, _, info = env.step(action)
             ep_rewards += reward
+            scolor, ecolor = ("\033[32m", "\033[0m") if reward > 0 else ("", "")
             print(
-                f"{steps}, r: {reward}, r_pred:{root_reward[0]:.1f}, a:{action}, policy:{[round(p, 1) for p in policy.numpy()]}, v:{value:.1f}"
+                f"{scolor}{steps}, r: {reward}, a:{action}, policy:{[round(p, 1) for p in _policy.numpy()]}, v:{_value:.1f}{ecolor}"
             )
             frames.append(process_frame(next_frame))
             steps += 1
@@ -425,4 +394,4 @@ def test(
 
 if __name__ == "__main__":
     train(resume_step=None)
-    # test(load_dir="checkpoints_bkup1")
+    # test(load_dir="checkpoints_bkup2")

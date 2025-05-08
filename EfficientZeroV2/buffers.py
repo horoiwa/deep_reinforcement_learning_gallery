@@ -10,7 +10,7 @@ class Experience:
     observation: np.ndarray
     action: int
     reward: float
-    done: int
+    done: float
 
 
 class ReplayBuffer:
@@ -33,46 +33,49 @@ class ReplayBuffer:
         ]
         trajectories = [self.buffer[idx : idx + unroll_steps + 1] for idx in indices]
 
-        observations = []
-        actions = []
-        rewards = []
-        masks = []
-
+        obs, actions, rewards, dones, masks = [], [], [], [], []
         for trajectory in trajectories:
-            _masks = 1 - np.cumsum([t.done for t in trajectory]).clip(0, 1)
-            _observations = (
-                np.concatenate([t.observation for t in trajectory], axis=0)
-                * _masks[..., np.newaxis, np.newaxis, np.newaxis]
-            )
-            _actions = (np.array([t.action for t in trajectory])).reshape(
-                -1, 1
-            ) * _masks[..., np.newaxis]
-            _rewards = (
-                np.array([t.reward for t in trajectory]).reshape(-1, 1)
-                * _masks[..., np.newaxis]
-            )
+            done = False
+            _obs, _actions, _rewards, _dones, _masks = [], [], [], [], []
+            for t in trajectory:
+                if done:
+                    # If the trajectory is done, we need to pad the observation and action
+                    # to match the unroll steps
+                    _obs.append(tf.zeros_like(t.observation, dtype=tf.float32))
+                    _actions.append(0)
+                    _rewards.append(0.0)
+                    _dones.append(1.0)
+                    _masks.append(0.0)
+                else:
+                    _obs.append(tf.convert_to_tensor(t.observation, dtype=tf.float32))
+                    _actions.append(t.action)
+                    _rewards.append(t.reward)
+                    _dones.append(t.done)
+                    _masks.append(1.0)
 
-            observations.append(_observations)
-            actions.append(_actions)
-            rewards.append(_rewards)
-            masks.append(_masks)
+                if t.done:
+                    done = True
 
-        # ここでsegmentation fault
-        observations = tf.convert_to_tensor(
-            np.array(observations), dtype=tf.float32
-        )  # (B, unroll_steps+1, 96, 96, 1)
-        actions = tf.stack(actions, axis=0)  # (B, unroll_steps+1)
-        rewards = tf.stack(rewards, axis=0)  # (B, unroll_steps+1)
-        masks = tf.cast(tf.stack(masks, axis=0), tf.float32)  # (B, unroll_steps+1)
+            obs.append(tf.concat(_obs, axis=0))
+            actions.append(np.array(_actions, dtype=np.int32))
+            rewards.append(np.array(_rewards, dtype=np.float32))
+            dones.append(np.array(_dones, dtype=np.float32))
+            masks.append(np.array(_masks, dtype=np.float32))
 
-        init_obs = observations[:, 0, ...]  # (B, 96, 96, 1)
-        init_action = actions[:, 0, ...]  # (B, 1)
+        obs = tf.stack(obs)  # (B, unroll_steps+1, 96, 96, 1)
+
+        observations = obs[:, :-1, ...]  # (B, unroll_steps, 96, 96, 1)
+        next_observations = obs[:, 1:, ...]  # (B, unroll_steps, 96, 96, 1)
+        actions = tf.stack(actions, axis=0)[:, :unroll_steps]  # (B, unroll_steps)
+        rewards = tf.stack(rewards, axis=0)[:, :unroll_steps]  # (B, unroll_steps)
+        dones = tf.stack(dones, axis=0)[:, :unroll_steps]  # (B, unroll_steps)
+        masks = tf.stack(masks, axis=0)[:, :unroll_steps]  # (B, unroll_steps)
 
         return (
-            init_obs,
-            init_action,
-            observations[:, 1:, ...],
-            tf.squeeze(actions[:, 1:, ...], axis=-1),
-            tf.squeeze(rewards[:, 1:, ...], axis=-1),
-            masks[:, 1:],
+            observations,
+            next_observations,
+            actions,
+            rewards,
+            dones,
+            masks,
         )

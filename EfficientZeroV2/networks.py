@@ -29,59 +29,28 @@ class EFZeroNetwork(tf.keras.Model):
 
     @tf.function
     def encode(self, observations, training=False):
-        z = self.representation_network(observations, training=training)
-
-        # =========== DEBUG ================
-        # print("========================")
-        # for layer in self.representation_network._flatten_layers():
-        #     if isinstance(layer, tf.keras.layers.BatchNormalization):
-        #         g = layer.gamma.numpy()
-        #         b = layer.beta.numpy()
-        #         print(f"{layer.name} γ max={g.max():.2f}  β max={b.max():.2f}")
-        #
-        # print("---------------------------")
-        # x = observations
-        # print(
-        #     f"input: std={tf.math.reduce_std(x).numpy():.2f}  max={tf.reduce_max(x):.2f}"
-        # )
-        # for l in self.representation_network.layers:
-        #     x = l(x, training=True)
-        #     print(
-        #         f"{l.name:24s} std={tf.math.reduce_std(x).numpy():.2f}  max={tf.reduce_max(x):.2f}"
-        #     )
-        # print("========================")
-        return z
+        state = self.representation_network(observations, training=training)
+        return state
 
     @tf.function
-    def predict_policy_value_reward(self, z, training=False):
+    def predict_pv(self, z, training=False):
         policy_logit, value_logits = self.pv_network(z, training=training)
         policy_dist = tf.nn.softmax(policy_logit, axis=-1)
         value_dist = tf.nn.softmax(value_logits, axis=-1)
         value_scalar = tf.reduce_sum(
             value_dist * self.pv_network.supports, axis=-1, keepdims=True
         )
+        return (policy_logit, policy_dist, value_dist, value_scalar)
 
-        reward_logit = self.reward_network(z, training=training)
+    @tf.function
+    def unroll(self, state, actions, training=False):
+        next_state = self.dynamics_network(state, actions, training=training)
+        reward_logit = self.reward_network(next_state, training=training)
         reward_dist = tf.nn.softmax(reward_logit, axis=-1)
         reward_scalar = tf.reduce_sum(
             reward_dist * self.reward_network.supports, axis=-1, keepdims=True
         )
-
-        return (
-            policy_logit,
-            value_logits,
-            reward_logit,
-            policy_dist,
-            value_dist,
-            reward_dist,
-            value_scalar,
-            reward_scalar,
-        )
-
-    @tf.function
-    def predict_transition(self, z, actions, training=False):
-        z_next = self.dynamics_network(z, actions, training=training)
-        return z_next
+        return next_state, reward_dist, reward_scalar
 
     def scalar_to_dist(self, x, mode: Literal["value", "reward"]):
         if mode == "value":
@@ -113,15 +82,15 @@ class RepresentationNetwork(tf.keras.Model):
             use_bias=False,
             activation=None,
         )
-        self.bn_1 = kl.BatchNormalization(axis=-1)
+        self.bn_1 = kl.GroupNormalization(axis=-1, groups=32)
         self.resblock_1 = ResidualBlock(dims=32)
         self.resblock_downsample = DownSampleResidualBlock(32, 64, strides=2)
         self.resblock_2 = ResidualBlock(dims=64)
         self.pooling1 = kl.AveragePooling2D(pool_size=3, strides=2, padding="same")
-        self.bn_pool1 = kl.BatchNormalization(axis=-1)
+        self.bn_pool1 = kl.GroupNormalization(axis=-1, groups=32)
         self.resblock_3 = ResidualBlock(dims=64)
         self.pooling2 = kl.AveragePooling2D(pool_size=3, strides=2, padding="same")
-        self.bn_pool2 = kl.BatchNormalization(axis=-1)
+        self.bn_pool2 = kl.GroupNormalization(axis=-1, groups=32)
         self.resblock_4 = ResidualBlock(dims=64)
 
     def call(self, observations, training=False):
@@ -164,7 +133,7 @@ class PolicyValueNetwork(tf.keras.Model):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        self.v_bn_1 = kl.BatchNormalization(axis=-1)
+        self.v_bn_1 = kl.GroupNormalization(axis=-1, groups=16)
         self.v_fc_1 = kl.Dense(
             32,
             use_bias=True,
@@ -172,7 +141,7 @@ class PolicyValueNetwork(tf.keras.Model):
             kernel_initializer="he_normal",
             kernel_regularizer=l2(0.0005),
         )
-        self.v_bn_2 = kl.BatchNormalization(axis=-1)
+        self.v_bn_2 = kl.LayerNormalization(axis=-1)
         self.v_fc_2 = kl.Dense(
             n_supports,
             use_bias=True,
@@ -190,7 +159,7 @@ class PolicyValueNetwork(tf.keras.Model):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        self.p_bn_1 = kl.BatchNormalization(axis=-1)
+        self.p_bn_1 = kl.GroupNormalization(axis=-1, groups=16)
         self.p_fc_1 = kl.Dense(
             32,
             use_bias=True,
@@ -198,7 +167,7 @@ class PolicyValueNetwork(tf.keras.Model):
             kernel_initializer="he_normal",
             kernel_regularizer=l2(0.0005),
         )
-        self.p_bn_2 = kl.BatchNormalization(axis=-1)
+        self.p_bn_2 = kl.LayerNormalization(axis=-1)
         self.p_fc_2 = kl.Dense(
             action_space,
             use_bias=True,
@@ -250,7 +219,7 @@ class RewardNetwork(tf.keras.Model):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        self.bn_1 = kl.BatchNormalization(axis=-1)
+        self.bn_1 = kl.GroupNormalization(axis=-1, groups=16)
 
         self.fc_1 = kl.Dense(
             512,
@@ -259,7 +228,7 @@ class RewardNetwork(tf.keras.Model):
             kernel_initializer="he_normal",
             kernel_regularizer=l2(0.0005),
         )
-        self.bn_2 = kl.BatchNormalization(axis=-1)
+        self.bn_2 = kl.LayerNormalization(axis=-1)
         self.fc_2 = kl.Dense(
             n_supports,
             use_bias=True,
@@ -305,7 +274,7 @@ class DynamicsNetwork(tf.keras.Model):
             use_bias=False,
             kernel_regularizer=l2(0.0005),
         )
-        self.bn_1 = kl.BatchNormalization(axis=-1)
+        self.bn_1 = kl.GroupNormalization(axis=-1, groups=32)
         self.resblock_1 = ResidualBlock(dims=64)
 
     def call(self, states, actions, training=False):
@@ -342,14 +311,14 @@ class P1Network(tf.keras.Model):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        self.bn_1 = kl.BatchNormalization(axis=-1)
+        self.bn_1 = kl.LayerNormalization(axis=-1)
         self.dense_2 = kl.Dense(
             512,
             use_bias=True,
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        self.bn_2 = kl.BatchNormalization(axis=-1)
+        self.bn_2 = kl.LayerNormalization(axis=-1)
         self.dense_3 = kl.Dense(
             1024,
             use_bias=True,
@@ -384,7 +353,7 @@ class P2Network(tf.keras.Model):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        self.bn_1 = kl.BatchNormalization(axis=-1)
+        self.bn_1 = kl.LayerNormalization(axis=-1)
         self.dense_2 = kl.Dense(
             1024,
             use_bias=True,
@@ -415,7 +384,7 @@ class ResidualBlock(tf.keras.layers.Layer):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        self.bn_1 = kl.BatchNormalization(axis=-1)
+        self.bn_1 = kl.GroupNormalization(axis=-1, groups=32)
 
         self.conv_2 = kl.Conv2D(
             dims,
@@ -426,7 +395,7 @@ class ResidualBlock(tf.keras.layers.Layer):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        self.bn_2 = kl.BatchNormalization(axis=-1)
+        self.bn_2 = kl.GroupNormalization(axis=-1, groups=32)
 
     def call(self, inputs, training=False):
         _x = inputs
@@ -456,7 +425,7 @@ class DownSampleResidualBlock(tf.keras.layers.Layer):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        self.bn_1 = kl.BatchNormalization(axis=-1)
+        self.bn_1 = kl.GroupNormalization(axis=-1, groups=32)
 
         self.conv_2 = kl.Conv2D(
             dims_out,
@@ -467,7 +436,7 @@ class DownSampleResidualBlock(tf.keras.layers.Layer):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        self.bn_2 = kl.BatchNormalization(axis=-1)
+        self.bn_2 = kl.GroupNormalization(axis=-1, groups=32)
 
         self.downsample = kl.Conv2D(
             dims_out,
@@ -478,7 +447,7 @@ class DownSampleResidualBlock(tf.keras.layers.Layer):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        self.bn_down = kl.BatchNormalization(axis=-1)
+        self.bn_down = kl.GroupNormalization(axis=-1, groups=32)
 
     def call(self, inputs, training=False):
 
