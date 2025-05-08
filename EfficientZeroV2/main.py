@@ -286,12 +286,13 @@ class EfficientZeroV2:
                     stats[f"loss_v_{i}"].append(loss_v)
                     stats[f"loss_g_{i}"].append(loss_g)
                     stats[f"entropy"].append(entropy)
-                    stats["reward_gt_mu"].append(tf.reduce_mean(rewards[:, 0]))
+                    stats["target_reward_mu"].append(tf.reduce_mean(rewards[:, 0]))
                     stats["reward_pred_mu"].append(tf.reduce_mean(_reward_t_scalar))
+                    stats["target_value_mu"].append(tf.reduce_mean(target_value_t))
                     stats["value_pred_mu"].append(tf.reduce_mean(_value_t_scalar))
-                    stats["state_init_mu"].append(tf.reduce_mean(state))
-                    stats["state_init_var"].append(tf.math.reduce_std(state))
-                    stats["state_init_max"].append(tf.reduce_max(state))
+                    stats["state_mu"].append(tf.reduce_mean(state))
+                    stats["state_var"].append(tf.math.reduce_std(state))
+                    stats["state_max"].append(tf.reduce_max(state))
 
                 state = 0.5 * next_state + 0.5 * tf.stop_gradient(next_state) # fmt: skip
 
