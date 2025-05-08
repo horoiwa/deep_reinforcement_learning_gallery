@@ -133,7 +133,7 @@ class EfficientZeroV2:
             )
 
             ep_rewards += reward
-            reward = np.clip(reward, -1, 1) + 0.5
+            reward = np.clip(reward, -1, 1) + 0.1
             frames.append(process_frame(next_frame))
 
             if done:
