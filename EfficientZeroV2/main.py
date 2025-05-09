@@ -59,10 +59,10 @@ class EfficientZeroV2:
             2.0,
         )
 
-        # self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
-        self.optimizer = tf.keras.optimizers.SGD(
-            learning_rate=0.02, weight_decay=0.0001, momentum=0.9
-        )
+        self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
+        # self.optimizer = tf.keras.optimizers.SGD(
+        #     learning_rate=0.02, weight_decay=0.0001, momentum=0.9
+        # )
 
         self.setup()
         self.summary_writer = (
@@ -133,7 +133,7 @@ class EfficientZeroV2:
             )
 
             ep_rewards += reward
-            reward = np.clip(reward, -1, 1) + 0.1
+            reward = np.clip(reward, -1, 1)
             frames.append(process_frame(next_frame))
 
             if done:
@@ -153,8 +153,7 @@ class EfficientZeroV2:
                     )
                 trajectory.append(exp)
 
-            if len(self.replay_buffer) > 300 and self.total_steps % 4 == 0:
-                # if len(self.replay_buffer) > 1000 and self.total_steps % 4 == 0:
+            if len(self.replay_buffer) > 1000 and self.total_steps % 4 == 0:
                 with timer(f"Update network"):
                     self.update_network()
 
@@ -288,7 +287,7 @@ class EfficientZeroV2:
                     stats[f"entropy"].append(entropy)
                     stats["target_reward_mu"].append(tf.reduce_mean(rewards[:, 0]))
                     stats["reward_pred_mu"].append(tf.reduce_mean(_reward_t_scalar))
-                    stats["target_value_mu"].append(tf.reduce_mean(target_value_t))
+                    # stats["target_value_mu"].append(tf.reduce_mean(target_value_t))
                     stats["value_pred_mu"].append(tf.reduce_mean(_value_t_scalar))
                     stats["state_mu"].append(tf.reduce_mean(state))
                     stats["state_var"].append(tf.math.reduce_std(state))
@@ -394,5 +393,5 @@ def test(
 
 
 if __name__ == "__main__":
-    train(resume_step=None)
-    # test(load_dir="checkpoints_bkup2")
+    # train(resume_step=None)
+    test(load_dir="checkpoints_bkup5")
