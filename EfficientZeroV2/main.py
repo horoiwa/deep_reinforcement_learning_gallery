@@ -187,7 +187,7 @@ class EfficientZeroV2:
                 ),
                 [B, T, -1],
             )
-            _, target_policies, target_values = mcts.search_batch(
+            _, target_policies, _target_values = mcts.search_batch(
                 observations=tf.reshape(obs, [B * T, H, W, C]),
                 action_space=self.action_space,
                 network=self.network,
@@ -199,7 +199,7 @@ class EfficientZeroV2:
 
         target_policies = tf.reshape(target_policies, [B, T, -1])
         target_values = tf.reshape(
-            self.network.scalar_to_dist(target_values, mode="value"), [B, T, -1]
+            self.network.scalar_to_dist(_target_values, mode="value"), [B, T, -1]
         )
         _target_next_states = self.network.encode(
             tf.reshape(next_obs, [B * T, H, W, C]), training=False
@@ -265,7 +265,7 @@ class EfficientZeroV2:
                     * mask_t
                 )
 
-                entropy = -tf.reduce_mean(
+                loss_entropy = tf.reduce_mean(
                     tf.reduce_sum(policy_t * tf.math.log(policy_t + 1e-8), axis=-1)
                 )
 
@@ -274,6 +274,7 @@ class EfficientZeroV2:
                     + self.lambda_p * loss_p
                     + self.lambda_v * loss_v
                     + self.lambda_g * loss_g
+                    + 5e-3 * loss_entropy
                 ) / self.unroll_steps
 
                 loss += loss_t
@@ -284,10 +285,9 @@ class EfficientZeroV2:
                     stats[f"loss_p_{i}"].append(loss_p)
                     stats[f"loss_v_{i}"].append(loss_v)
                     stats[f"loss_g_{i}"].append(loss_g)
-                    stats[f"entropy"].append(entropy)
+                    stats[f"loss_entropy"].append(loss_entropy)
                     stats["target_reward_mu"].append(tf.reduce_mean(rewards[:, 0]))
                     stats["reward_pred_mu"].append(tf.reduce_mean(_reward_t_scalar))
-                    # stats["target_value_mu"].append(tf.reduce_mean(target_value_t))
                     stats["value_pred_mu"].append(tf.reduce_mean(_value_t_scalar))
                     stats["state_mu"].append(tf.reduce_mean(state))
                     stats["state_var"].append(tf.math.reduce_std(state))
@@ -331,6 +331,7 @@ class EfficientZeroV2:
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
                 temperature=0.25,
+                debug=True,
             )
             _, _, r_pred = self.network.unroll(
                 self.network.encode(obs), actions=[action]
@@ -342,7 +343,9 @@ class EfficientZeroV2:
                 f"{scolor}{steps}, r: {reward}, a:{action}, policy:{[round(p, 1) for p in _policy.numpy()]}, v:{_value:.1f}{ecolor}"
             )
             print(f"Predicted reward: {r_pred.numpy()[0][0]:.3f}")
+            print("----" * 10)
             print()
+
             frames.append(process_frame(next_frame))
             steps += 1
 
@@ -356,6 +359,7 @@ def train(
     max_steps=100_000,
     env_id="BreakoutDeterministic-v4",
     log_dir="log",
+    load_dir=None,
 ):
     if resume_step is None:
         if Path(log_dir).exists():
@@ -364,7 +368,7 @@ def train(
     else:
         agent = EfficientZeroV2(env_id=env_id, log_dir=log_dir)
         agent.total_steps += resume_step
-        agent.load(load_dir="checkpoints")
+        agent.load(load_dir=load_dir)
 
     n = 0
     while max_steps >= agent.total_steps:
@@ -398,5 +402,6 @@ def test(
 
 
 if __name__ == "__main__":
-    # train(resume_step=None)
+    # train()
+    # train(resume_step=1000, load_dir="checkpoints_bkup5")
     test(load_dir="checkpoints_bkup5")

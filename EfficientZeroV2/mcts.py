@@ -12,6 +12,7 @@ def search(
     num_simulations: int,
     gamma: float,
     temperature: float = 1.0,
+    debug: bool = False,
 ) -> tuple[int, float, float]:
 
     best_actions, policies, values = search_batch(
@@ -21,6 +22,7 @@ def search(
         num_simulations=num_simulations,
         gamma=gamma,
         temperature=temperature,
+        debug=debug,
     )
     return best_actions[0], policies[0], values[0]
 
@@ -33,6 +35,7 @@ def search_batch(
     gamma: float,
     temperature: float = 1.0,
     training: bool = False,
+    debug: bool = False,
 ) -> tuple[list[int], list[float], list[float]]:
 
     batch_size: int = len(observations)
@@ -62,7 +65,7 @@ def search_batch(
         )
         trees.append(tree)
 
-    for _ in range(num_simulations):
+    for n in range(num_simulations):
         simulations: list[Generator] = [tree.run_simulation() for tree in trees]
 
         prev_states, prev_actions = [], []
@@ -77,6 +80,11 @@ def search_batch(
             prev_states, prev_actions, training=False
         )
         policy_logits, _, _, values = network.predict_pv(next_states, training=training)
+
+        if debug:
+            print(
+                f"\t {n}th, a:{prev_actions[0][0]}, r:{rewards[0][0]:.2f}, v::{values[0][0]:.2f}"
+            )
 
         for i, simulation in enumerate(simulations):
             simulation.send(
@@ -330,7 +338,7 @@ class GumbelMCTS:
         if self.simulation_count == self.simulation_count_to_next_phase:
             num_remaining_simulations = self.num_simulations - self.simulation_count
 
-            if num_remaining_simulations > 2:
+            if num_remaining_simulations >= 2:
                 self.is_phase_zero = False
                 self.simulation_count_to_next_phase += num_remaining_simulations // 2
 
@@ -354,15 +362,15 @@ class GumbelMCTS:
 
     def get_simulation_result(self):
         assert self.simulation_count == self.num_simulations
-        best_action = sorted(
+        sorted_children = sorted(
             self.root_node.children, key=lambda node: node.visit_count, reverse=True
-        )[0].prev_action
-        search_based_policy = tf.math.softmax(
-            [
-                child_node.get_score(is_phase_zero=False, scaler=self.vstats.normalize)
-                for child_node in self.root_node.children
-            ]
-        ).numpy()
+        )
+        best_action = sorted_children[0].prev_action
+        search_based_policy_logit = [
+            child_node.get_score(is_phase_zero=False, scaler=self.vstats.normalize)
+            for child_node in self.root_node.children
+        ]
+        search_based_policy = tf.math.softmax(search_based_policy_logit).numpy()
         search_based_value = np.mean(self.search_based_values)
 
         return best_action, search_based_policy, search_based_value
