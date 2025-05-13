@@ -332,16 +332,16 @@ class EfficientZeroV2:
                 gamma=self.gamma,
                 temperature=0.25,
             )
+            _, _, r_pred = self.network.unroll(
+                self.network.encode(obs), actions=[action]
+            )
             next_frame, reward, done, _, info = env.step(action)
             ep_rewards += reward
             scolor, ecolor = ("\033[32m", "\033[0m") if reward > 0 else ("", "")
             print(
                 f"{scolor}{steps}, r: {reward}, a:{action}, policy:{[round(p, 1) for p in _policy.numpy()]}, v:{_value:.1f}{ecolor}"
             )
-            _, _, r_scalar = self.network.unroll(
-                self.network.encode(obs), actions=[action]
-            )
-            print(f"Predicted reward: {r_scalar.numpy()[0][0]:.3f}")
+            print(f"Predicted reward: {r_pred.numpy()[0][0]:.3f}")
             print()
             frames.append(process_frame(next_frame))
             steps += 1
