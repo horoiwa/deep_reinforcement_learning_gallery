@@ -338,6 +338,11 @@ class EfficientZeroV2:
             print(
                 f"{scolor}{steps}, r: {reward}, a:{action}, policy:{[round(p, 1) for p in _policy.numpy()]}, v:{_value:.1f}{ecolor}"
             )
+            _, _, r_scalar = self.network.unroll(
+                self.network.encode(obs), actions=[action]
+            )
+            print(f"Predicted reward: {r_scalar.numpy()[0][0]:.3f}")
+            print()
             frames.append(process_frame(next_frame))
             steps += 1
 
