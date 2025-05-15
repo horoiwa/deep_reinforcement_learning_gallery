@@ -66,7 +66,9 @@ def search_batch(
         trees.append(tree)
 
     for n in range(num_simulations):
-        simulations: list[Generator] = [tree.run_simulation() for tree in trees]
+        simulations: list[Generator] = [
+            tree.run_simulation(debug=debug) for tree in trees
+        ]
 
         prev_states, prev_actions = [], []
         for simulation in simulations:
@@ -81,11 +83,6 @@ def search_batch(
         )
         policy_logits, _, _, values = network.predict_pv(next_states, training=training)
 
-        if debug:
-            print(
-                f"\t {n}th, a:{prev_actions[0][0]}, r:{rewards[0][0]:.2f}, v::{values[0][0]:.2f}"
-            )
-
         for i, simulation in enumerate(simulations):
             simulation.send(
                 (
@@ -95,9 +92,11 @@ def search_batch(
                     rewards[i][0].numpy(),
                 )
             )
+        if debug:
+            print(f"\t r_pred:{rewards[0][0]:.2f}, v_pred::{values[0][0]:.2f}")
 
     best_actions, mcts_policies, mcts_values = zip(
-        *[tree.get_simulation_result() for tree in trees]
+        *[tree.get_simulation_result(debug=debug) for tree in trees]
     )
     mcts_policies = tf.cast(tf.stack(mcts_policies), tf.float32)
     mcts_values = tf.cast(tf.stack(mcts_values), tf.float32)
@@ -113,9 +112,11 @@ class Node:
     prev_action: int | None
     depth: int
     gamma: float
+    c_visit: float = 50.0
+    c_scale: float = 0.1
     visit_count: int = 0
     noise: float = 0.0
-    visible: bool = True
+    visible: bool | None = None
 
     state: np.ndarray | None = None
     value_nn: float | None = None
@@ -124,33 +125,74 @@ class Node:
     search_based_values: list[float] = field(default_factory=list)
 
     def __repr__(self):
-        return f"Node(prior={self.prior}, prev_action={self.prev_action}, visit_count={self.visit_count}, value={self.value}, reward={self.reward}, depth={self.depth}, visible={self.visible})"
+        if self.depth != 0:
+            return (
+                f"\nNode(logit={self.policy_logit:.2f}, noise={self.noise:.2f},"
+                f"prev_action={self.prev_action}, visit_count={self.visit_count},"
+                f"value={self.value_nn:.2f}, reward={self.reward_nn:.2f},"
+                f"depth={self.depth}, visible={self.visible})"
+            )
+        else:
+            return (
+                f"\nNode(logit={self.policy_logit}, noise={self.noise},"
+                f"prev_action={self.prev_action}, visit_count={self.visit_count},"
+                f"value={self.value_nn}, reward={self.reward_nn},"
+                f"depth={self.depth}, visible={self.visible})"
+            )
 
     @property
     def is_expanded(self):
         return self.children is not None
 
-    def get_Qs(self):
-        pass
+    @property
+    def value(self):
+        # NOT IMPLEMENTED
+        if self.depth == 0:
+            value = self.value_nn
+        elif self.search_based_values:
+            value = np.mean(self.search_based_values)
+        else:
+            value = self.parent.value
+        return value
+
+    def get_qvalue(self):
+        # NOT IMPLEMENTED
+        if self.search_based_values:
+            qvalue = np.mean(self.search_based_values)
+        else:
+            qvalue = self.parent.value
+        return qvalue
+
+    def get_improved_policy_logit(self, debug: bool = False):
+        # 4 LEARNING AN IMPROVED POLICY
+        policy_logits = [child.policy_logit for child in self.children]
+
+        qvalues = np.array([child.get_qvalue() for child in self.children])
+        q_min, q_max = qvalues.min(), qvalues.max()
+        scaled_qvalues = (qvalues - q_min) / (q_max - q_min + 1e-8)
+        visit_counts = [child.visit_count for child in self.children]
+        transformed_qvalues = [
+            (self.c_visit + max(visit_counts)) * self.c_scale * q
+            for q in scaled_qvalues
+        ]
+        if debug:
+            print()
+            print("\tqvalues:", np.round(qvalues, 3))
+            print("\tscaled_qvalues:", np.round(scaled_qvalues, 3))
+            print("\ttransformed_qvalues:", np.round(transformed_qvalues, 3))
+            print("\tvisit_counts:", visit_counts)
+
+        imporved_policy_logits = [
+            logit + transformed_q
+            for logit, transformed_q in zip(
+                policy_logits, transformed_qvalues, strict=True
+            )
+        ]
+        return imporved_policy_logits
 
     def search(self, action: int | None = None):
         self.visit_count += 1
-        if action is None:
-            """
-            直感的には改善方策 π (a) が示唆する選択確率と、
-            これまでの訪問回数 N(a) に基づく選択確率との差が最も大きい行動、
-            つまり「まだ十分に訪問されていないが、改善方策上は有望な行動」を選択
-            Note:
-                For simplification, No use of the improved policy (Gumbel MCTS) during non-root search.
-            """
-            policy = tf.math.softmax([child_node.prior for child_node in self.children])
-            visit_counts = [child.visit_count for child in self.children]
-            scores = [
-                policy[i] - visit_counts[i] / (1 + sum(visit_counts))
-                for i in range(len(self.children))
-            ]
-            action = np.argmax(scores)
-
+        action = action if action is not None else self.select_action()
         selected_node: Node = self.children[action]
         if selected_node.is_expanded:
             return selected_node.search(action=None)
@@ -159,13 +201,24 @@ class Node:
             prev_action = action
             return selected_node, prev_state, prev_action
 
+    def select_action(self) -> int:
+        # 5 PLANNING AT NON-ROOT NODES
+        policy = tf.nn.softmax(self.get_improved_policy_logit()).numpy()
+        visit_counts = [child.visit_count for child in self.children]
+        scores = [
+            policy[i] - visit_counts[i] / (1 + sum(visit_counts))
+            for i in range(len(self.children))
+        ]
+        action = np.argmax(scores)
+        return action
+
     def expand(
         self,
         state: np.ndarray,
         policy_logits: np.ndarray,
         value_nn: float = None,
         reward_nn: float = None,
-        gumbel_noises: np.ndarray = None,
+        noises: np.ndarray = None,
     ):
         self.state = state
         self.value_nn = value_nn
@@ -183,19 +236,17 @@ class Node:
                 gamma=self.gamma,
                 noise=noise,
             )
-            for i, (logit, noise) in enumerate(
-                zip(policy_logits, gumbel_noises, strict=True)
-            )
+            for i, (logit, noise) in enumerate(zip(policy_logits, noises, strict=True))
         ]
         self.visit_count += 1
 
     def backprop(self) -> float:
-        value = self.reward + self.gamma * self.value
+        value = self.reward_nn + self.gamma * self.value_nn
         self.search_based_values.append(value)
 
         node = self.parent
         while node.depth > 0:
-            value = node.reward + self.gamma * value
+            value = node.reward_nn + self.gamma * value
             node.search_based_values.append(value)
             node = node.parent
         return value
@@ -208,19 +259,23 @@ class GumbelMCTS:
         num_simulations: int,
         gamma: float,
         temperature: float,
+        c_visit: float = 50.0,
+        c_scale: float = 0.1,
     ):
         self.root_node = None
-        self.root_values = []
+        self.search_based_values = []
 
         self.action_space = action_space
         self.num_simulations = num_simulations
+        self.max_considered_actions = num_simulations // 2
         assert (num_simulations & (num_simulations - 1)) == 0
         self.temperature = temperature
         self.gamma = gamma
+        self.c_visit = c_visit
+        self.c_scale = c_scale
 
         self.simulation_count = 0
         self.simulation_count_to_next_phase = self.num_simulations // 2
-        self.is_phase_zero = True
 
     def setup(
         self, root_state: np.ndarray, root_value: float, root_policy_logits: np.ndarray
@@ -248,79 +303,117 @@ class GumbelMCTS:
             policy_logits=root_policy_logits,
             value_nn=root_value,
             reward_nn=0.0,
-            noises=self.gumbel_noises,
+            noises=gumbel_noises,
         )
 
-    def run_simulation(self):
+        # Find m actions with the highest g(a) + logits(a)
+        sorted_child_nodes = sorted(
+            self.root_node.children,
+            key=lambda x: x.noise + x.policy_logit,
+            reverse=True,
+        )
+        for i, child_node in enumerate(sorted_child_nodes):
+            if i < self.max_considered_actions:
+                child_node.visible = True
+            else:
+                child_node.visible = False
 
-        # Select Action
-        candidates: list[Node] = sorted(
+    def run_simulation(self, debug: bool = False):
+
+        # Select min visited action from visible children
+        # (In each phase, all considered actions are visited equally often)
+        action: int = sorted(
             [
                 child_node
                 for child_node in self.root_node.children
                 if child_node.visible
             ],
-            key=lambda x: x.get_score(
-                is_phase_zero=self.is_phase_zero, scaler=self.vstats.normalize
-            ),
-            reverse=True,
-        )
-        min_visit_candidate = min(candidates, key=lambda x: x.visit_count)
-        action: int = min_visit_candidate.prev_action
+            key=lambda x: x.visit_count,
+            reverse=False,
+        )[0].prev_action
 
         # Retrieve leaf node
         leaf_node, prev_state, prev_action = self.root_node.search(action=action)
 
         # Expand leaf node
         received_values: tuple = yield (prev_state, prev_action)
-        next_state, policy_logits, value, reward = received_values
+        next_state, policy_logits, value_nn, reward_nn = received_values
 
         leaf_node.expand(
-            state=next_state, priors=policy_logits, value=value, reward=reward
+            state=next_state,
+            policy_logits=policy_logits,
+            value_nn=value_nn,
+            reward_nn=reward_nn,
         )
 
         # backprop
-        estimated_value = leaf_node.backprop(vstats=self.vstats)
+        estimated_value = leaf_node.backprop()
         self.search_based_values.append(estimated_value)
         self.simulation_count += 1
+
+        if debug:
+            print(
+                f"{self.simulation_count}th sim, a: {action} search_value: {estimated_value:.2f}"
+            )
 
         # Sequential Halving
         if self.simulation_count == self.simulation_count_to_next_phase:
             num_remaining_simulations = self.num_simulations - self.simulation_count
+            self.simulation_count_to_next_phase += num_remaining_simulations // 2
+            self.sequential_halving(debug=debug)
 
-            if num_remaining_simulations >= 2:
-                self.is_phase_zero = False
-                self.simulation_count_to_next_phase += num_remaining_simulations // 2
-
-                child_nodes: list[Node] = sorted(
-                    [
-                        child_node
-                        for child_node in self.root_node.children
-                        if child_node.visible
-                    ],
-                    key=lambda x: x.get_score(
-                        is_phase_zero=self.is_phase_zero, scaler=self.vstats.normalize
-                    ),
-                    reverse=True,
-                )
-                n_child_nodes = len(child_nodes)
-                if n_child_nodes > 1:
-                    m = n_child_nodes // 2
-                    for child_node in child_nodes[-m:]:
-                        child_node.visible = False
         yield
 
-    def get_simulation_result(self):
+    def sequential_halving(self, debug: bool = False):
+        # Use Sequential Halving with n simulations to identify the best action from the Atopm actions,
+        # by comparing g(a) + logits(a) + σ(ˆq(a)).
+
+        if len([n for n in self.root_node.children if n.visible]) == 1:
+            return
+        elif debug:
+            print("Sequential Halving")
+
+        # g(a) + logits(a) + σ(ˆq(a))
+        improved_policy_logits = self.root_node.get_improved_policy_logit(debug=debug)
+        noises = [node.noise for node in self.root_node.children]
+        scores = [
+            noise + improve_policy_logit
+            for noise, improve_policy_logit in zip(
+                noises, improved_policy_logits, strict=True
+            )
+        ]
+        if debug:
+            log = [f"\n\t a: {i}, score: {score:.2f}" for i, score in enumerate(scores)]
+            print("".join(log) + "\n")
+
+        scored_remaining_children = [
+            (score, node)
+            for score, node in zip(scores, self.root_node.children, strict=True)
+            if node.visible
+        ]
+        sorted_scored_remaining_children = sorted(
+            scored_remaining_children, key=lambda item: item[0], reverse=True
+        )
+
+        top_m = len(sorted_scored_remaining_children) // 2
+        for _, child_node in sorted_scored_remaining_children[top_m:]:
+            child_node.visible = False
+
+    def get_simulation_result(self, debug: bool = False):
         assert self.simulation_count == self.num_simulations
+        if debug:
+            print("Simulation finished")
         sorted_children = sorted(
             self.root_node.children, key=lambda node: node.visit_count, reverse=True
         )
         best_action = sorted_children[0].prev_action
-        search_based_policy_logit = [
-            child_node.get_score(is_phase_zero=False, scaler=self.vstats.normalize)
-            for child_node in self.root_node.children
-        ]
-        search_based_policy = tf.math.softmax(search_based_policy_logit).numpy()
-        search_based_value = np.mean(self.search_based_values)
+        policy_logits = self.root_node.get_improved_policy_logit(debug=debug)
+        mcts_policy = tf.math.softmax(policy_logits).numpy()
+        mcts_value = np.mean(self.search_based_values)
 
-        return best_action, search_based_policy, search_based_value
+        if debug:
+            print("Best action:", best_action)
+            print("MCTS policy:", np.round(mcts_policy, 3))
+            print("MCTS values:", np.round(self.search_based_values, 3))
+
+        return best_action, mcts_policy, mcts_value
