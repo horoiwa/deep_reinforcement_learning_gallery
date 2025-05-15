@@ -105,39 +105,23 @@ def search_batch(
     return (best_actions, mcts_policies, mcts_values)
 
 
-class ValueStats(list):
-
-    def normalize(self, value: float) -> float:
-        return value
-
-    # def normalize(self, value: float) -> float:
-    #     if len(self) == 0:
-    #         return np.clip(value, 0.0, 1.0)
-
-    #     _min, _max = min(self), max(self)
-    #     if _max > _min:
-    #         value = np.clip(value, _min, _max)
-    #         value = (value - _min) / max(_max - _min, 0.01)
-    #     value = np.clip(value, 0.0, 1.0)
-    #     return value
-
-
 @dataclass
 class Node:
 
-    prior: float
-    parent: Optional["Node"]
+    policy_logit: float | None
+    parent: Optional["Node"] | None
     prev_action: int | None
     depth: int
     gamma: float
     visit_count: int = 0
+    noise: float = 0.0
+    visible: bool = True
 
     state: np.ndarray | None = None
-    value: float | None = None
-    reward: float | None = None
+    value_nn: float | None = None
+    reward_nn: float | None = None
     children: Optional[List["Node"]] = None
     search_based_values: list[float] = field(default_factory=list)
-    visible: bool = True
 
     def __repr__(self):
         return f"Node(prior={self.prior}, prev_action={self.prev_action}, visit_count={self.visit_count}, value={self.value}, reward={self.reward}, depth={self.depth}, visible={self.visible})"
@@ -146,41 +130,8 @@ class Node:
     def is_expanded(self):
         return self.children is not None
 
-    @property
-    def search_based_value(self) -> np.ndarray:
-        if self.search_based_values:
-            return np.mean(self.search_based_values)
-        else:
-            return None
-
-    def get_transformed_search_based_value(
-        self,
-        scaler: Callable[[float], float],
-        c_visit: float = 50.0,
-        c_scale: float = 0.1,
-    ) -> float:
-        if self.search_based_value is None:
-            return 0.0
-        else:
-            scaled_v: float = scaler(self.search_based_value)
-            max_child_visit_count = max(child.visit_count for child in self.children)
-            transformed_value = (c_visit + max_child_visit_count) * c_scale * scaled_v
-            return transformed_value
-
-    def get_score(
-        self,
-        is_phase_zero: bool,
-        scaler: Callable[[float], float],
-        c_visit: float = 50.0,
-        c_scale: float = 0.1,
-    ) -> float:
-        if is_phase_zero:
-            return self.prior
-        else:
-            score = self.prior + self.get_transformed_search_based_value(
-                scaler=scaler, c_visit=c_visit, c_scale=c_scale
-            )
-            return score
+    def get_Qs(self):
+        pass
 
     def search(self, action: int | None = None):
         self.visit_count += 1
@@ -211,35 +162,41 @@ class Node:
     def expand(
         self,
         state: np.ndarray,
-        priors: np.ndarray,
-        value: float = None,
-        reward: float = None,
+        policy_logits: np.ndarray,
+        value_nn: float = None,
+        reward_nn: float = None,
+        gumbel_noises: np.ndarray = None,
     ):
         self.state = state
-        self.value = value
-        self.reward = reward
+        self.value_nn = value_nn
+        self.reward_nn = reward_nn
+
+        if noises is None:
+            noises = np.zeros_like(policy_logits, dtype=np.float32)
+
         self.children = [
             Node(
-                prior=prior,
+                policy_logit=logit,
                 prev_action=i,
                 parent=self,
                 depth=self.depth + 1,
                 gamma=self.gamma,
+                noise=noise,
             )
-            for i, prior in enumerate(priors)
+            for i, (logit, noise) in enumerate(
+                zip(policy_logits, gumbel_noises, strict=True)
+            )
         ]
         self.visit_count += 1
 
-    def backprop(self, vstats: ValueStats) -> float:
+    def backprop(self) -> float:
         value = self.reward + self.gamma * self.value
         self.search_based_values.append(value)
-        vstats.append(value)
 
         node = self.parent
         while node.depth > 0:
             value = node.reward + self.gamma * value
             node.search_based_values.append(value)
-            vstats.append(value)
             node = node.parent
         return value
 
@@ -253,6 +210,7 @@ class GumbelMCTS:
         temperature: float,
     ):
         self.root_node = None
+        self.root_values = []
 
         self.action_space = action_space
         self.num_simulations = num_simulations
@@ -263,8 +221,6 @@ class GumbelMCTS:
         self.simulation_count = 0
         self.simulation_count_to_next_phase = self.num_simulations // 2
         self.is_phase_zero = True
-        self.search_based_values = []
-        self.vstats = ValueStats()
 
     def setup(
         self, root_state: np.ndarray, root_value: float, root_policy_logits: np.ndarray
@@ -275,20 +231,13 @@ class GumbelMCTS:
             len(root_policy_logits.shape) == 1
             and root_policy_logits.shape[0] == self.action_space
         )
-        self.gumble_noises = (
+        gumbel_noises = (
             np.random.gumbel(0, 1, size=self.action_space) * self.temperature
         )
 
-        scores = np.array(
-            [
-                score + noise
-                for score, noise in zip(root_policy_logits, self.gumble_noises)
-            ],
-            dtype=np.float32,
-        )
         # ルートノードを作成
         self.root_node = Node(
-            prior=1.0,
+            policy_logit=None,
             parent=None,
             prev_action=None,
             depth=0,
@@ -296,9 +245,10 @@ class GumbelMCTS:
         )
         self.root_node.expand(
             state=root_state,
-            priors=scores,
-            value=root_value,
-            reward=0.0,
+            policy_logits=root_policy_logits,
+            value_nn=root_value,
+            reward_nn=0.0,
+            noises=self.gumbel_noises,
         )
 
     def run_simulation(self):
