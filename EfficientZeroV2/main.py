@@ -47,7 +47,6 @@ class EfficientZeroV2:
             action_space=self.action_space, n_supports=self.n_supports
         )
 
-        self.replay_buffer = ReplayBuffer(maxlen=100_000)
         self.batch_size = 32  # original 256
         self.gamma = 0.997
         self.unroll_steps = 5  # original 5
@@ -58,7 +57,7 @@ class EfficientZeroV2:
             0.25,
             2.0,
         )
-
+        self.replay_buffer = ReplayBuffer(gamma=self.gamma, maxlen=100_000)
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
         # self.optimizer = tf.keras.optimizers.SGD(
         #     learning_rate=0.02, weight_decay=0.0001, momentum=0.9
@@ -133,7 +132,7 @@ class EfficientZeroV2:
             )
 
             ep_rewards += reward
-            reward = np.clip(reward, -1, 1)
+            reward = np.clip(reward, -1, 1) + 1
             frames.append(process_frame(next_frame))
 
             if done:
@@ -153,7 +152,7 @@ class EfficientZeroV2:
                     )
                 trajectory.append(exp)
 
-            if len(self.replay_buffer) > 1000 and self.total_steps % 4 == 0:
+            if len(self.replay_buffer) > 300 and self.total_steps % 4 == 0:
                 with timer(f"Update network"):
                     self.update_network()
 
@@ -172,11 +171,19 @@ class EfficientZeroV2:
 
     def update_network(self):
 
-        (obs, next_obs, actions, rewards, dones, masks) = (
-            self.replay_buffer.sample_batch(
-                batch_size=self.batch_size,
-                unroll_steps=self.unroll_steps,
-            )
+        (
+            indices,
+            obs,
+            next_obs,
+            actions,
+            rewards,
+            dones,
+            masks,
+            nstep_returns,
+            target_masks,
+        ) = self.replay_buffer.sample_batch(
+            batch_size=self.batch_size,
+            unroll_steps=self.unroll_steps,
         )
         with timer(f"reanalyze({self.batch_size})"):
             B, T, H, W, C = obs.shape
@@ -187,7 +194,7 @@ class EfficientZeroV2:
                 ),
                 [B, T, -1],
             )
-            _, target_policies, _target_values = mcts.search_batch(
+            _, mcts_policies, mcts_target_values = mcts.search_batch(
                 observations=tf.reshape(obs, [B * T, H, W, C]),
                 action_space=self.action_space,
                 network=self.network,
@@ -197,10 +204,32 @@ class EfficientZeroV2:
                 training=False,
             )
 
-        target_policies = tf.reshape(target_policies, [B, T, -1])
-        target_values = tf.reshape(
-            self.network.scalar_to_dist(_target_values, mode="value"), [B, T, -1]
+        target_policies = tf.reshape(mcts_policies, [B, T, -1])
+
+        mcts_target_values = tf.reshape(
+            self.network.scalar_to_dist(mcts_target_values, mode="value"), [B, T, -1]
         )
+
+        _, _, _, residual_values = self.network.predict_pv(
+            self.network.encode(next_obs[:, -1, ...], training=False)
+        )
+        residual_values = tf.tile(
+            (1.0 - tf.reduce_max(dones, axis=-1, keepdims=True)) * residual_values,
+            [1, self.unroll_steps],
+        )
+        discounts = np.array([self.gamma**i for i in range(self.unroll_steps, 0, -1)])
+        _td_target_values = nstep_returns + discounts * residual_values
+        td_target_values = tf.reshape(
+            self.network.scalar_to_dist(
+                tf.reshape(_td_target_values, (B * T,)), mode="value"
+            ),
+            [B, T, -1],
+        )
+
+        target_values = (
+            target_masks * td_target_values + (1.0 - target_masks) * mcts_target_values
+        )
+
         _target_next_states = self.network.encode(
             tf.reshape(next_obs, [B * T, H, W, C]), training=False
         )
@@ -209,6 +238,7 @@ class EfficientZeroV2:
         )
 
         stats = collections.defaultdict(list)
+        td_errors = []
         with tf.GradientTape() as tape:
             loss = 0.0
             state = self.network.encode(obs[:, 0, ...], training=True)
@@ -232,10 +262,12 @@ class EfficientZeroV2:
                     )
                     * mask_t
                 )
-                loss_v = -tf.reduce_mean(
+
+                td_error = (
                     tf.reduce_sum(target_value_t * tf.math.log(value_t + 1e-8), axis=-1)
                     * mask_t
                 )
+                loss_v = -tf.reduce_mean(td_error)
 
                 loss_r = -tf.reduce_mean(
                     tf.reduce_sum(
@@ -402,6 +434,6 @@ def test(
 
 
 if __name__ == "__main__":
-    # train()
+    train()
     # train(resume_step=1000, load_dir="checkpoints_bkup5")
-    test(load_dir="checkpoints_bkup5")
+    # test(load_dir="checkpoints_bkup6")

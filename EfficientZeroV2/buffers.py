@@ -14,7 +14,16 @@ class Experience:
 
 
 class ReplayBuffer:
-    def __init__(self, maxlen: int | None = None):
+    def __init__(
+        self,
+        T1: int = 40_000,
+        T2: int = 20_000,
+        gamma: float = 0.998,
+        maxlen: int = 100_000,
+    ):
+        self.T1: int = T1
+        self.T2: int = T2
+        self.gamma = gamma
         self.maxlen = maxlen
         self.buffer = []
 
@@ -71,11 +80,32 @@ class ReplayBuffer:
         dones = tf.stack(dones, axis=0)[:, :unroll_steps]  # (B, unroll_steps)
         masks = tf.stack(masks, axis=0)[:, :unroll_steps]  # (B, unroll_steps)
 
+        nstep_returns = np.zeros_like(rewards, dtype=np.float32)
+        r_sum = np.zeros_like(rewards[:, 0], dtype=np.float32)
+        for i in reversed(range(rewards.shape[1])):
+            nstep_returns[:, i] = rewards[:, i] + self.gamma * r_sum
+            r_sum += rewards[:, i]
+
+        target_masks = []
+        current_step: int = len(self.buffer)
+        for idx in indices:
+            if current_step <= self.T1:
+                target_masks.append([1.0] * unroll_steps)
+            else:
+                if current_step - idx < self.T2:
+                    target_masks.append([1.0] * unroll_steps)
+                else:
+                    target_masks.append([0.0] * unroll_steps)
+        value_target_masks = np.array(target_masks, dtype=np.float32)[..., np.newaxis]
+
         return (
+            indices,
             observations,
             next_observations,
             actions,
             rewards,
             dones,
             masks,
+            nstep_returns,
+            value_target_masks,
         )

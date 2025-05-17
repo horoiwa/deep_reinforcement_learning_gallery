@@ -125,7 +125,7 @@ class Node:
     search_based_values: list[float] = field(default_factory=list)
 
     def __repr__(self):
-        if self.depth != 0:
+        if self.depth != 0 and self.is_expanded:
             return (
                 f"\nNode(logit={self.policy_logit:.2f}, noise={self.noise:.2f},"
                 f"prev_action={self.prev_action}, visit_count={self.visit_count},"
@@ -144,30 +144,20 @@ class Node:
     def is_expanded(self):
         return self.children is not None
 
-    @property
-    def value(self):
-        # NOT IMPLEMENTED
-        if self.depth == 0:
-            value = self.value_nn
-        elif self.search_based_values:
-            value = np.mean(self.search_based_values)
-        else:
-            value = self.parent.value
-        return value
-
-    def get_qvalue(self):
-        # NOT IMPLEMENTED
+    def get_completed_qvalue(self):
+        # Using completed Q-values
         if self.search_based_values:
             qvalue = np.mean(self.search_based_values)
         else:
-            qvalue = self.parent.value
+            # No use of "D MIXED VALUE APPROXIMATION"
+            qvalue = self.parent.value_nn
         return qvalue
 
     def get_improved_policy_logit(self, debug: bool = False):
         # 4 LEARNING AN IMPROVED POLICY
         policy_logits = [child.policy_logit for child in self.children]
 
-        qvalues = np.array([child.get_qvalue() for child in self.children])
+        qvalues = np.array([child.get_completed_qvalue() for child in self.children])
         q_min, q_max = qvalues.min(), qvalues.max()
         scaled_qvalues = (qvalues - q_min) / (q_max - q_min + 1e-8)
         visit_counts = [child.visit_count for child in self.children]
@@ -181,6 +171,7 @@ class Node:
             print("\tscaled_qvalues:", np.round(scaled_qvalues, 3))
             print("\ttransformed_qvalues:", np.round(transformed_qvalues, 3))
             print("\tvisit_counts:", visit_counts)
+            print("\tpolicy_logits:", np.round(policy_logits, 3))
 
         imporved_policy_logits = [
             logit + transformed_q
