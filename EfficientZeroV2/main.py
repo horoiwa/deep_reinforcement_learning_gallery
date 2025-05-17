@@ -50,7 +50,7 @@ class EfficientZeroV2:
             action_space=self.action_space, n_supports=self.n_supports
         )
 
-        self.batch_size = 32  # original 256
+        self.batch_size = 64  # original 256
         self.gamma = 0.997
         self.unroll_steps = 5  # original 5
         self.num_simulations = 8  # original 16
