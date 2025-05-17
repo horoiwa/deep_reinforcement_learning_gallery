@@ -59,15 +59,37 @@ class EFZeroNetwork(tf.keras.Model):
             supports = self.reward_network.supports
 
         x = tf.reshape(tf.cast(x, dtype=tf.float32), shape=(-1, 1))
-        supports = tf.repeat(tf.expand_dims(supports, axis=0), x.shape[0], axis=0)
-        indices = tf.argmin(tf.abs(supports - x), axis=1)
-        dist = tf.one_hot(
-            indices,
-            depth=supports.shape[1],
-            on_value=1.0,
-            off_value=0.0,
-            dtype=tf.float32,
+        supports = tf.expand_dims(supports, axis=0)  # (1, n_supports)
+
+        # Calculate distances between x and supports
+        distances = tf.abs(supports - x)  # (batch_size, n_supports)
+
+        # Find the two closest supports for interpolation
+        lower_indices = tf.maximum(
+            tf.searchsorted(supports[0], x[:, 0], side="left") - 1, 0
         )
+        upper_indices = tf.minimum(lower_indices + 1, supports.shape[1] - 1)
+
+        lower_supports = tf.gather(supports[0], lower_indices)
+        upper_supports = tf.gather(supports[0], upper_indices)
+
+        # Compute interpolation weights
+        upper_weights = (x[:, 0] - lower_supports) / (
+            upper_supports - lower_supports + 1e-8
+        )
+        lower_weights = 1.0 - upper_weights
+
+        # Create the distribution
+        dist = tf.zeros_like(distances)
+        batch_indices = tf.range(tf.shape(x)[0], dtype=tf.int32)
+
+        # Update the distribution with lower and upper weights
+        lower_indices = tf.stack([batch_indices, lower_indices], axis=1)
+        upper_indices = tf.stack([batch_indices, upper_indices], axis=1)
+
+        dist = tf.tensor_scatter_nd_update(dist, lower_indices, lower_weights)
+        dist = tf.tensor_scatter_nd_update(dist, upper_indices, upper_weights)
+
         return dist
 
 
