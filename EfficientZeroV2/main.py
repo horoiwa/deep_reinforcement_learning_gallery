@@ -50,7 +50,7 @@ class EfficientZeroV2:
             action_space=self.action_space, n_supports=self.n_supports
         )
 
-        self.batch_size = 64  # original 256
+        self.batch_size = 48  # original 256
         self.gamma = 0.997
         self.unroll_steps = 5  # original 5
         self.num_simulations = 8  # original 16
@@ -132,6 +132,7 @@ class EfficientZeroV2:
             )
 
             if random.random() < 0.05:
+                print("random action")
                 action = random.randint(0, self.action_space - 1)
 
             next_frame, reward, done, _, info = env.step(action)
@@ -161,7 +162,7 @@ class EfficientZeroV2:
                     )
                 trajectory.append(exp)
 
-            if len(self.replay_buffer) > 300 and self.total_steps % 4 == 0:
+            if len(self.replay_buffer) > 1000 and self.total_steps % 4 == 0:
                 self.update_network()
 
             if self.total_steps % 400 == 0:
