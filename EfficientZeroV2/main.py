@@ -46,6 +46,9 @@ class EfficientZeroV2:
         self.network = EFZeroNetwork(
             action_space=self.action_space, n_supports=self.n_supports
         )
+        self.target_network = EFZeroNetwork(
+            action_space=self.action_space, n_supports=self.n_supports
+        )
 
         self.batch_size = 32  # original 256
         self.gamma = 0.997
@@ -70,21 +73,23 @@ class EfficientZeroV2:
         self.total_steps = 0
 
     def setup(self):
-        env = gym.make(self.env_id)
-        frame, info = env.reset()
-        frames = collections.deque(maxlen=self.n_frames)
-        for _ in range(self.n_frames):
-            frames.append(process_frame(frame))
-        observations = np.stack(frames, axis=2)[np.newaxis, ...]
+        for network in (self.network, self.target_network):
+            env = gym.make(self.env_id)
+            frame, info = env.reset()
+            frames = collections.deque(maxlen=self.n_frames)
+            for _ in range(self.n_frames):
+                frames.append(process_frame(frame))
+            observations = np.stack(frames, axis=2)[np.newaxis, ...]
 
-        states = self.network.encode(observations, training=False)
-        _ = self.network.predict_pv(states, training=False)
-        next_states, _, _ = self.network.unroll(
-            states, actions=np.array([[2]]), training=False
-        )
-        proj = self.network.p1_network(states, training=False)
-        pred = self.network.p2_network(proj, training=False)
-        env.close()
+            states = network.encode(observations, training=False)
+            _ = network.predict_pv(states, training=False)
+            next_states, _, _ = network.unroll(
+                states, actions=np.array([[2]]), training=False
+            )
+            proj = network.p1_network(states, training=False)
+            pred = network.p2_network(proj, training=False)
+            env.close()
+        self.update_target_network()
 
     def save(self, save_dir: str):
         save_dir = Path(save_dir)
@@ -132,7 +137,7 @@ class EfficientZeroV2:
             )
 
             ep_rewards += reward
-            reward = np.clip(reward, -1, 1) + 1
+            reward = np.clip(reward, -1, 1)
             frames.append(process_frame(next_frame))
 
             if done:
@@ -153,8 +158,10 @@ class EfficientZeroV2:
                 trajectory.append(exp)
 
             if len(self.replay_buffer) > 300 and self.total_steps % 4 == 0:
-                with timer(f"Update network"):
-                    self.update_network()
+                self.update_network()
+
+            if self.total_steps % 400 == 0:
+                self.update_target_network()
 
             ep_steps += 1
             self.total_steps += 1
@@ -210,8 +217,8 @@ class EfficientZeroV2:
             self.network.scalar_to_dist(mcts_target_values, mode="value"), [B, T, -1]
         )
 
-        _, _, _, residual_values = self.network.predict_pv(
-            self.network.encode(next_obs[:, -1, ...], training=False)
+        _, _, _, residual_values = self.target_network.predict_pv(
+            self.target_network.encode(next_obs[:, -1, ...], training=False)
         )
         residual_values = tf.tile(
             (1.0 - tf.reduce_max(dones, axis=-1, keepdims=True)) * residual_values,
@@ -220,7 +227,7 @@ class EfficientZeroV2:
         discounts = np.array([self.gamma**i for i in range(self.unroll_steps, 0, -1)])
         _td_target_values = nstep_returns + discounts * residual_values
         td_target_values = tf.reshape(
-            self.network.scalar_to_dist(
+            self.target_network.scalar_to_dist(
                 tf.reshape(_td_target_values, (B * T,)), mode="value"
             ),
             [B, T, -1],
@@ -335,6 +342,9 @@ class EfficientZeroV2:
             for key, value in stats.items():
                 tf.summary.scalar(key, tf.reduce_mean(value), step=self.total_steps)
             tf.summary.scalar("grad_norm", grad_norm, step=self.total_steps)
+
+    def update_target_network(self):
+        self.target_network.set_weights(self.network.get_weights())
 
     def test_play(self, tag: int | None = None, monitor_dir: Path | None = None):
         if monitor_dir:

@@ -465,3 +465,28 @@ class DownSampleResidualBlock(tf.keras.layers.Layer):
         out = x + _x
         out = tf.nn.relu(out)
         return out
+
+
+def test_scalar_to_dist(mode: Literal["value", "reward"]):
+    model = EFZeroNetwork(action_space=3, n_supports=51)
+    if mode == "reward":
+        supports = model.reward_network.supports
+        x = tf.constant([0.0, 0.3, 0.5, 0.8, 1.0, 1.1], dtype=tf.float32)
+        th = 0.01
+    elif mode == "value":
+        supports = model.pv_network.supports
+        x = tf.constant([0.0, 1.0, 2.0, 3.0, 4.0], dtype=tf.float32)
+        th = 0.1
+
+    x_dist = model.scalar_to_dist(x, mode=mode)
+    x_scalar = tf.reduce_sum(supports * x_dist, axis=-1)
+
+    x_diff = tf.abs(x - x_scalar)
+    print(x_diff)
+    for diff in x_diff:
+        assert diff < th, f"Difference is too large: {diff.numpy():.3f}"
+
+
+if __name__ == "__main__":
+    test_scalar_to_dist(mode="value")
+    test_scalar_to_dist(mode="reward")
