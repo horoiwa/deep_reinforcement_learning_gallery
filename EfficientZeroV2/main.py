@@ -130,6 +130,10 @@ class EfficientZeroV2:
                 gamma=self.gamma,
                 temperature=self.get_temperature(),
             )
+
+            if random.random() < 0.05:
+                action = random.randint(0, self.action_space - 1)
+
             next_frame, reward, done, _, info = env.step(action)
             scolor, ecolor = ("\033[32m", "\033[0m") if reward > 0 else ("", "")
             print(
