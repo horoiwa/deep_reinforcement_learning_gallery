@@ -54,11 +54,12 @@ class EfficientZeroV2:
         self.gamma = 0.997
         self.unroll_steps = 5  # original 5
         self.num_simulations = 8  # original 16
-        self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g = (
+        self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g, self.lambda_ent = (
             1.0,
-            1.0,
+            0.25,  #original 1.0
             0.25,
             2.0,
+            0.05,  # original 0.005
         )
         self.replay_buffer = ReplayBuffer(gamma=self.gamma, maxlen=100_000)
         self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
@@ -318,7 +319,7 @@ class EfficientZeroV2:
                     + self.lambda_p * loss_p
                     + self.lambda_v * loss_v
                     + self.lambda_g * loss_g
-                    + 5e-3 * loss_entropy
+                    + self.lambda_ent * loss_entropy
                 ) / self.unroll_steps
 
                 loss += loss_t

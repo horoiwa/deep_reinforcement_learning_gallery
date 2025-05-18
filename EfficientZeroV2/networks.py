@@ -157,7 +157,7 @@ class PolicyValueNetwork(tf.keras.Model):
         )
         self.v_bn_1 = kl.GroupNormalization(axis=-1, groups=16)
         self.v_fc_1 = kl.Dense(
-            32,
+            512,
             use_bias=True,
             activation=None,
             kernel_initializer="he_normal",
@@ -183,7 +183,7 @@ class PolicyValueNetwork(tf.keras.Model):
         )
         self.p_bn_1 = kl.GroupNormalization(axis=-1, groups=16)
         self.p_fc_1 = kl.Dense(
-            32,
+            512,
             use_bias=True,
             activation=None,
             kernel_initializer="he_normal",
