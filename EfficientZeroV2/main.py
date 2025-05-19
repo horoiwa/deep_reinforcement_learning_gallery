@@ -62,10 +62,10 @@ class EfficientZeroV2:
             0.05,  # original 0.005
         )
         self.replay_buffer = ReplayBuffer(gamma=self.gamma, maxlen=100_000)
-        self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
-        # self.optimizer = tf.keras.optimizers.SGD(
-        #     learning_rate=0.02, weight_decay=0.0001, momentum=0.9
-        # )
+        # self.optimizer = tf.keras.optimizers.Adam(learning_rate=3e-4)
+        self.optimizer = tf.keras.optimizers.SGD(
+            learning_rate=0.02, weight_decay=0.0001, momentum=0.9
+        )
 
         self.setup()
         self.summary_writer = (
@@ -163,7 +163,7 @@ class EfficientZeroV2:
                     )
                 trajectory.append(exp)
 
-            if len(self.replay_buffer) > 1000 and self.total_steps % 4 == 0:
+            if len(self.replay_buffer) > 300 and self.total_steps % 4 == 0:
                 self.update_network()
 
             if self.total_steps % 400 == 0:
@@ -323,6 +323,7 @@ class EfficientZeroV2:
                 ) / self.unroll_steps
 
                 loss += loss_t
+                import pdb; pdb.set_trace()  # fmt: skip
 
                 if i == 0:
                     stats[f"loss_{i}"].append(loss_t)
@@ -352,7 +353,7 @@ class EfficientZeroV2:
     def update_target_network(self):
         self.target_network.set_weights(self.network.get_weights())
 
-    def test_play(self, tag: int | None = None, monitor_dir: Path | None = None):
+    def test_play(self, tag: int | None = None, monitor_dir: Path | None = None, debug=True):
         if monitor_dir:
             env = gym.wrappers.RecordVideo(
                 gym.make(self.env_id, render_mode="rgb_array"),
@@ -379,7 +380,7 @@ class EfficientZeroV2:
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
                 temperature=0.25,
-                debug=True,
+                debug=debug,
             )
 
             _, _, r_pred = self.network.unroll(
@@ -394,8 +395,19 @@ class EfficientZeroV2:
             print(f"Predicted reward: {r_pred.numpy()[0][0]:.3f}")
             print("----" * 10)
             print()
-            if reward > 0:
+            if debug and reward > 0:
                 import pdb; pdb.set_trace()  # fmt: skip
+                action, _policy, _value = mcts.search(
+                    observation=obs,
+                    action_space=self.action_space,
+                    network=self.network,
+                    num_simulations=self.num_simulations,
+                    gamma=self.gamma,
+                    temperature=0.25,
+                    debug=debug,
+                )
+                import pdb; pdb.set_trace()  # fmt: skip
+
 
             frames.append(process_frame(next_frame))
             steps += 1
@@ -437,6 +449,7 @@ def train(
 def test(
     load_dir: str,
     env_id="BreakoutDeterministic-v4",
+    debug=False,
 ):
     MONITOR_DIR = Path(__file__).parent / "mp4"
     if MONITOR_DIR.exists():
@@ -447,13 +460,13 @@ def test(
 
     agent.load(load_dir=load_dir)
     for i in range(1, 3):
-        score = agent.test_play(tag=f"{i}", monitor_dir=MONITOR_DIR)
+        score = agent.test_play(tag=f"{i}", monitor_dir=MONITOR_DIR, debug=debug)
         print("----" * 10)
         print(f"{i}: Score {score}")
         print("----" * 10)
 
 
 if __name__ == "__main__":
-    # train()
-    # train(resume_step=1000, load_dir="checkpoints_bkup5")
-    test(load_dir="checkpoints_bkup1")
+    train()
+    # train(resume_step=1000, load_dir="checkpoints_bkup1")
+    # test(load_dir="checkpoints_bkup1", debug=False)

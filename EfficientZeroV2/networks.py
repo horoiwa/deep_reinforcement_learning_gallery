@@ -244,7 +244,7 @@ class RewardNetwork(tf.keras.Model):
         self.bn_1 = kl.GroupNormalization(axis=-1, groups=16)
 
         self.fc_1 = kl.Dense(
-            512,
+            32,
             use_bias=True,
             activation=None,
             kernel_initializer="he_normal",
@@ -347,7 +347,7 @@ class P1Network(tf.keras.Model):
             activation=None,
             kernel_regularizer=l2(0.0005),
         )
-        # self.bn_3 = kl.BatchNormalization(axis=-1)
+        self.bn_3 = kl.LayerNormalization(axis=-1)
 
     def call(self, z, training=False):
         x = tf.reshape(z, shape=(z.shape[0], -1))
@@ -360,7 +360,7 @@ class P1Network(tf.keras.Model):
         x = tf.nn.relu(x)
 
         projection = self.dense_3(x)
-        # projection = self.bn_3(projection, training=training)
+        projection = self.bn_3(projection, training=training)
 
         return projection
 

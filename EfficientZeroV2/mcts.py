@@ -153,13 +153,16 @@ class Node:
             qvalue = self.parent.value_nn
         return qvalue
 
-    def get_improved_policy_logit(self, debug: bool = False):
+    def get_improved_policy_logit(self, scale=False, debug: bool = False):
         # 4 LEARNING AN IMPROVED POLICY
         policy_logits = [child.policy_logit for child in self.children]
 
         qvalues = np.array([child.get_completed_qvalue() for child in self.children])
-        q_min, q_max = qvalues.min(), qvalues.max()
-        scaled_qvalues = (qvalues - q_min) / (q_max - q_min + 1e-8)
+        if scale:
+            q_min, q_max = qvalues.min(), qvalues.max()
+            scaled_qvalues = (qvalues - q_min) / (q_max - q_min + 1e-8)
+        else:
+            scaled_qvalues = qvalues
         visit_counts = [child.visit_count for child in self.children]
         transformed_qvalues = [
             (self.c_visit + max(visit_counts)) * self.c_scale * q
