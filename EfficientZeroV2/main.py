@@ -56,7 +56,7 @@ class EfficientZeroV2:
         self.num_simulations = 8  # original 16
         self.lambda_r, self.lambda_p, self.lambda_v, self.lambda_g, self.lambda_ent = (
             1.0,
-            0.25,  #original 1.0
+            1.0,  #original 1.0
             0.25,
             2.0,
             0.05,  # original 0.005
@@ -381,8 +381,9 @@ class EfficientZeroV2:
                 temperature=0.25,
                 debug=True,
             )
+
             _, _, r_pred = self.network.unroll(
-                self.network.encode(obs), actions=[action]
+                self.network.encode(obs), np.array([action])
             )
             next_frame, reward, done, _, info = env.step(action)
             ep_rewards += reward
@@ -393,6 +394,8 @@ class EfficientZeroV2:
             print(f"Predicted reward: {r_pred.numpy()[0][0]:.3f}")
             print("----" * 10)
             print()
+            if reward > 0:
+                import pdb; pdb.set_trace()  # fmt: skip
 
             frames.append(process_frame(next_frame))
             steps += 1
@@ -438,6 +441,7 @@ def test(
     MONITOR_DIR = Path(__file__).parent / "mp4"
     if MONITOR_DIR.exists():
         shutil.rmtree(MONITOR_DIR)
+    MONITOR_DIR.mkdir(parents=True, exist_ok=True)
 
     agent = EfficientZeroV2(env_id=env_id, log_dir=None)
 
@@ -450,6 +454,6 @@ def test(
 
 
 if __name__ == "__main__":
-    train()
+    # train()
     # train(resume_step=1000, load_dir="checkpoints_bkup5")
-    # test(load_dir="checkpoints_bkup6")
+    test(load_dir="checkpoints_bkup1")
