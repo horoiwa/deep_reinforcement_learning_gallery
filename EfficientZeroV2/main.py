@@ -147,7 +147,7 @@ class EfficientZeroV2:
             frames.append(process_frame(next_frame))
 
             if done:
-                exp = Experience(observation=obs, action=action, reward=reward, done=1)
+                exp = Experience(observation=obs, action=action, reward=-1.0, done=1)
                 trajectory.append(exp)
                 break
             else:
@@ -155,15 +155,16 @@ class EfficientZeroV2:
                 if info["lives"] != lives:
                     lives = info["lives"]
                     exp = Experience(
-                        observation=obs, action=action, reward=reward, done=1
+                        observation=obs, action=action, reward=-1.0, done=1
                     )
+                    print("\033[31mlife loss\033[0m")
                 else:
                     exp = Experience(
                         observation=obs, action=action, reward=reward, done=0
                     )
                 trajectory.append(exp)
 
-            if len(self.replay_buffer) > 300 and self.total_steps % 4 == 0:
+            if len(self.replay_buffer) > 1000 and self.total_steps % 4 == 0:
                 self.update_network()
 
             if self.total_steps % 400 == 0:
@@ -323,7 +324,6 @@ class EfficientZeroV2:
                 ) / self.unroll_steps
 
                 loss += loss_t
-                import pdb; pdb.set_trace()  # fmt: skip
 
                 if i == 0:
                     stats[f"loss_{i}"].append(loss_t)
@@ -371,7 +371,7 @@ class EfficientZeroV2:
         ep_rewards = 0
         steps = 0
         done = False
-        while not done:
+        while not done and steps < 2000:
             obs = np.stack(frames, axis=2)[np.newaxis, ...]
             action, _policy, _value = mcts.search(
                 observation=obs,
@@ -379,9 +379,12 @@ class EfficientZeroV2:
                 network=self.network,
                 num_simulations=self.num_simulations,
                 gamma=self.gamma,
-                temperature=0.25,
+                temperature=1.0,
                 debug=debug,
             )
+            if random.random() < 0.05:
+                print("random action")
+                action = random.randint(0, self.action_space - 1)
 
             _, _, r_pred = self.network.unroll(
                 self.network.encode(obs), np.array([action])
@@ -468,5 +471,5 @@ def test(
 
 if __name__ == "__main__":
     train()
-    # train(resume_step=1000, load_dir="checkpoints_bkup1")
-    # test(load_dir="checkpoints_bkup1", debug=False)
+    # train(resume_step=37500, load_dir="checkpoints_bkup2")
+    #test(load_dir="checkpoints_bkup2", debug=False)

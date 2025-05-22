@@ -397,17 +397,18 @@ class GumbelMCTS:
         assert self.simulation_count == self.num_simulations
         if debug:
             print("Simulation finished")
-        sorted_children = sorted(
-            self.root_node.children, key=lambda node: node.visit_count, reverse=True
-        )
-        best_action = sorted_children[0].prev_action
+
         policy_logits = self.root_node.get_improved_policy_logit(debug=debug)
         mcts_policy = tf.math.softmax(policy_logits).numpy()
         mcts_value = np.mean(self.search_based_values)
 
+        scores = [child.noise + logit for child, logit in zip(self.root_node.children, policy_logits, strict=True)]
+        best_action = np.argmax(scores)
+
         if debug:
-            print("Best action:", best_action)
             print("MCTS policy:", np.round(mcts_policy, 3))
             print("MCTS values:", np.round(self.search_based_values, 3))
+            print("Scores:", np.round(scores, 3))
+            print("Best action:", best_action)
 
         return best_action, mcts_policy, mcts_value
