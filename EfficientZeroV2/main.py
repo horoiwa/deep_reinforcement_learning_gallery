@@ -462,7 +462,7 @@ def test(
     agent = EfficientZeroV2(env_id=env_id, log_dir=None)
 
     agent.load(load_dir=load_dir)
-    for i in range(1, 3):
+    for i in range(1, 5):
         score = agent.test_play(tag=f"{i}", monitor_dir=MONITOR_DIR, debug=debug)
         print("----" * 10)
         print(f"{i}: Score {score}")
@@ -471,5 +471,4 @@ def test(
 
 if __name__ == "__main__":
     train()
-    # train(resume_step=37500, load_dir="checkpoints_bkup2")
-    #test(load_dir="checkpoints_bkup2", debug=False)
+    # test(load_dir="checkpoints", debug=False)

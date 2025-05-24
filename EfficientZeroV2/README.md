@@ -1,18 +1,19 @@
 # EfficientZeroV2
 
-This is **unofficial** **simplified** re-implementation of (EfficientZero V2: Mastering Discrete and Continuous Control with Limited Data)[https://github.com/Shengjiewang-Jason/EfficientZeroV2]
+This is **unofficial** **simplificated** re-implementation of (EfficientZero V2: Mastering Discrete and Continuous Control with Limited Data)[https://github.com/Shengjiewang-Jason/EfficientZeroV2]
 
 
 ## Simplifications
 
-- Use grayscale instead of RGB as input
-- Use Deterministic-v4 env step instead of NoFrameSKip-v4
+- Simplifications due to limited compute resource
+  - Smaller batch size
+  - Replaced Batch Normalization with Group Normalization due to smaller batch size
+  - fewer number of gradient steps
+  - fewer number of simulations
 - No Prioritized Experience Replay
-- No value-prefix for reward prediction, use simple reward prediction on each time step
-- No LSTM for reward prediction
-- No mixed value target, only use search-based value estimation target (SVE target)
-- No mcts-improved-policy based on completed Q, instead, use simple loss
-- No value scaling of R2D2
+- No value-prefix prediction, use simple reward prediction on each time step without LSTM.
+- No mixed value approximation
+- Use grayscale instead of RGB as input
 
 
 ## Requirements
