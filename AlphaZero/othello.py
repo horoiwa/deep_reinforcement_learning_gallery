@@ -13,11 +13,45 @@ from PIL import Image, ImageDraw
 import numpy as np
 
 
-N_COLS = N_ROWS = 6
+# デフォルト盤面サイズ
+_N_ROWS = 6
+_N_COLS = 6
+_ACTION_SPACE = _N_ROWS * _N_COLS + 1
+_ACTION_NOOP = _ACTION_SPACE - 1
 
-ACTION_SPACE = N_ROWS * N_COLS + 1
+# グローバル定数（後方互換性のため）
+N_COLS = _N_COLS
+N_ROWS = _N_ROWS
+ACTION_SPACE = _ACTION_SPACE
+ACTION_NOOP = _ACTION_NOOP
 
-ACTION_NOOP = ACTION_SPACE - 1
+
+def set_board_size(n_rows: int, n_cols: int):
+    """盤面サイズを動的に設定
+    
+    Args:
+        n_rows: 行数
+        n_cols: 列数
+    """
+    global N_ROWS, N_COLS, ACTION_SPACE, ACTION_NOOP
+    global _N_ROWS, _N_COLS, _ACTION_SPACE, _ACTION_NOOP
+    
+    if n_rows <= 0 or n_cols <= 0:
+        raise ValueError(f"盤面サイズは正の整数である必要があります: {n_rows}x{n_cols}")
+    
+    _N_ROWS = n_rows
+    _N_COLS = n_cols
+    _ACTION_SPACE = _N_ROWS * _N_COLS + 1
+    _ACTION_NOOP = _ACTION_SPACE - 1
+    
+    N_ROWS = _N_ROWS
+    N_COLS = _N_COLS
+    ACTION_SPACE = _ACTION_SPACE
+    ACTION_NOOP = _ACTION_NOOP
+    
+    # キャッシュをクリア（重要！）
+    get_directions.cache_clear()
+    _get_valid_actions.cache_clear()
 
 
 def xy_to_idx(row, col):
@@ -178,10 +212,11 @@ def greedy_action(state: list, player: int, epsilon=0.):
 
     if random.random() > epsilon:
         best_action = None
-        best_score = 0
+        best_score = -1
         for action in valid_actions:
             next_state, done = step(state, action, player)
-            _, score = count_stone(next_state)
+            first_score, second_score = count_stone(next_state)
+            score = first_score if player == 1 else second_score
             if score > best_score:
                 best_score = score
                 best_action = action
